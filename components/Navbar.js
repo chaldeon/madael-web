@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
+import { ChevronDown } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 
 export default function Navbar() {
@@ -10,9 +11,12 @@ export default function Navbar() {
   const { lang, toggleLang } = useLanguage();
   const isHome = pathname === '/';
   const isAbout = pathname === '/about';
-  const isKalkulator = pathname === '/kalkulator-pph21';
+  const toolLinks = [
+    { href: '/kalkulator-pph21', label: lang === 'id' ? 'Kalkulator PPh 21' : 'PPh 21 Calculator' },
+    { href: '/kalkulator-bpjs', label: lang === 'id' ? 'Kalkulator BPJS' : 'BPJS Calculator' },
+  ];
+  const isToolsActive = toolLinks.some((t) => t.href === pathname);
   const contactHref = isAbout ? '/about#contact' : '/#contact';
-  
 
   return (
     <nav className="flex items-center justify-between px-10 h-[68px] border-b border-[#E0E0E0] bg-white sticky top-0 z-[999]">
@@ -40,7 +44,7 @@ export default function Navbar() {
             Home
           </Link>
         </li>
-                <li>
+        <li>
           <Link
             href="/about"
             className={`text-sm tracking-[0.02em] no-underline transition-colors ${
@@ -50,16 +54,43 @@ export default function Navbar() {
             About
           </Link>
         </li>
-        <li>
-          <Link
-            href="/kalkulator-pph21"
-            className={`text-sm tracking-[0.02em] no-underline transition-colors ${
-              isKalkulator ? 'text-black' : 'text-[#6B6B6B] hover:text-black'
+
+        {/* Dropdown "Alat" — hover trigger */}
+        <li className="relative group">
+          <button
+            type="button"
+            className={`flex items-center gap-1 text-sm tracking-[0.02em] bg-transparent border-0 cursor-pointer transition-colors ${
+              isToolsActive ? 'text-black' : 'text-[#6B6B6B] hover:text-black'
             }`}
           >
-            Kalkulator PPh 21
-          </Link>
+            {lang === 'id' ? 'Alat' : 'Tools'}
+            <ChevronDown
+              size={14}
+              className="transition-transform duration-150 group-hover:rotate-180"
+            />
+          </button>
+
+          {/* bridge biar hover gak putus pas geser mouse ke bawah */}
+          <div className="absolute left-0 top-full pt-3 invisible opacity-0 translate-y-1 group-hover:visible group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150 z-[1000]">
+            <ul className="bg-white border border-[#E0E0E0] shadow-lg min-w-[230px] py-2 list-none">
+              {toolLinks.map((t) => (
+                <li key={t.href}>
+                  <Link
+                    href={t.href}
+                    className={`block px-4 py-2.5 text-sm no-underline transition-colors ${
+                      pathname === t.href
+                        ? 'text-madael-red bg-[#FAFAFA]'
+                        : 'text-[#6B6B6B] hover:text-black hover:bg-[#FAFAFA]'
+                    }`}
+                  >
+                    {t.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
         </li>
+
         <li>
           <Link
             href={contactHref}
