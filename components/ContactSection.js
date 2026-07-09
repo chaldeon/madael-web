@@ -79,7 +79,7 @@ export default function ContactSection() {
               <strong className="text-black">Metland Menteng</strong>
               <br />
               <span  className="block pl-3 text-[#3D3D3D]">
-                Jakarta Timur 13960
+                Ujung Menteng,Jakarta Timur 13960
               </span>
             </div>
           </div>
