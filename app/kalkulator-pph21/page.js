@@ -80,6 +80,13 @@ function formatRupiah(num) {
   }).format(num || 0);
 }
 
+function formatNumberDisplay(value, lang) {
+  if (value === '' || value === null || value === undefined) return '';
+  const num = Number(value);
+  if (Number.isNaN(num)) return '';
+  return num.toLocaleString(lang === 'id' ? 'id-ID' : 'en-US');
+}
+
 // ============ TERJEMAHAN ============
 const translations = {
   id: {
@@ -91,10 +98,9 @@ const translations = {
     dataPenghasilan: 'Data Penghasilan',
     hasilPerhitungan: 'Hasil Perhitungan',
     statusPtkp: 'Status PTKP',
-    gajiPokok: 'Gaji Pokok / Bulan',
     tunjPPh: 'Tunjangan PPh / Bulan',
     tunjLain: 'Tunjangan Lain / Bulan',
-    bonus: mode => (mode === 'ter' ? 'Bonus / THR (Bulan Ini)' : 'Bonus / THR (Setahun)'),
+    gajiPokokBulan: 'Gaji Pokok / Bulan',
     hitung: 'Hitung',
     reset: 'Reset',
     emptyState: 'Isi data di kiri lalu klik Hitung untuk melihat hasilnya.',
@@ -102,15 +108,34 @@ const translations = {
     kategoriTer: 'Kategori TER',
     tarifTer: 'Tarif TER',
     pphBulanIni: 'PPh 21 Terutang Bulan Ini',
-    brutoSetahun: 'Bruto Setahun',
-    biayaJabatan: 'Biaya Jabatan (maks. Rp6jt/th)',
+    brutoSetahun: 'Total Bruto Diterima',
+    biayaJabatan: 'Biaya Jabatan',
     ptkpRow: 'PTKP',
     pkpRow: 'Penghasilan Kena Pajak (PKP)',
-    pphSetahun: 'PPh 21 Setahun',
-    pphPerBulan: 'PPh 21 per Bulan',
+    pphSetahun: 'PPh 21 Terutang',
+    pphPerBulan: 'PPh 21 Rata-rata / Bulan',
+    catatanMasaKerja: (n) => `* Dihitung untuk masa perolehan penghasilan: ${n} bulan.`,
+    catatanNpwp: '* Termasuk tambahan 20% karena tidak memiliki NPWP.',
     ctaTitle: 'Butuh payroll yang lebih akurat dan bebas ribet?',
     ctaDesc: 'Madael Consult membantu perusahaan mengelola payroll dan kepatuhan PPh 21 secara profesional.',
     ctaButton: 'Hubungi Madael Consult',
+    terFields: {
+      gajiPensiun: { label: 'Gaji/Pensiun atau THT/JHT', tip: 'Gaji pokok bulanan, uang pensiun bulanan, atau penarikan dana THT/JHT. Ini komponen dasar penghasilan bruto.' },
+      tunjPPh: { label: 'Tunjangan PPh', tip: 'Tunjangan yang diberikan perusahaan untuk menanggung PPh 21 karyawan (skema gross-up). Tunjangan ini juga menjadi objek pajak.' },
+      tunjLainLembur: { label: 'Tunjangan Lainnya, Uang Lembur, dan sebagainya', tip: 'Tunjangan tetap/tidak tetap lain (transport, makan, komunikasi) dan upah lembur yang dibayarkan rutin bersama gaji.' },
+      honorarium: { label: 'Honorarium dan Imbalan Lainnya Sejenisnya', tip: 'Honorarium, komisi, atau imbalan sejenis di luar gaji rutin yang diterima pegawai tetap pada bulan berjalan.' },
+      premiAsuransi: { label: 'Premi Asuransi yang dibayar Pemberi Kerja', tip: 'Premi asuransi kesehatan, kecelakaan, jiwa, dwiguna, atau beasiswa yang dibayar/ditanggung perusahaan. Sesuai PMK 168/2023, ini termasuk objek PPh 21.' },
+      naturaKenikmatan: { label: 'Natura dan Kenikmatan Lainnya', tip: 'Fasilitas dalam bentuk barang/kenikmatan (mobil dinas, rumah dinas, dll). Sejak PMK 66/2023, sebagian natura menjadi objek pajak berdasarkan nilai wajarnya.' },
+      bonusTHR: { label: 'Tantiem, Bonus, Gratifikasi, Jasa Produksi dan THR', tip: 'Penghasilan tidak teratur yang diterima sekali/beberapa kali setahun (THR, bonus, tantiem, jasa produksi). Digabung ke bruto bulan diterimanya.' },
+      brutoOtomatis: { label: 'Penghasilan Bruto', tip: 'Total seluruh komponen di atas. Nilai ini otomatis dipakai untuk mencari tarif TER sesuai kategori dan lapisan penghasilan.' },
+    },
+    tahunanFields: {
+      npwpStatus: { label: 'Status NPWP', tip: 'Karyawan tanpa NPWP dikenakan tarif PPh 21 20% lebih tinggi dari tarif normal, sesuai Pasal 21 UU PPh.' },
+      masaPerolehan: { label: 'Masa Perolehan Penghasilan', tip: 'Jumlah bulan penghasilan diterima dalam setahun. Untuk karyawan yang tidak bekerja setahun penuh, biaya jabatan dan hasil dihitung proporsional sesuai jumlah bulan ini.' },
+      penghasilanTidakTeratur: { label: 'Penghasilan Tidak Teratur (Bonus/THR)', tip: 'Penghasilan yang diterima tidak rutin setiap bulan, seperti bonus, THR, atau tantiem. Dimasukkan terpisah dari penghasilan teratur (gaji bulanan).' },
+      iuranPensiun: { label: 'Iuran Pensiun / JHT Dibayar Sendiri', tip: 'Iuran pensiun (misal DPLK) atau JHT yang dibayar sendiri oleh karyawan, bukan dipotong otomatis oleh BPJS/perusahaan. Nilai ini mengurangi Penghasilan Kena Pajak (PKP).' },
+    },
+    npwpOptions: { ada: 'Punya NPWP', tidak: 'Tidak Punya NPWP' },
   },
   en: {
     eyebrow: 'Free Tool',
@@ -121,10 +146,9 @@ const translations = {
     dataPenghasilan: 'Income Details',
     hasilPerhitungan: 'Calculation Result',
     statusPtkp: 'PTKP Status (Tax-Free Income Bracket)',
-    gajiPokok: 'Basic Salary / Month',
     tunjPPh: 'Tax Allowance / Month',
     tunjLain: 'Other Allowances / Month',
-    bonus: mode => (mode === 'ter' ? 'Bonus / THR (This Month)' : 'Bonus / THR (Annual)'),
+    gajiPokokBulan: 'Basic Salary / Month',
     hitung: 'Calculate',
     reset: 'Reset',
     emptyState: 'Fill in the details on the left, then click Calculate to see your result.',
@@ -132,73 +156,171 @@ const translations = {
     kategoriTer: 'TER Category',
     tarifTer: 'TER Rate',
     pphBulanIni: 'PPh 21 Due This Month',
-    brutoSetahun: 'Annual Gross Income',
-    biayaJabatan: 'Biaya Jabatan (occupational deduction, max. Rp6M/yr)',
+    brutoSetahun: 'Total Gross Received',
+    biayaJabatan: 'Biaya Jabatan (occupational deduction)',
     ptkpRow: 'PTKP (non-taxable income)',
     pkpRow: 'PKP (taxable income)',
-    pphSetahun: 'Annual PPh 21',
-    pphPerBulan: 'PPh 21 per Month',
+    pphSetahun: 'PPh 21 Due',
+    pphPerBulan: 'Average PPh 21 / Month',
+    catatanMasaKerja: (n) => `* Calculated for ${n} month(s) of income.`,
+    catatanNpwp: '* Includes 20% surcharge for not having an NPWP (Tax ID).',
     ctaTitle: "Want payroll that's accurate and hassle-free?",
     ctaDesc: 'Madael Consult helps companies manage payroll and PPh 21 compliance professionally.',
     ctaButton: 'Contact Madael Consult',
+    terFields: {
+      gajiPensiun: { label: 'Gaji/Pensiun atau THT/JHT (Salary/Pension or Old-Age Savings)', tip: 'Monthly base salary, monthly pension, or THT/JHT (old-age savings) withdrawal. The core component of gross income.' },
+      tunjPPh: { label: 'Tunjangan PPh (Tax Allowance)', tip: "Allowance paid by the employer to cover the employee's PPh 21 (gross-up scheme). This allowance is itself taxable." },
+      tunjLainLembur: { label: 'Tunjangan Lainnya, Uang Lembur, dsb (Other Allowances & Overtime)', tip: 'Other fixed/variable allowances (transport, meals, communication) and overtime pay received regularly with salary.' },
+      honorarium: { label: 'Honorarium dan Imbalan Lainnya Sejenisnya (Honoraria & Similar Payments)', tip: 'Honoraria, commissions, or similar payments received by a permanent employee outside their regular salary this month.' },
+      premiAsuransi: { label: 'Premi Asuransi yang dibayar Pemberi Kerja (Employer-Paid Insurance Premiums)', tip: 'Health, accident, life, endowment, or scholarship insurance premiums paid by the employer. Under PMK 168/2023, these are taxable.' },
+      naturaKenikmatan: { label: 'Natura dan Kenikmatan Lainnya (Benefits-in-Kind)', tip: 'Benefits-in-kind (company car, company housing, etc). Since PMK 66/2023, some benefits-in-kind are taxed at fair value.' },
+      bonusTHR: { label: 'Tantiem, Bonus, Gratifikasi, Jasa Produksi dan THR (Bonuses & THR)', tip: 'Irregular income received once or a few times a year (THR, bonus, tantiem, production services). Added to gross income for the month received.' },
+      brutoOtomatis: { label: 'Penghasilan Bruto (Gross Income)', tip: 'Sum of all components above. Automatically used to find the applicable TER rate based on category and income bracket.' },
+    },
+    tahunanFields: {
+      npwpStatus: { label: 'Status NPWP (Tax ID Status)', tip: 'Employees without an NPWP (Indonesian Tax ID) are subject to a PPh 21 rate 20% higher than normal, per Article 21 of the Income Tax Law.' },
+      masaPerolehan: { label: 'Masa Perolehan Penghasilan (Months Worked)', tip: "Number of months income was earned within the year. For employees who didn't work the full year, occupational costs and results are prorated to this number of months." },
+      penghasilanTidakTeratur: { label: 'Penghasilan Tidak Teratur / Irregular Income (Bonus/THR)', tip: 'Income received irregularly, such as bonus, THR, or tantiem — entered separately from regular monthly salary.' },
+      iuranPensiun: { label: 'Iuran Pensiun / JHT Dibayar Sendiri (Self-Paid Pension/JHT)', tip: 'Pension contributions (e.g. DPLK) or JHT paid directly by the employee, not automatically deducted via BPJS/employer. This reduces taxable income (PKP).' },
+    },
+    npwpOptions: { ada: 'Has NPWP', tidak: 'No NPWP' },
   },
 };
 
-const initialInputs = { status: 'TK0', gaji: '', tunjPPh: '', tunjLain: '', bonus: '' };
+const initialTerInputs = {
+  status: 'TK0',
+  gajiPensiun: '',
+  tunjPPh: '',
+  tunjLainLembur: '',
+  honorarium: '',
+  premiAsuransi: '',
+  naturaKenikmatan: '',
+  bonusTHR: '',
+};
+
+const initialTahunanInputs = {
+  status: 'TK0',
+  npwpStatus: 'ada',
+  masaPerolehan: '12',
+  gaji: '',
+  tunjPPh: '',
+  tunjLain: '',
+  penghasilanTidakTeratur: '',
+  iuranPensiun: '',
+};
+
+// ============ TOOLTIP ============
+function InfoTooltip({ text }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        className="w-4 h-4 rounded-full border border-[#B0B0B0] text-[#6B6B6B] text-[10px] leading-none flex items-center justify-center hover:border-madael-red hover:text-madael-red transition-colors flex-shrink-0"
+        aria-label="Info"
+      >
+        i
+      </button>
+      {open && (
+        <span className="absolute z-20 left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 bg-white border border-[#E0E0E0] text-[#3D3D3D] text-xs leading-relaxed rounded-md px-3 py-2.5 shadow-lg normal-case font-normal">
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function FieldLabel({ label, tooltip }) {
+  return (
+    <label className="flex items-center gap-1.5 text-xs tracking-[0.02em] text-[#6B6B6B] mb-2">
+      <span>{label}</span>
+      <InfoTooltip text={tooltip} />
+    </label>
+  );
+}
 
 export default function KalkulatorPPh21() {
   const { lang } = useLanguage();
   const t = translations[lang];
 
   const [mode, setMode] = useState('ter');
-  const [inputs, setInputs] = useState(initialInputs);
+  const [terInputs, setTerInputs] = useState(initialTerInputs);
+  const [tahunanInputs, setTahunanInputs] = useState(initialTahunanInputs);
   const [result, setResult] = useState(null);
 
-  const handleChange = (field) => (e) => {
-    setInputs((prev) => ({ ...prev, [field]: e.target.value }));
+  const handleTerNumberChange = (field) => (e) => {
+    const raw = e.target.value.replace(/[^\d]/g, '');
+    setTerInputs((prev) => ({ ...prev, [field]: raw }));
+  };
+  const handleTahunanNumberChange = (field) => (e) => {
+    const raw = e.target.value.replace(/[^\d]/g, '');
+    setTahunanInputs((prev) => ({ ...prev, [field]: raw }));
   };
 
+  const terBruto =
+    (Number(terInputs.gajiPensiun) || 0) +
+    (Number(terInputs.tunjPPh) || 0) +
+    (Number(terInputs.tunjLainLembur) || 0) +
+    (Number(terInputs.honorarium) || 0) +
+    (Number(terInputs.premiAsuransi) || 0) +
+    (Number(terInputs.naturaKenikmatan) || 0) +
+    (Number(terInputs.bonusTHR) || 0);
+
   const handleReset = () => {
-    setInputs(initialInputs);
+    if (mode === 'ter') setTerInputs(initialTerInputs);
+    else setTahunanInputs(initialTahunanInputs);
     setResult(null);
   };
 
   const handleHitung = () => {
-    const gaji = Number(inputs.gaji) || 0;
-    const tunjPPh = Number(inputs.tunjPPh) || 0;
-    const tunjLain = Number(inputs.tunjLain) || 0;
-    const bonus = Number(inputs.bonus) || 0;
-    const ptkp = PTKP_DATA[inputs.status];
-
     if (mode === 'ter') {
-      const bruto = gaji + tunjPPh + tunjLain + bonus;
-      const rate = getTerRate(ptkp.category, bruto);
-      const pph = bruto * (rate / 100);
-      setResult({ mode: 'ter', bruto, category: ptkp.category, rate, pph });
+      const ptkp = PTKP_DATA[terInputs.status];
+      const rate = getTerRate(ptkp.category, terBruto);
+      const pph = terBruto * (rate / 100);
+      setResult({ mode: 'ter', bruto: terBruto, category: ptkp.category, rate, pph });
     } else {
+      const gaji = Number(tahunanInputs.gaji) || 0;
+      const tunjPPh = Number(tahunanInputs.tunjPPh) || 0;
+      const tunjLain = Number(tahunanInputs.tunjLain) || 0;
+      const penghasilanTidakTeratur = Number(tahunanInputs.penghasilanTidakTeratur) || 0;
+      const iuranPensiun = Number(tahunanInputs.iuranPensiun) || 0;
+      const masaKerja = Number(tahunanInputs.masaPerolehan) || 12;
+      const ptkp = PTKP_DATA[tahunanInputs.status];
+
       const brutoBulanan = gaji + tunjPPh + tunjLain;
-      const brutoSetahun = brutoBulanan * 12 + bonus;
-      const biayaJabatan = Math.min(brutoSetahun * 0.05, 6000000);
-      const netoSetahun = brutoSetahun - biayaJabatan;
-      const pkpRaw = netoSetahun - ptkp.amount;
+      const brutoDiterima = brutoBulanan * masaKerja + penghasilanTidakTeratur;
+      const capBiayaJabatan = 500000 * masaKerja;
+      const biayaJabatan = Math.min(brutoDiterima * 0.05, capBiayaJabatan);
+      const netoDiterima = brutoDiterima - biayaJabatan - iuranPensiun;
+      const pkpRaw = netoDiterima - ptkp.amount;
       const pkp = Math.max(Math.floor(pkpRaw / 1000) * 1000, 0);
-      const pphSetahun = hitungPasal17(pkp);
-      const pphPerBulan = pphSetahun / 12;
+
+      let pphSetahun = hitungPasal17(pkp);
+      const npwpSurcharge = tahunanInputs.npwpStatus === 'tidak';
+      if (npwpSurcharge) pphSetahun *= 1.2;
+
+      const pphPerBulan = pphSetahun / masaKerja;
+
       setResult({
         mode: 'tahunan',
-        brutoSetahun,
+        brutoSetahun: brutoDiterima,
         biayaJabatan,
         ptkp: ptkp.amount,
         pkp,
         pphSetahun,
         pphPerBulan,
+        masaKerja,
+        npwpSurcharge,
       });
     }
   };
 
   const inputClass =
     'w-full border border-[#E0E0E0] px-4 py-2.5 text-sm text-black focus:outline-none focus:border-madael-red transition-colors';
-  const labelClass = 'block text-xs uppercase tracking-[0.1em] text-[#6B6B6B] mb-2';
+  const plainLabelClass = 'block text-xs tracking-[0.02em] text-[#6B6B6B] mb-2';
 
   return (
     <>
@@ -210,9 +332,7 @@ export default function KalkulatorPPh21() {
           <h1 className="font-serif text-[36px] font-normal text-white tracking-[-0.02em] leading-[1.2] mb-3">
             {t.title}
           </h1>
-          <p className="text-[#AAA] text-sm max-w-[480px]">
-            {t.subtitle}
-          </p>
+          <p className="text-[#AAA] text-sm max-w-[480px]">{t.subtitle}</p>
         </div>
       </section>
 
@@ -240,62 +360,127 @@ export default function KalkulatorPPh21() {
       <section className="px-10 py-10 bg-white">
         <div className="max-w-[1100px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-12">
 
+          {/* ============ INPUT ============ */}
           <div>
             <h2 className="font-serif text-[22px] font-normal text-black tracking-[-0.02em] mb-6 border-l-[3px] border-madael-red pl-4">
               {t.dataPenghasilan}
             </h2>
 
-            <div className="mb-5">
-              <label className={labelClass}>{t.statusPtkp}</label>
-              <select
-                value={inputs.status}
-                onChange={handleChange('status')}
-                className={inputClass}
-              >
-                {Object.entries(PTKP_DATA).map(([key, val]) => (
-                  <option key={key} value={key}>
-                    {lang === 'id' ? val.labelId : val.labelEn}
-                  </option>
+            {mode === 'ter' ? (
+              <>
+                <div className="mb-5">
+                  <label className={plainLabelClass}>{t.statusPtkp}</label>
+                  <select
+                    value={terInputs.status}
+                    onChange={(e) => setTerInputs((p) => ({ ...p, status: e.target.value }))}
+                    className={inputClass}
+                  >
+                    {Object.entries(PTKP_DATA).map(([key, val]) => (
+                      <option key={key} value={key}>{lang === 'id' ? val.labelId : val.labelEn}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {['gajiPensiun', 'tunjPPh', 'tunjLainLembur', 'honorarium', 'premiAsuransi', 'naturaKenikmatan', 'bonusTHR'].map((field) => (
+                  <div className="mb-5" key={field}>
+                    <FieldLabel label={t.terFields[field].label} tooltip={t.terFields[field].tip} />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={formatNumberDisplay(terInputs[field], lang)}
+                      onChange={handleTerNumberChange(field)}
+                      className={inputClass}
+                      placeholder="0"
+                    />
+                  </div>
                 ))}
-              </select>
-            </div>
 
-            <div className="mb-5">
-              <label className={labelClass}>{t.gajiPokok}</label>
-              <input type="number" value={inputs.gaji} onChange={handleChange('gaji')} className={inputClass} placeholder="10000000" />
-            </div>
+                <div className="mb-8 border border-[#E0E0E0] bg-[#F9F9F9] px-4 py-3 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-xs tracking-[0.02em] text-[#6B6B6B]">
+                    {t.terFields.brutoOtomatis.label}
+                    <InfoTooltip text={t.terFields.brutoOtomatis.tip} />
+                  </span>
+                  <span className="text-sm font-semibold text-black">{formatRupiah(terBruto)}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mb-5">
+                  <label className={plainLabelClass}>{t.statusPtkp}</label>
+                  <select
+                    value={tahunanInputs.status}
+                    onChange={(e) => setTahunanInputs((p) => ({ ...p, status: e.target.value }))}
+                    className={inputClass}
+                  >
+                    {Object.entries(PTKP_DATA).map(([key, val]) => (
+                      <option key={key} value={key}>{lang === 'id' ? val.labelId : val.labelEn}</option>
+                    ))}
+                  </select>
+                </div>
 
-            <div className="mb-5">
-              <label className={labelClass}>{t.tunjPPh}</label>
-              <input type="number" value={inputs.tunjPPh} onChange={handleChange('tunjPPh')} className={inputClass} placeholder="0" />
-            </div>
+                <div className="mb-5">
+                  <FieldLabel label={t.tahunanFields.npwpStatus.label} tooltip={t.tahunanFields.npwpStatus.tip} />
+                  <select
+                    value={tahunanInputs.npwpStatus}
+                    onChange={(e) => setTahunanInputs((p) => ({ ...p, npwpStatus: e.target.value }))}
+                    className={inputClass}
+                  >
+                    <option value="ada">{t.npwpOptions.ada}</option>
+                    <option value="tidak">{t.npwpOptions.tidak}</option>
+                  </select>
+                </div>
 
-            <div className="mb-5">
-              <label className={labelClass}>{t.tunjLain}</label>
-              <input type="number" value={inputs.tunjLain} onChange={handleChange('tunjLain')} className={inputClass} placeholder="0" />
-            </div>
+                <div className="mb-5">
+                  <FieldLabel label={t.tahunanFields.masaPerolehan.label} tooltip={t.tahunanFields.masaPerolehan.tip} />
+                  <select
+                    value={tahunanInputs.masaPerolehan}
+                    onChange={(e) => setTahunanInputs((p) => ({ ...p, masaPerolehan: e.target.value }))}
+                    className={inputClass}
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>{n} {lang === 'id' ? 'bulan' : 'month(s)'}</option>
+                    ))}
+                  </select>
+                </div>
 
-            <div className="mb-8">
-              <label className={labelClass}>{t.bonus(mode)}</label>
-              <input type="number" value={inputs.bonus} onChange={handleChange('bonus')} className={inputClass} placeholder="0" />
-            </div>
+                <div className="mb-5">
+                  <label className={plainLabelClass}>{t.gajiPokokBulan}</label>
+                  <input type="text" inputMode="numeric" value={formatNumberDisplay(tahunanInputs.gaji, lang)} onChange={handleTahunanNumberChange('gaji')} className={inputClass} placeholder="0" />
+                </div>
+
+                <div className="mb-5">
+                  <label className={plainLabelClass}>{t.tunjPPh}</label>
+                  <input type="text" inputMode="numeric" value={formatNumberDisplay(tahunanInputs.tunjPPh, lang)} onChange={handleTahunanNumberChange('tunjPPh')} className={inputClass} placeholder="0" />
+                </div>
+
+                <div className="mb-5">
+                  <label className={plainLabelClass}>{t.tunjLain}</label>
+                  <input type="text" inputMode="numeric" value={formatNumberDisplay(tahunanInputs.tunjLain, lang)} onChange={handleTahunanNumberChange('tunjLain')} className={inputClass} placeholder="0" />
+                </div>
+
+                <div className="mb-5">
+                  <FieldLabel label={t.tahunanFields.penghasilanTidakTeratur.label} tooltip={t.tahunanFields.penghasilanTidakTeratur.tip} />
+                  <input type="text" inputMode="numeric" value={formatNumberDisplay(tahunanInputs.penghasilanTidakTeratur, lang)} onChange={handleTahunanNumberChange('penghasilanTidakTeratur')} className={inputClass} placeholder="0" />
+                </div>
+
+                <div className="mb-8">
+                  <FieldLabel label={t.tahunanFields.iuranPensiun.label} tooltip={t.tahunanFields.iuranPensiun.tip} />
+                  <input type="text" inputMode="numeric" value={formatNumberDisplay(tahunanInputs.iuranPensiun, lang)} onChange={handleTahunanNumberChange('iuranPensiun')} className={inputClass} placeholder="0" />
+                </div>
+              </>
+            )}
 
             <div className="flex gap-3">
-              <button
-                onClick={handleHitung}
-                className="bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
-              >
+              <button onClick={handleHitung} className="bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors">
                 {t.hitung}
               </button>
-              <button
-                onClick={handleReset}
-                className="border border-[#E0E0E0] text-[#6B6B6B] px-8 py-3 text-sm font-medium tracking-[0.04em] hover:border-madael-red hover:text-madael-red transition-colors"
-              >
+              <button onClick={handleReset} className="border border-[#E0E0E0] text-[#6B6B6B] px-8 py-3 text-sm font-medium tracking-[0.04em] hover:border-madael-red hover:text-madael-red transition-colors">
                 {t.reset}
               </button>
             </div>
           </div>
 
+          {/* ============ OUTPUT ============ */}
           <div>
             <h2 className="font-serif text-[22px] font-normal text-black tracking-[-0.02em] mb-6 border-l-[3px] border-madael-red pl-4">
               {t.hasilPerhitungan}
@@ -317,26 +502,30 @@ export default function KalkulatorPPh21() {
             )}
 
             {result && result.mode === 'tahunan' && (
-              <div className="border border-[#E0E0E0]">
-                <Row label={t.brutoSetahun} value={formatRupiah(result.brutoSetahun)} />
-                <Row label={t.biayaJabatan} value={formatRupiah(result.biayaJabatan)} />
-                <Row label={t.ptkpRow} value={formatRupiah(result.ptkp)} />
-                <Row label={t.pkpRow} value={formatRupiah(result.pkp)} />
-                <Row label={t.pphSetahun} value={formatRupiah(result.pphSetahun)} />
-                <Row label={t.pphPerBulan} value={formatRupiah(result.pphPerBulan)} highlight />
-              </div>
+              <>
+                <div className="border border-[#E0E0E0]">
+                  <Row label={t.brutoSetahun} value={formatRupiah(result.brutoSetahun)} />
+                  <Row label={t.biayaJabatan} value={formatRupiah(result.biayaJabatan)} />
+                  <Row label={t.ptkpRow} value={formatRupiah(result.ptkp)} />
+                  <Row label={t.pkpRow} value={formatRupiah(result.pkp)} />
+                  <Row label={t.pphSetahun} value={formatRupiah(result.pphSetahun)} />
+                  <Row label={t.pphPerBulan} value={formatRupiah(result.pphPerBulan)} highlight />
+                </div>
+                {(result.masaKerja !== 12 || result.npwpSurcharge) && (
+                  <div className="mt-3 text-xs text-[#6B6B6B] space-y-1">
+                    {result.masaKerja !== 12 && <p>{t.catatanMasaKerja(result.masaKerja)}</p>}
+                    {result.npwpSurcharge && <p>{t.catatanNpwp}</p>}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
       </section>
 
       <section className="px-10 py-16 bg-[#F4F4F4] border-t border-[#E0E0E0] text-center">
-        <h3 className="font-serif text-[24px] font-normal text-black tracking-[-0.02em] mb-3">
-          {t.ctaTitle}
-        </h3>
-        <p className="text-sm text-[#6B6B6B] mb-6 max-w-[480px] mx-auto">
-          {t.ctaDesc}
-        </p>
+        <h3 className="font-serif text-[24px] font-normal text-black tracking-[-0.02em] mb-3">{t.ctaTitle}</h3>
+        <p className="text-sm text-[#6B6B6B] mb-6 max-w-[480px] mx-auto">{t.ctaDesc}</p>
         <a href="https://wa.me/6285121548247?text=Halo%20Madael%20Consult%2C%20saya%20ingin%20konsultasi%20mengenai%20layanan%20payroll%20Anda." target="_blank" rel="noopener noreferrer" className="inline-block bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors">
           {t.ctaButton}
         </a>
@@ -348,7 +537,7 @@ export default function KalkulatorPPh21() {
 function Row({ label, value, highlight }) {
   return (
     <div className={`flex justify-between items-center px-6 py-4 border-b border-[#E0E0E0] last:border-b-0 gap-4 ${highlight ? 'bg-madael-red' : 'bg-white'}`}>
-      <span className={`text-xs uppercase tracking-[0.08em] ${highlight ? 'text-white/80' : 'text-[#6B6B6B]'}`}>{label}</span>
+      <span className={`text-xs tracking-[0.02em] ${highlight ? 'text-white/80' : 'text-[#6B6B6B]'}`}>{label}</span>
       <span className={`text-sm font-semibold text-right ${highlight ? 'text-white text-base' : 'text-black'}`}>{value}</span>
     </div>
   );
