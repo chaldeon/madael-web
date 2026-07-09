@@ -12,8 +12,9 @@ export default function Navbar() {
   const isHome = pathname === '/';
   const isAbout = pathname === '/about';
   const toolLinks = [
-    { href: '/kalkulator-pph21', label: lang === 'id' ? 'Kalkulator PPh 21' : 'PPh 21 Calculator' },
-    { href: '/kalkulator-bpjs', label: lang === 'id' ? 'Kalkulator BPJS' : 'BPJS Calculator' },
+    { href: '/kalkulator-pph21', label: 'Kalkulator PPh 21' },
+    { href: '/kalkulator-bpjs', label: 'Kalkulator BPJS' },
+    { href: '/kalkulator-lembur', label: 'Kalkulator Lembur' },
   ];
   const isToolsActive = toolLinks.some((t) => t.href === pathname);
   const contactHref = isAbout ? '/about#contact' : '/#contact';
