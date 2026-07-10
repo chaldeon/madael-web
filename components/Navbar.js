@@ -15,6 +15,7 @@ export default function Navbar() {
     { href: '/kalkulator-pph21', label: 'Kalkulator PPh 21' },
     { href: '/kalkulator-bpjs', label: 'Kalkulator BPJS' },
     { href: '/kalkulator-lembur', label: 'Kalkulator Lembur' },
+    { href: '/kalkulator-pkwt', label: 'Kalkulator PKWT' },
   ];
   const isToolsActive = toolLinks.some((t) => t.href === pathname);
   const contactHref = isAbout ? '/about#contact' : '/#contact';
