@@ -43,20 +43,11 @@ function getUPMKBaseMonths(totalMonths) {
   return 10;
 }
 
-// Hitung jumlah hari kerja (Senin-Jumat) di bulan dari tanggal efektif PHK
-function countWeekdaysInMonth(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  const year = d.getFullYear();
-  const month = d.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  let count = 0;
-  for (let day = 1; day <= daysInMonth; day++) {
-    const dow = new Date(year, month, day).getDay();
-    if (dow !== 0 && dow !== 6) count++;
-  }
-  return count;
-}
+// Pembagi upah harian untuk konversi sisa cuti ke rupiah
+const DIVISOR_OPTIONS = {
+  kalender30: 30,
+  hariKerja25: 25,
+};
 
 const REASONS = [
   { key: 'efisiensiTidakBangkrut', upMult: 0.5, upmkMult: 1, hasUP: true },
@@ -89,7 +80,7 @@ const translations = {
     masaKerjaLabel: 'Masa Kerja',
     tahun: 'tahun',
     bulan: 'bulan',
-    catatan: '* Dihitung berdasarkan UU Cipta Kerja. UP dan UPMK ditentukan tabel masa kerja dikalikan multiplier sesuai alasan PHK. UPH = 15% × (UP + UPMK + uang cuti belum diambil). Uang cuti dihitung dari upah harian (upah sebulan ÷ jumlah hari kerja Senin–Jumat di bulan efektif PHK, tanpa memperhitungkan libur nasional) × sisa cuti.',
+    catatan: '* Dihitung berdasarkan UU Cipta Kerja. UP dan UPMK ditentukan tabel masa kerja dikalikan multiplier sesuai alasan PHK. UPH = 15% × (UP + UPMK) + uang cuti belum diambil (uang cuti dibayar penuh, tidak ikut dipotong 15%). Uang cuti = upah harian × sisa cuti; upah harian dihitung dari upah sebulan dibagi sesuai metode yang dipilih (30 hari kalender sesuai PP 35/2021, atau 25 hari kerja sebagai alternatif).',
     noUpNote: 'Karyawan mengundurkan diri tidak mendapat Uang Pesangon (UP), hanya UPMK dan UPH.',
     reasonOptions: {
       efisiensiTidakBangkrut: 'Efisiensi (Perusahaan Tidak Bangkrut)',
@@ -101,14 +92,21 @@ const translations = {
       meninggalDunia: 'Meninggal Dunia',
       mengundurkanDiri: 'Karyawan Mengundurkan Diri',
     },
+    divisorOptions: {
+      kalender30: 'Kalender — ÷30 hari (sesuai PP 35/2021)',
+      hariKerja25: 'Hari Kerja — ÷25 hari (alternatif)',
+    },
     fields: {
       gajiPokok: { label: 'Gaji Pokok', tip: 'Gaji pokok bulanan karyawan. Bagian dari dasar perhitungan upah sebulan.' },
       tunjTetap: { label: 'Tunjangan Tetap', tip: 'Tunjangan rutin bulanan (bukan tunjangan tidak tetap seperti bonus). Ikut jadi dasar perhitungan upah sebulan.' },
       tahunKerja: { label: 'Masa Kerja - Tahun', tip: 'Jumlah tahun penuh masa kerja karyawan, menentukan bracket tabel UP dan UPMK.' },
       bulanKerja: { label: 'Masa Kerja - Bulan', tip: 'Sisa bulan setelah tahun penuh (0-11). Ikut menentukan bracket tabel UP dan UPMK secara presisi.' },
       alasan: { label: 'Alasan PHK', tip: 'Alasan PHK menentukan multiplier UP dan UPMK sesuai UU Cipta Kerja — beberapa alasan mendapat UP lebih besar (misal sakit berkepanjangan, meninggal dunia), sebagian tidak mendapat UP sama sekali (mengundurkan diri).' },
-      sisaCuti: { label: 'Sisa Cuti Belum Diambil (hari)', tip: 'Jumlah hari cuti tahunan yang belum diambil karyawan. Dikonversi ke rupiah dan menjadi komponen UPH.' },
-      tglEfektif: { label: 'Tanggal Efektif PHK', tip: 'Tanggal PHK berlaku efektif. Dipakai untuk menghitung jumlah hari kerja (Senin–Jumat) di bulan tersebut, sebagai dasar konversi sisa cuti ke rupiah.' },
+      sisaCuti: { label: 'Sisa Cuti Belum Diambil (hari)', tip: 'Jumlah hari cuti tahunan yang belum diambil karyawan. Dibayar penuh (tidak ikut dipotong 15%) dan menjadi komponen UPH.' },
+      divisorCuti: {
+        label: 'Metode Hitung Upah Harian (untuk Cuti)',
+        tip: 'Dipakai untuk mengonversi sisa cuti ke rupiah. Kalender (÷30): upah sebulan dibagi 30 hari, sesuai definisi umum PP 35/2021. Hari Kerja (÷25): upah sebulan dibagi 25 hari kerja, alternatif yang kadang dipakai perusahaan.',
+      },
     },
   },
   en: {
@@ -129,7 +127,7 @@ const translations = {
     masaKerjaLabel: 'Length of Service',
     tahun: 'years',
     bulan: 'months',
-    catatan: "* Calculated per the Job Creation Law. UP and UPMK are determined by a length-of-service table multiplied by a reason-based multiplier. UPH = 15% × (UP + UPMK + unused leave pay). Unused leave pay is calculated from the daily wage (monthly wage ÷ number of weekday working days — Mon–Fri — in the effective termination month, excluding national holidays) × remaining leave days.",
+    catatan: "* Calculated per the Job Creation Law. UP and UPMK are determined by a length-of-service table multiplied by a reason-based multiplier. UPH = 15% × (UP + UPMK) + unused leave pay (leave is paid in full, not reduced by 15%). Leave pay = daily wage × remaining leave days; daily wage is the monthly wage divided per the selected method (30 calendar days per PP 35/2021, or 25 working days as an alternative).",
     noUpNote: 'Employees who resign do not receive UP (severance pay), only UPMK and UPH.',
     reasonOptions: {
       efisiensiTidakBangkrut: 'Efficiency (Company Not Bankrupt)',
@@ -141,14 +139,21 @@ const translations = {
       meninggalDunia: 'Death',
       mengundurkanDiri: 'Employee Resignation',
     },
+    divisorOptions: {
+      kalender30: 'Calendar — ÷30 days (per PP 35/2021)',
+      hariKerja25: 'Working Days — ÷25 days (alternative)',
+    },
     fields: {
       gajiPokok: { label: 'Gaji Pokok (Basic Salary)', tip: "Employee's monthly basic salary. Part of the monthly wage calculation base." },
       tunjTetap: { label: 'Tunjangan Tetap (Fixed Allowance)', tip: 'Regular monthly allowance (not irregular allowances like bonuses). Included in the monthly wage calculation base.' },
       tahunKerja: { label: 'Length of Service - Years', tip: 'Number of full years of service, determines the UP and UPMK table bracket.' },
       bulanKerja: { label: 'Length of Service - Months', tip: 'Remaining months after full years (0-11). Refines the UP and UPMK table bracket.' },
       alasan: { label: 'Termination Reason', tip: 'The reason for termination determines the UP and UPMK multiplier per the Job Creation Law — some reasons get a higher UP (e.g. prolonged illness, death), some get no UP at all (resignation).' },
-      sisaCuti: { label: 'Remaining Unused Leave (days)', tip: "Number of unused annual leave days. Converted to rupiah and included as a UPH component." },
-      tglEfektif: { label: 'Effective Termination Date', tip: 'The date termination takes effect. Used to calculate the number of weekday (Mon–Fri) working days in that month, as the basis for converting unused leave to rupiah.' },
+      sisaCuti: { label: 'Remaining Unused Leave (days)', tip: 'Number of unused annual leave days. Paid in full (not reduced by 15%) and included as a UPH component.' },
+      divisorCuti: {
+        label: 'Daily Wage Method (for Leave)',
+        tip: 'Used to convert remaining leave into rupiah. Calendar (÷30): monthly wage divided by 30 days, per the general PP 35/2021 definition. Working Days (÷25): monthly wage divided by 25 working days, an alternative some companies use.',
+      },
     },
   },
 };
@@ -160,7 +165,7 @@ const initialInputs = {
   bulanKerja: '',
   alasan: REASONS[0].key,
   sisaCuti: '',
-  tglEfektif: '',
+  divisorMode: 'kalender30',
 };
 
 // ============ TOOLTIP (sama dengan kalkulator lain) ============
@@ -239,14 +244,15 @@ export default function KalkulatorPesangon() {
     const upmk = upmkBaseMonths * reason.upmkMult * upahSebulan;
 
     const sisaCuti = Number(inputs.sisaCuti) || 0;
-    const hariKerjaBulan = countWeekdaysInMonth(inputs.tglEfektif);
-    const upahHarian = hariKerjaBulan ? upahSebulan / hariKerjaBulan : 0;
+    const divisor = DIVISOR_OPTIONS[inputs.divisorMode] || 30;
+    const upahHarian = upahSebulan / divisor;
     const uangCuti = upahHarian * sisaCuti;
 
-    const uph = 0.15 * (up + upmk + uangCuti);
+    // UPH = 15% dari (UP + UPMK) + uang cuti penuh (cuti tidak ikut dipotong 15%)
+    const uph = 0.15 * (up + upmk) + uangCuti;
     const total = up + upmk + uph;
 
-    setResult({ upahSebulan, up, upmk, uangCuti, uph, total, hasUP: reason.hasUP, hariKerjaBulan });
+    setResult({ upahSebulan, up, upmk, uangCuti, uph, total, hasUP: reason.hasUP });
   };
 
   const inputClass =
@@ -350,13 +356,15 @@ export default function KalkulatorPesangon() {
             </div>
 
             <div className="mb-8">
-              <FieldLabel label={t.fields.tglEfektif.label} tooltip={t.fields.tglEfektif.tip} />
-              <input
-                type="date"
-                value={inputs.tglEfektif}
-                onChange={(e) => setInputs((p) => ({ ...p, tglEfektif: e.target.value }))}
+              <FieldLabel label={t.fields.divisorCuti.label} tooltip={t.fields.divisorCuti.tip} />
+              <select
+                value={inputs.divisorMode}
+                onChange={(e) => setInputs((p) => ({ ...p, divisorMode: e.target.value }))}
                 className={inputClass}
-              />
+              >
+                <option value="kalender30">{t.divisorOptions.kalender30}</option>
+                <option value="hariKerja25">{t.divisorOptions.hariKerja25}</option>
+              </select>
             </div>
 
             <div className="flex gap-3">

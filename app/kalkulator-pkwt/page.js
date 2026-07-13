@@ -18,9 +18,40 @@ function formatNumberDisplay(value, lang) {
   return num.toLocaleString(lang === 'id' ? 'id-ID' : 'en-US');
 }
 
-// Hitung masa kerja: total hari (inklusif tanggal mulai & berakhir),
-// dikonversi ke bulan pakai pendekatan 1 bulan = 30 hari (umum dipakai HR).
-function computeMasaKerja(startStr, endStr) {
+// ============ METODE KALENDER ============
+// Bulan dihitung dari selisih bulan-kalender asli (mis. 1 Feb - 31 Jul = pas 6 bulan,
+// tanpa sisa hari, walau Feb/Mar/Mei/Jul punya jumlah hari berbeda-beda).
+function computeMasaKerjaKalender(startStr, endStr) {
+  const start = new Date(startStr);
+  const end = new Date(endStr);
+  if (end < start) return null;
+
+  // Geser end +1 hari supaya penghitungan bersifat inklusif
+  // (1 Feb s.d. 31 Jul dianggap genap sampai 1 Agu, bukan 31 Jul).
+  const endPlusOne = new Date(end);
+  endPlusOne.setDate(endPlusOne.getDate() + 1);
+
+  let months = (endPlusOne.getFullYear() - start.getFullYear()) * 12
+             + (endPlusOne.getMonth() - start.getMonth());
+  let days = endPlusOne.getDate() - start.getDate();
+
+  if (days < 0) {
+    months -= 1;
+    const prevMonthLastDate = new Date(endPlusOne.getFullYear(), endPlusOne.getMonth(), 0).getDate();
+    days += prevMonthLastDate;
+  }
+  if (months < 0) return null;
+
+  const totalDays = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
+  const bulanDesimal = months + days / 30;
+
+  return { totalDays, bulanBulat: months, sisaHari: days, bulanDesimal };
+}
+
+// ============ METODE 30 HARI/BULAN (FLAT) ============
+// Total hari kontrak dibagi rata 30 hari per bulan — sederhana dan konsisten,
+// tapi bisa menghasilkan sisa hari untuk kontrak yang sebenarnya genap per kalender.
+function computeMasaKerjaFlat30(startStr, endStr) {
   const start = new Date(startStr);
   const end = new Date(endStr);
   const totalDays = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
@@ -31,6 +62,13 @@ function computeMasaKerja(startStr, endStr) {
   const bulanDesimal = totalDays / 30;
 
   return { totalDays, bulanBulat, sisaHari, bulanDesimal };
+}
+
+function computeMasaKerja(mode, startStr, endStr) {
+  if (!startStr || !endStr) return null;
+  return mode === 'flat30'
+    ? computeMasaKerjaFlat30(startStr, endStr)
+    : computeMasaKerjaKalender(startStr, endStr);
 }
 
 // ============ TERJEMAHAN ============
@@ -55,6 +93,14 @@ const translations = {
       tunjTetap: { label: 'Tunjangan Tetap', tip: 'Tunjangan rutin yang dibayarkan setiap bulan (bukan tunjangan tidak tetap seperti bonus). Ikut jadi dasar perhitungan kompensasi.' },
       tglMulai: { label: 'Tanggal Mulai PKWT', tip: 'Tanggal mulai berlakunya kontrak kerja waktu tertentu (PKWT), sesuai yang tertulis di perjanjian kerja.' },
       tglBerakhir: { label: 'Tanggal Berakhir PKWT', tip: 'Tanggal berakhirnya masa kontrak PKWT saat ini (bukan tanggal perpanjangan, kalau ada perpanjangan hitung terpisah per periode).' },
+      metodeMasaKerja: {
+        label: 'Metode Hitung Masa Kerja',
+        tip: 'Kalender: bulan dihitung dari tanggal kalender asli (mis. 1 Feb–31 Jul = pas 6 bulan tanpa sisa hari). 30 Hari/Bulan (Flat): setiap bulan dianggap tepat 30 hari — lebih sederhana, tapi kontrak yang sebenarnya genap per kalender bisa muncul sisa hari. Pilih metode yang sesuai kebiasaan perhitungan HR Anda.',
+      },
+    },
+    metodeOptions: {
+      kalender: 'Kalender (bulan kalender asli)',
+      flat30: '30 Hari/Bulan (Flat)',
     },
   },
   en: {
@@ -77,6 +123,14 @@ const translations = {
       tunjTetap: { label: 'Tunjangan Tetap (Fixed Allowance)', tip: 'Regular monthly allowance (not irregular allowances like bonuses). Included in the compensation calculation base.' },
       tglMulai: { label: 'Tanggal Mulai PKWT (Contract Start Date)', tip: 'Start date of the fixed-term employment contract (PKWT), as stated in the employment agreement.' },
       tglBerakhir: { label: 'Tanggal Berakhir PKWT (Contract End Date)', tip: 'End date of the current PKWT period (not a renewal date — renewals are calculated as separate periods).' },
+      metodeMasaKerja: {
+        label: 'Length-of-Service Calculation Method',
+        tip: 'Calendar: months are counted from actual calendar dates (e.g. Feb 1–Jul 31 = exactly 6 months, no leftover days). 30 Days/Month (Flat): every month is treated as exactly 30 days — simpler, but contracts that are actually calendar-exact can show leftover days. Choose whichever matches your HR convention.',
+      },
+    },
+    metodeOptions: {
+      kalender: 'Calendar (actual calendar months)',
+      flat30: '30 Days/Month (Flat)',
     },
   },
 };
@@ -86,6 +140,7 @@ const initialInputs = {
   tunjTetap: '',
   tglMulai: '',
   tglBerakhir: '',
+  masaKerjaMode: 'kalender',
 };
 
 // ============ TOOLTIP (sama dengan kalkulator lain) ============
@@ -157,7 +212,7 @@ export default function KalkulatorPKWT() {
 
     if (!inputs.tglMulai || !inputs.tglBerakhir) return;
 
-    const masaKerja = computeMasaKerja(inputs.tglMulai, inputs.tglBerakhir);
+    const masaKerja = computeMasaKerja(inputs.masaKerjaMode, inputs.tglMulai, inputs.tglBerakhir);
     if (!masaKerja) {
       setError(t.invalidDate);
       setResult(null);
@@ -229,7 +284,7 @@ export default function KalkulatorPKWT() {
               />
             </div>
 
-            <div className="mb-8">
+            <div className="mb-5">
               <FieldLabel label={t.fields.tglBerakhir.label} tooltip={t.fields.tglBerakhir.tip} />
               <input
                 type="date"
@@ -237,6 +292,18 @@ export default function KalkulatorPKWT() {
                 onChange={(e) => setInputs((p) => ({ ...p, tglBerakhir: e.target.value }))}
                 className={inputClass}
               />
+            </div>
+
+            <div className="mb-8">
+              <FieldLabel label={t.fields.metodeMasaKerja.label} tooltip={t.fields.metodeMasaKerja.tip} />
+              <select
+                value={inputs.masaKerjaMode}
+                onChange={(e) => setInputs((p) => ({ ...p, masaKerjaMode: e.target.value }))}
+                className={inputClass}
+              >
+                <option value="kalender">{t.metodeOptions.kalender}</option>
+                <option value="flat30">{t.metodeOptions.flat30}</option>
+              </select>
             </div>
 
             {error && <p className="text-xs text-madael-red mb-4">{error}</p>}
