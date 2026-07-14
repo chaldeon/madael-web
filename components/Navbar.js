@@ -58,6 +58,17 @@ export default function Navbar() {
           </Link>
         </li>
 
+        <li>
+          <Link
+            href="/karir"
+            className={`text-sm tracking-[0.02em] no-underline transition-colors ${
+              pathname === '/karir' ? 'text-black' : 'text-[#6B6B6B] hover:text-black'
+            }`}
+          >
+            {lang === 'id' ? 'Karir' : 'Careers'}
+          </Link>
+        </li>
+
         {/* Dropdown "Alat" — hover trigger */}
         <li className="relative group">
           <button
