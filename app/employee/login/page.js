@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase-browser';
@@ -11,6 +11,21 @@ export default function EmployeeLoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    const checkSession = async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (user) {
+        router.push('/employee/dashboard');
+        return;
+      }
+      setCheckingSession(false);
+    };
+    checkSession();
+  }, [router]);
 
   const inputClass =
     'w-full border border-[#E0E0E0] px-4 py-2.5 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
@@ -31,8 +46,16 @@ export default function EmployeeLoginPage() {
     }
 
     router.push('/employee/dashboard');
-    router.refresh(); // penting: sync session baru ke server/middleware
+    router.refresh();
   };
+
+  if (checkingSession) {
+    return (
+      <section className="min-h-[calc(100vh-68px)] flex items-center justify-center bg-black">
+        <p className="text-sm text-white/60">Memuat...</p>
+      </section>
+    );
+  }
 
   return (
     <section className="min-h-[calc(100vh-68px)] flex items-center justify-center bg-black px-6">
