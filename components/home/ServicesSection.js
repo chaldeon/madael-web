@@ -78,8 +78,8 @@ export default function ServicesSection() {
             <div className="text-madael-red text-xs font-semibold tracking-[0.1em] mb-3">
               {s.num}
             </div>
-            <div className="text-base font-semibold text-black mb-2">{s.name}</div>
-            <div className="text-sm text-[#6B6B6B] leading-[1.6]">
+            <div className="text-[20px] font-semibold text-black mb-2">{s.name}</div>
+            <div className="text-[15px] text-[#6B6B6B] leading-[1.6]">
               {lang === 'id' ? s.descId : s.descEn}
             </div>
             <a

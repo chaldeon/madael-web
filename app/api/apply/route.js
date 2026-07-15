@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { uploadCVToDrive } from '@/lib/googleDrive';
 
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
+const GENERAL_FOLDER_NAME = 'Umum';
 
 export async function POST(request) {
   try {
@@ -13,12 +14,29 @@ export async function POST(request) {
     const telepon = (formData.get('telepon') || '').toString().trim();
     const jobId = (formData.get('job_id') || '').toString().trim();
     const positionName = (formData.get('posisi') || '').toString().trim();
+    // Diisi hanya untuk lamaran umum (bukan apply ke lowongan spesifik):
+    // teks bebas posisi yang diminati kandidat, disimpan di kolom `catatan`.
+    const posisiMinat = (formData.get('posisi_minat') || '').toString().trim();
     const file = formData.get('cv');
 
+    // Lamaran umum = tidak ada job_id (form "Tidak menemukan posisi yang sesuai?")
+    const isGeneral = !jobId;
+
     // Validasi dasar
-    if (!nama || !email || !jobId || !file) {
+    if (!nama || !email || !file) {
       return NextResponse.json(
-        { error: 'Nama, email, posisi, dan file CV wajib diisi.' },
+        { error: 'Nama, email, dan file CV wajib diisi.' },
+        { status: 400 }
+      );
+    }
+
+    if (!isGeneral && !positionName) {
+      return NextResponse.json({ error: 'Posisi wajib diisi.' }, { status: 400 });
+    }
+
+    if (isGeneral && !posisiMinat) {
+      return NextResponse.json(
+        { error: 'Posisi yang diminati wajib diisi.' },
         { status: 400 }
       );
     }
@@ -41,10 +59,13 @@ export async function POST(request) {
     const safeNama = nama.replace(/[^a-zA-Z0-9]+/g, '_');
     const fileName = `${safeNama}_${Date.now()}.pdf`;
 
-    // Upload ke Google Drive (folder otomatis per posisi)
+    // Upload ke Google Drive — folder per posisi untuk apply spesifik,
+    // atau folder tetap "Umum" untuk lamaran umum.
+    const driveFolderName = isGeneral ? GENERAL_FOLDER_NAME : positionName || 'Lainnya';
+
     let cvDriveId;
     try {
-      cvDriveId = await uploadCVToDrive(fileBuffer, fileName, positionName || 'Lainnya');
+      cvDriveId = await uploadCVToDrive(fileBuffer, fileName, driveFolderName);
     } catch (driveError) {
       console.error('Google Drive upload error:', driveError);
       return NextResponse.json(
@@ -60,13 +81,14 @@ export async function POST(request) {
     // bisa dibaca langsung dari client manapun.
     const { error } = await supabase.from('applications').insert([
       {
-        job_id: jobId,
+        job_id: isGeneral ? null : jobId,
         nama,
         email,
         telepon: telepon || null,
         cv_drive_id: cvDriveId,
         cv_filename: fileName,
         status: 'Baru',
+        catatan: isGeneral ? posisiMinat : null,
       },
     ]);
 

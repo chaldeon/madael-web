@@ -44,10 +44,10 @@ function AnimatedStat({ target, labelId, labelEn }) {
 
   return (
     <div ref={ref} className="text-right">
-      <div className="font-serif text-[28px] text-white font-normal leading-none">
+      <div className="font-serif text-[42px] text-white font-normal leading-none">
         {value}+
       </div>
-      <div className="text-[11px] text-[#666] tracking-[0.08em] uppercase mt-1">
+      <div className="text-[17px] text-[#666] tracking-[0.08em] uppercase mt-1">
         {lang === 'id' ? labelId : labelEn}
       </div>
     </div>

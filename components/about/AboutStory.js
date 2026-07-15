@@ -89,7 +89,7 @@ export default function AboutStory() {
               alt="Mangara Sidabutar"
               width={140}
               height={140}
-              className="object-cover bg-[#F4F4F4] border border-[#E0E0E0] mb-6"
+              className="object-cover bg-[#F4F4F4] border border-[#E0E0E0] mb-6 rounded-full overflow-hidden"
             />
             <div className="font-serif text-[22px] font-normal text-black tracking-[-0.01em] mb-1">
               Mangara Sidabutar
