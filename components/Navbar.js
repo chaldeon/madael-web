@@ -69,17 +69,6 @@ export default function Navbar() {
           </Link>
         </li>
 
-        <li>
-          <Link
-            href="/employee/login"
-            className={`text-sm tracking-[0.02em] no-underline transition-colors ${
-              pathname.startsWith('/employee') ? 'text-black' : 'text-[#6B6B6B] hover:text-black'
-            }`}
-          >
-            Employee
-          </Link>
-        </li>
-
         {/* Dropdown "Alat" — hover trigger */}
         <li className="relative group">
           <button
@@ -133,6 +122,19 @@ export default function Navbar() {
             {lang === 'id' ? 'EN' : 'ID'}
           </button>
         </li>
+        <li className="w-0.5 h-5 bg-[#E0E0E0] mr-1" aria-hidden="true" />
+
+        <li>
+          <Link
+            href="/employee/login"
+            className={`text-sm tracking-[0.02em] no-underline transition-colors ${
+              pathname.startsWith('/employee') ? 'text-black' : 'text-[#6B6B6B] hover:text-black'
+            }`}
+          >
+            Employee
+          </Link>
+        </li>
+
       </ul>
     </nav>
   );
