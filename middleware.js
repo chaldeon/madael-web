@@ -32,12 +32,22 @@ export async function middleware(request) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isAdminRoute = request.nextUrl.pathname.startsWith('/admin');
+  const { pathname } = request.nextUrl;
+  const isAdminRoute = pathname.startsWith('/admin');
+  const isEmployeeRoute =
+    pathname.startsWith('/employee') && pathname !== '/employee/login';
 
   if (isAdminRoute && !user) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = '/login';
-    redirectUrl.searchParams.set('redirectedFrom', request.nextUrl.pathname);
+    redirectUrl.searchParams.set('redirectedFrom', pathname);
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  if (isEmployeeRoute && !user) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = '/employee/login';
+    redirectUrl.searchParams.set('redirectedFrom', pathname);
     return NextResponse.redirect(redirectUrl);
   }
 
@@ -45,12 +55,5 @@ export async function middleware(request) {
 }
 
 export const config = {
-  matcher: [
-    /*
-     * Jalankan middleware di semua route KECUALI:
-     * static files, images, favicon, dan route publik lain
-     * (cukup cek /admin di dalam function, matcher ini cuma optimisasi)
-     */
-    '/admin/:path*',
-  ],
+  matcher: ['/admin/:path*', '/employee/:path*'],
 };
