@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 
 const emptyForm = {
@@ -45,14 +45,19 @@ export default function JobPortalLowonganPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState(null);
+  // openId: null (tertutup semua) | 'new' (form create) | <job.id> (form edit row itu)
+  const [openId, setOpenId] = useState(null);
   const [slugTouched, setSlugTouched] = useState(false);
   const [formData, setFormData] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState(null);
   const [togglingId, setTogglingId] = useState(null);
   const [duplicatingId, setDuplicatingId] = useState(null);
+
+  const editingId = openId && openId !== 'new' ? openId : null;
+
+  const createSectionRef = useRef(null);
+  const rowRefs = useRef({});
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -87,16 +92,38 @@ export default function JobPortalLowonganPage() {
     fetchData();
   }, [fetchData]);
 
-  const openCreateForm = () => {
-    setEditingId(null);
+  // Auto-scroll ke accordion yang baru dibuka
+  useEffect(() => {
+    if (openId === 'new') {
+      createSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (openId) {
+      rowRefs.current[openId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [openId]);
+
+  const closeForm = () => {
+    setOpenId(null);
     setFormData(emptyForm);
     setSlugTouched(false);
     setFormError(null);
-    setShowForm(true);
+  };
+
+  const openCreateForm = () => {
+    if (openId === 'new') {
+      closeForm();
+      return;
+    }
+    setFormData(emptyForm);
+    setSlugTouched(false);
+    setFormError(null);
+    setOpenId('new');
   };
 
   const openEditForm = (job) => {
-    setEditingId(job.id);
+    if (openId === job.id) {
+      closeForm();
+      return;
+    }
     setFormData({
       title: job.title || '',
       slug: job.slug || '',
@@ -110,15 +137,7 @@ export default function JobPortalLowonganPage() {
     });
     setSlugTouched(true);
     setFormError(null);
-    setShowForm(true);
-  };
-
-  const closeForm = () => {
-    setShowForm(false);
-    setEditingId(null);
-    setFormData(emptyForm);
-    setSlugTouched(false);
-    setFormError(null);
+    setOpenId(job.id);
   };
 
   const handleTitleChange = (e) => {
@@ -230,6 +249,105 @@ export default function JobPortalLowonganPage() {
   const labelClass = 'block text-xs font-medium text-[#3D3D3D] mb-1.5';
   const textareaClass = inputClass + ' resize-y min-h-[100px]';
 
+  // Isi form dipakai bareng untuk accordion Create (di atas tabel) & Edit (nempel di row)
+  const renderFormContent = () => (
+    <div className="p-8">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="font-serif text-[22px] font-normal text-black tracking-[-0.02em]">
+          {editingId ? 'Edit Lowongan' : 'Buat Lowongan Baru'}
+        </h2>
+        <button type="button" onClick={closeForm} className="text-sm text-[#6B6B6B] hover:text-black">
+          Batal
+        </button>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <div className="grid grid-cols-2 gap-5">
+          <div>
+            <label className={labelClass}>Judul Posisi</label>
+            <input type="text" required value={formData.title} onChange={handleTitleChange} className={inputClass} />
+          </div>
+          <div>
+            <label className={labelClass}>Slug</label>
+            <input type="text" required value={formData.slug} onChange={handleSlugChange} className={inputClass} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-5">
+          <div>
+            <label className={labelClass}>Departemen</label>
+            <input type="text" value={formData.department} onChange={handleFieldChange('department')} className={inputClass} />
+          </div>
+          <div>
+            <label className={labelClass}>Lokasi</label>
+            <input type="text" value={formData.location} onChange={handleFieldChange('location')} className={inputClass} />
+          </div>
+          <div>
+            <label className={labelClass}>Tipe</label>
+            <input
+              type="text"
+              placeholder="Full-time / Part-time / Contract"
+              value={formData.type}
+              onChange={handleFieldChange('type')}
+              className={inputClass}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className={labelClass}>Deskripsi Pekerjaan</label>
+          <textarea value={formData.description} onChange={handleFieldChange('description')} className={textareaClass} />
+        </div>
+
+        <div>
+          <label className={labelClass}>Kualifikasi</label>
+          <textarea value={formData.requirements} onChange={handleFieldChange('requirements')} className={textareaClass} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-5 items-end">
+          <div>
+            <label className={labelClass}>Deadline Apply</label>
+            <input type="date" value={formData.closes_at || ''} onChange={handleFieldChange('closes_at')} className={inputClass} />
+          </div>
+          <div className="flex items-center gap-3 pb-2.5">
+            <button
+              type="button"
+              onClick={handleToggleActiveInForm}
+              className={'relative w-11 h-6 transition-colors ' + (formData.is_active ? 'bg-madael-red' : 'bg-[#D0D0D0]')}
+            >
+              <span
+                className={
+                  'absolute top-0.5 left-0.5 w-5 h-5 bg-white transition-transform ' +
+                  (formData.is_active ? 'translate-x-5' : 'translate-x-0')
+                }
+              />
+            </button>
+            <span className="text-sm text-[#3D3D3D]">{formData.is_active ? 'Aktif' : 'Nonaktif'}</span>
+          </div>
+        </div>
+
+        {formError && <p className="text-sm text-madael-red">{formError}</p>}
+
+        <div className="flex gap-3 pt-2">
+          <button
+            type="submit"
+            disabled={saving}
+            className="bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {saving ? 'Menyimpan...' : 'Simpan'}
+          </button>
+          <button
+            type="button"
+            onClick={closeForm}
+            className="border border-[#E0E0E0] text-[#6B6B6B] px-8 py-3 text-sm font-medium tracking-[0.04em] hover:border-madael-red hover:text-madael-red transition-colors"
+          >
+            Batal
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+
   return (
     <div className="max-w-[1100px] mx-auto px-6 py-10">
       <div className="flex items-center justify-between mb-8">
@@ -245,166 +363,102 @@ export default function JobPortalLowonganPage() {
         </button>
       </div>
 
-      <div className="bg-white border border-[#E0E0E0] overflow-x-auto mb-8">
-        {loading ? (
-          <p className="text-sm text-[#6B6B6B] p-6">Memuat data...</p>
-        ) : error ? (
-          <p className="text-sm text-madael-red p-6">Gagal memuat data: {error}</p>
-        ) : listings.length === 0 ? (
-          <p className="text-sm text-[#6B6B6B] p-6">Belum ada lowongan.</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B] tracking-[0.04em]">
-                <th className="px-5 py-3 font-medium">Judul Posisi</th>
-                <th className="px-5 py-3 font-medium">Pelamar</th>
-                <th className="px-5 py-3 font-medium">Status</th>
-                <th className="px-5 py-3 font-medium">Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {listings.map((job) => (
-                <tr key={job.id} className="border-b border-[#F0F0F0] last:border-0">
-                  <td className="px-5 py-3.5 text-black">
-                    {job.title}
-                    <div className="text-xs text-[#AAA] mt-0.5">/{job.slug}</div>
-                  </td>
-                  <td className="px-5 py-3.5 text-[#3D3D3D]">{applicantCounts[job.id] || 0}</td>
-                  <td className="px-5 py-3.5">
-                    <span
-                      className={
-                        'text-xs font-medium px-2.5 py-1 ' +
-                        (job.is_active ? 'bg-[#DCFCE7] text-[#166534]' : 'bg-[#F0F0F0] text-[#6B6B6B]')
-                      }
-                    >
-                      {job.is_active ? 'Aktif' : 'Nonaktif'}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-4">
-                      <button onClick={() => openEditForm(job)} className="text-xs font-medium text-madael-red hover:text-madael-dark">
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDuplicate(job)}
-                        disabled={duplicatingId === job.id}
-                        className="text-xs font-medium text-[#6B6B6B] hover:text-black disabled:opacity-50"
-                      >
-                        {duplicatingId === job.id ? 'Menduplikat...' : 'Duplikat'}
-                      </button>
-                      <button
-                        onClick={() => handleToggleActive(job)}
-                        disabled={togglingId === job.id}
-                        className="text-xs font-medium text-[#6B6B6B] hover:text-black disabled:opacity-50"
-                      >
-                        {job.is_active ? 'Nonaktifkan' : 'Aktifkan'}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {showForm && (
-        <div className="bg-white border border-[#E0E0E0] p-8">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="font-serif text-[22px] font-normal text-black tracking-[-0.02em]">
-              {editingId ? 'Edit Lowongan' : 'Buat Lowongan Baru'}
-            </h2>
-            <button onClick={closeForm} className="text-sm text-[#6B6B6B] hover:text-black">
-              Batal
-            </button>
+      <div ref={createSectionRef} className="bg-white border border-[#E0E0E0] overflow-hidden mb-8">
+        {/* Accordion Create — selalu di atas tabel */}
+        <div
+          className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
+            openId === 'new' ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+          }`}
+        >
+          <div className="overflow-hidden border-b border-[#E0E0E0]">
+            {openId === 'new' && renderFormContent()}
           </div>
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="grid grid-cols-2 gap-5">
-              <div>
-                <label className={labelClass}>Judul Posisi</label>
-                <input type="text" required value={formData.title} onChange={handleTitleChange} className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Slug</label>
-                <input type="text" required value={formData.slug} onChange={handleSlugChange} className={inputClass} />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-5">
-              <div>
-                <label className={labelClass}>Departemen</label>
-                <input type="text" value={formData.department} onChange={handleFieldChange('department')} className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Lokasi</label>
-                <input type="text" value={formData.location} onChange={handleFieldChange('location')} className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Tipe</label>
-                <input
-                  type="text"
-                  placeholder="Full-time / Part-time / Contract"
-                  value={formData.type}
-                  onChange={handleFieldChange('type')}
-                  className={inputClass}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className={labelClass}>Deskripsi Pekerjaan</label>
-              <textarea value={formData.description} onChange={handleFieldChange('description')} className={textareaClass} />
-            </div>
-
-            <div>
-              <label className={labelClass}>Kualifikasi</label>
-              <textarea value={formData.requirements} onChange={handleFieldChange('requirements')} className={textareaClass} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-5 items-end">
-              <div>
-                <label className={labelClass}>Deadline Apply</label>
-                <input type="date" value={formData.closes_at || ''} onChange={handleFieldChange('closes_at')} className={inputClass} />
-              </div>
-              <div className="flex items-center gap-3 pb-2.5">
-                <button
-                  type="button"
-                  onClick={handleToggleActiveInForm}
-                  className={'relative w-11 h-6 transition-colors ' + (formData.is_active ? 'bg-madael-red' : 'bg-[#D0D0D0]')}
-                >
-                  <span
-                    className={
-                      'absolute top-0.5 left-0.5 w-5 h-5 bg-white transition-transform ' +
-                      (formData.is_active ? 'translate-x-5' : 'translate-x-0')
-                    }
-                  />
-                </button>
-                <span className="text-sm text-[#3D3D3D]">{formData.is_active ? 'Aktif' : 'Nonaktif'}</span>
-              </div>
-            </div>
-
-            {formError && <p className="text-sm text-madael-red">{formError}</p>}
-
-            <div className="flex gap-3 pt-2">
-              <button
-                type="submit"
-                disabled={saving}
-                className="bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {saving ? 'Menyimpan...' : 'Simpan'}
-              </button>
-              <button
-                type="button"
-                onClick={closeForm}
-                className="border border-[#E0E0E0] text-[#6B6B6B] px-8 py-3 text-sm font-medium tracking-[0.04em] hover:border-madael-red hover:text-madael-red transition-colors"
-              >
-                Batal
-              </button>
-            </div>
-          </form>
         </div>
-      )}
+
+        <div className="overflow-x-auto">
+          {loading ? (
+            <p className="text-sm text-[#6B6B6B] p-6">Memuat data...</p>
+          ) : error ? (
+            <p className="text-sm text-madael-red p-6">Gagal memuat data: {error}</p>
+          ) : listings.length === 0 ? (
+            <p className="text-sm text-[#6B6B6B] p-6">Belum ada lowongan.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B] tracking-[0.04em]">
+                  <th className="px-5 py-3 font-medium">Judul Posisi</th>
+                  <th className="px-5 py-3 font-medium">Pelamar</th>
+                  <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3 font-medium">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listings.map((job) => (
+                  <Fragment key={job.id}>
+                    <tr ref={(el) => (rowRefs.current[job.id] = el)}>
+                      <td className="px-5 py-3.5 text-black">
+                        {job.title}
+                        <div className="text-xs text-[#AAA] mt-0.5">/{job.slug}</div>
+                      </td>
+                      <td className="px-5 py-3.5 text-[#3D3D3D]">{applicantCounts[job.id] || 0}</td>
+                      <td className="px-5 py-3.5">
+                        <span
+                          className={
+                            'text-xs font-medium px-2.5 py-1 ' +
+                            (job.is_active ? 'bg-[#DCFCE7] text-[#166534]' : 'bg-[#F0F0F0] text-[#6B6B6B]')
+                          }
+                        >
+                          {job.is_active ? 'Aktif' : 'Nonaktif'}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-4">
+                          <button
+                            onClick={() => openEditForm(job)}
+                            className={`text-xs font-medium hover:text-madael-dark ${
+                              openId === job.id ? 'text-madael-dark underline' : 'text-madael-red'
+                            }`}
+                          >
+                            {openId === job.id ? 'Tutup' : 'Edit'}
+                          </button>
+                          <button
+                            onClick={() => handleDuplicate(job)}
+                            disabled={duplicatingId === job.id}
+                            className="text-xs font-medium text-[#6B6B6B] hover:text-black disabled:opacity-50"
+                          >
+                            {duplicatingId === job.id ? 'Menduplikat...' : 'Duplikat'}
+                          </button>
+                          <button
+                            onClick={() => handleToggleActive(job)}
+                            disabled={togglingId === job.id}
+                            className="text-xs font-medium text-[#6B6B6B] hover:text-black disabled:opacity-50"
+                          >
+                            {job.is_active ? 'Nonaktifkan' : 'Aktifkan'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td colSpan={4} className="p-0 border-b border-[#F0F0F0] last:border-0">
+                        <div
+                          className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
+                            openId === job.id ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+                          }`}
+                        >
+                          <div className="overflow-hidden bg-[#FAFAFA]">
+                            {openId === job.id && renderFormContent()}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
