@@ -15,7 +15,8 @@ const ALL_MODULES = [
   { key: 'statistics', name: 'Statistics', desc: 'Laporan dan statistik perusahaan', href: '/employee/statistics', built: true, icon: BarChart3 },
   { key: 'kalkulator', name: 'Kalkulator', desc: 'PPh 21, BPJS, dan kalkulator lainnya', href: '/kalkulator-pph21', built: true, icon: Calculator },
   { key: 'absensi', name: 'Absensi', desc: 'Kelola kehadiran karyawan', href: '/employee/absensi', built: false, icon: Clock },
-  { key: 'payslip', name: 'Payslip', desc: 'Slip gaji karyawan', href: '/employee/payslip', built: false, icon: Receipt },
+  { key: 'payslip', name: 'Payslip', desc: 'Slip gaji karyawan', href: '/employee/payslip', built: true, icon: Receipt },
+  { key: 'payslip_admin', name: 'Kelola Payslip', desc: 'Upload dan kelola slip gaji karyawan', href: '/employee/payslip/admin', built: true, icon: Wallet, superadminOnly: true },
   { key: 'leave_request', name: 'Leave Request', desc: 'Pengajuan cuti karyawan', href: '/employee/leave-request', built: false, icon: CalendarDays },
   { key: 'payroll', name: 'Payroll', desc: 'Kelola penggajian', href: '/employee/payroll', built: false, icon: Wallet },
   { key: 'document_generator', name: 'Document Generator', desc: 'Buat dokumen HR otomatis', href: '/employee/document-generator', built: false, icon: FileText },
@@ -132,7 +133,9 @@ export default function EmployeeDashboardPage() {
         <p className="text-sm text-[#6B6B6B] mb-8">Pilih modul yang ingin kamu akses.</p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {ALL_MODULES.map((mod) => {
+          {ALL_MODULES
+            .filter((mod) => !mod.superadminOnly || employee.is_superadmin)
+            .map((mod) => {
             const Icon = mod.icon;
             const active = mod.built && hasAccess(mod.key);
             const CardTag = active ? Link : 'div';

@@ -4,8 +4,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { MODULE_OPTIONS } from '@/lib/employeeModules';
-import { useModuleAccess } from '@/lib/useModuleAccess';
-import Link from 'next/link';
 
 const emptyForm = {
   nama: '',
@@ -18,7 +16,6 @@ const emptyForm = {
 
 export default function EmployeeListPage() {
   const supabase = createClient();
-  const { status } = useModuleAccess('employee_list');
 
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -153,122 +150,96 @@ export default function EmployeeListPage() {
     'w-full border border-[#E0E0E0] px-4 py-2.5 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
   const labelClass = 'block text-xs font-medium text-[#3D3D3D] mb-1.5';
 
-  if (status === 'loading') {
-    return (
-      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
-      </section>
-    );
-  }
-
-  if (status === 'denied') {
-    return (
-      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
-        <div className="w-full max-w-[420px] border-t-4 border-madael-red bg-white p-8 text-center">
-          <p className="text-sm text-black mb-6">Kamu tidak punya akses ke modul Employee List.</p>
-          <Link
-            href="/employee/dashboard"
-            className="inline-block bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
-          >
-            Kembali ke Dashboard
-          </Link>
-        </div>
-      </section>
-    );
-  }
-
   return (
-    <section className="min-h-screen bg-[#F4F4F4] px-6 py-10">
-      <div className="max-w-[1200px] mx-auto">
-        <div className="flex items-start justify-between mb-8">
-          <div>
-            <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
-              Employee List
-            </h1>
-            <p className="text-sm text-[#6B6B6B] mt-1">{employees.length} total employee</p>
-          </div>
-          <button
-            onClick={openAddModal}
-            className="bg-madael-red text-white px-5 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
-          >
-            + Tambah Employee
-          </button>
+    <div className="max-w-[1200px] mx-auto px-6 py-10">
+      <div className="flex items-start justify-between mb-8">
+        <div>
+          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
+            Employee List
+          </h1>
+          <p className="text-sm text-[#6B6B6B] mt-1">{employees.length} total employee</p>
         </div>
+        <button
+          onClick={openAddModal}
+          className="bg-madael-red text-white px-5 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
+        >
+          + Tambah Employee
+        </button>
+      </div>
 
-        <div className="flex flex-wrap gap-3 mb-6">
-          <select value={filterPerusahaan} onChange={(e) => setFilterPerusahaan(e.target.value)} className={selectClass}>
-            <option value="">Semua Perusahaan</option>
-            {perusahaanOptions.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
+      <div className="flex flex-wrap gap-3 mb-6">
+        <select value={filterPerusahaan} onChange={(e) => setFilterPerusahaan(e.target.value)} className={selectClass}>
+          <option value="">Semua Perusahaan</option>
+          {perusahaanOptions.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
 
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={selectClass}>
-            <option value="">Semua Status</option>
-            <option value="Aktif">Aktif</option>
-            <option value="Nonaktif">Nonaktif</option>
-          </select>
-        </div>
+        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={selectClass}>
+          <option value="">Semua Status</option>
+          <option value="Aktif">Aktif</option>
+          <option value="Nonaktif">Nonaktif</option>
+        </select>
+      </div>
 
-        <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
-          {loading ? (
-            <p className="text-sm text-[#6B6B6B] p-6">Memuat data...</p>
-          ) : error ? (
-            <p className="text-sm text-madael-red p-6">Gagal memuat data: {error}</p>
-          ) : filtered.length === 0 ? (
-            <p className="text-sm text-[#6B6B6B] p-6">Tidak ada employee yang cocok dengan filter.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B] tracking-[0.04em]">
-                  <th className="px-5 py-3 font-medium">Nama</th>
-                  <th className="px-5 py-3 font-medium">Employee ID</th>
-                  <th className="px-5 py-3 font-medium">Email</th>
-                  <th className="px-5 py-3 font-medium">Perusahaan</th>
-                  <th className="px-5 py-3 font-medium">Status</th>
-                  <th className="px-5 py-3 font-medium">Superadmin</th>
-                  <th className="px-5 py-3 font-medium">Aksi</th>
+      <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
+        {loading ? (
+          <p className="text-sm text-[#6B6B6B] p-6">Memuat data...</p>
+        ) : error ? (
+          <p className="text-sm text-madael-red p-6">Gagal memuat data: {error}</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-sm text-[#6B6B6B] p-6">Tidak ada employee yang cocok dengan filter.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B] tracking-[0.04em]">
+                <th className="px-5 py-3 font-medium">Nama</th>
+                <th className="px-5 py-3 font-medium">Employee ID</th>
+                <th className="px-5 py-3 font-medium">Email</th>
+                <th className="px-5 py-3 font-medium">Perusahaan</th>
+                <th className="px-5 py-3 font-medium">Status</th>
+                <th className="px-5 py-3 font-medium">Superadmin</th>
+                <th className="px-5 py-3 font-medium">Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((emp) => (
+                <tr key={emp.id} className="border-b border-[#F0F0F0] last:border-0">
+                  <td className="px-5 py-3.5 text-black">{emp.nama}</td>
+                  <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.employee_id || '—'}</td>
+                  <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.email}</td>
+                  <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.perusahaan || '—'}</td>
+                  <td className="px-5 py-3.5">
+                    <span
+                      className={`text-xs font-medium px-2.5 py-1 ${
+                        emp.status === 'Aktif' ? 'bg-[#DCFCE7] text-[#166534]' : 'bg-[#F4F4F4] text-[#6B6B6B]'
+                      }`}
+                    >
+                      {emp.status}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span
+                      className={`text-xs font-medium px-2.5 py-1 ${
+                        emp.is_superadmin ? 'bg-madael-red text-white' : 'bg-[#F4F4F4] text-[#6B6B6B]'
+                      }`}
+                    >
+                      {emp.is_superadmin ? 'Ya' : 'Tidak'}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <button
+                      onClick={() => openAccessModal(emp)}
+                      className="text-madael-red hover:text-madael-dark text-xs font-medium"
+                    >
+                      Kelola Akses
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {filtered.map((emp) => (
-                  <tr key={emp.id} className="border-b border-[#F0F0F0] last:border-0">
-                    <td className="px-5 py-3.5 text-black">{emp.nama}</td>
-                    <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.employee_id || '—'}</td>
-                    <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.email}</td>
-                    <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.perusahaan || '—'}</td>
-                    <td className="px-5 py-3.5">
-                      <span
-                        className={`text-xs font-medium px-2.5 py-1 ${
-                          emp.status === 'Aktif' ? 'bg-[#DCFCE7] text-[#166534]' : 'bg-[#F4F4F4] text-[#6B6B6B]'
-                        }`}
-                      >
-                        {emp.status}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <span
-                        className={`text-xs font-medium px-2.5 py-1 ${
-                          emp.is_superadmin ? 'bg-madael-red text-white' : 'bg-[#F4F4F4] text-[#6B6B6B]'
-                        }`}
-                      >
-                        {emp.is_superadmin ? 'Ya' : 'Tidak'}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <button
-                        onClick={() => openAccessModal(emp)}
-                        className="text-madael-red hover:text-madael-dark text-xs font-medium"
-                      >
-                        Kelola Akses
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Modal Tambah Employee */}
@@ -415,6 +386,6 @@ export default function EmployeeListPage() {
           </div>
         </div>
       )}
-    </section>
+    </div>
   );
 }

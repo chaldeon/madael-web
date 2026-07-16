@@ -2,7 +2,7 @@ import Image from 'next/image';
 
 export default function Footer() {
   return (
-    <footer className="flex items-center justify-between flex-wrap gap-4 px-10 py-8 border-t border-[#E0E0E0]">
+    <footer className="print:hidden flex items-center justify-between flex-wrap gap-4 px-10 py-8 border-t border-[#E0E0E0]">
       <div className="flex items-center gap-2.5">
         <Image
           src="/logos/madael_logo_transparent.png"
