@@ -25,6 +25,11 @@ const OVERTIME_RULES = {
   ],
 };
 
+// Batas maksimal lembur harian sesuai Pasal 26 PP No. 35 Tahun 2021
+// (turunan UU Cipta Kerja / UU No. 6 Tahun 2023) — berlaku untuk hari kerja biasa.
+const MAX_JAM_LEMBUR_HARIAN = 4;
+const MAX_JAM_LEMBUR_MINGGUAN = 18;
+
 function getMultiplier(dayType, hour) {
   const rules = OVERTIME_RULES[dayType];
   for (const r of rules) {
@@ -79,14 +84,15 @@ const translations = {
     hasilPerhitungan: 'Hasil Perhitungan',
     upahSebulan: 'Upah Sebulan',
     jenisHari: 'Jenis Hari',
-    jamLembur: 'Jumlah Jam Lembur',
+    jamLembur: 'Jumlah Jam Lembur (Hari Ini)',
     hitung: 'Hitung',
     reset: 'Reset',
     emptyState: 'Isi data di kiri lalu klik Hitung untuk melihat hasilnya.',
     upahPerJamLabel: 'Upah per Jam (1/173 × Upah Sebulan)',
     breakdownTitle: 'Rincian per Jam',
     totalLembur: 'Total Upah Lembur',
-    catatan: '* Dihitung berdasarkan PP 35/2021 tentang Pengupahan (turunan UU Cipta Kerja). Upah per jam = 1/173 × upah sebulan (gaji pokok + tunjangan tetap).',
+    catatan: '* Dihitung berdasarkan Pasal 31 PP No. 35 Tahun 2021 tentang Pengupahan (turunan UU Cipta Kerja / UU No. 6 Tahun 2023). Upah per jam = 1/173 × upah sebulan (gaji pokok + tunjangan tetap).',
+    peringatanBatas: `⚠️ Jam lembur yang dimasukkan melebihi batas maksimal harian. Berdasarkan Pasal 26 PP No. 35 Tahun 2021 (turunan UU Cipta Kerja/UU No. 6 Tahun 2023 yang mengubah UU Ketenagakerjaan), waktu kerja lembur pada hari kerja biasa hanya boleh dilakukan paling lama ${MAX_JAM_LEMBUR_HARIAN} jam dalam 1 hari dan ${MAX_JAM_LEMBUR_MINGGUAN} jam dalam 1 minggu.`,
     jamKe: (from, to) => (from === to ? `Jam ke-${from}` : `Jam ke-${from} s.d. ${to}`),
     dayOptions: {
       biasa: 'Hari Kerja Biasa (Senin–Jumat)',
@@ -97,7 +103,7 @@ const translations = {
     fields: {
       upahSebulan: { label: 'Upah Sebulan', tip: 'Gaji pokok + tunjangan tetap per bulan. Jadi dasar perhitungan upah per jam (1/173 × upah sebulan).' },
       jenisHari: { label: 'Jenis Hari', tip: 'Jenis hari saat lembur dilakukan menentukan pengali (multiplier) upah lembur per jam, sesuai PP 35/2021.' },
-      jamLembur: { label: 'Jumlah Jam Lembur', tip: 'Total jam lembur yang dikerjakan pada hari yang dipilih. Setiap jam bisa punya pengali berbeda tergantung urutan jam ke berapa.' },
+      jamLembur: { label: 'Jumlah Jam Lembur', tip: 'Total jam lembur yang dikerjakan pada hari ini. Setiap jam bisa punya pengali berbeda tergantung urutan jam ke berapa. Untuk hari kerja biasa, batas maksimal lembur adalah 4 jam/hari sesuai PP 35/2021.' },
     },
   },
   en: {
@@ -108,14 +114,15 @@ const translations = {
     hasilPerhitungan: 'Calculation Result',
     upahSebulan: 'Monthly Wage',
     jenisHari: 'Day Type',
-    jamLembur: 'Overtime Hours',
+    jamLembur: 'Overtime Hours (Today)',
     hitung: 'Calculate',
     reset: 'Reset',
     emptyState: 'Fill in the details on the left, then click Calculate to see your result.',
     upahPerJamLabel: 'Hourly Wage (1/173 × Monthly Wage)',
     breakdownTitle: 'Hourly Breakdown',
     totalLembur: 'Total Overtime Pay',
-    catatan: "* Calculated per PP 35/2021 on Wages (derived from the Job Creation Law). Hourly wage = 1/173 × monthly wage (basic salary + fixed allowance).",
+    catatan: "* Calculated per Article 31 of PP No. 35 of 2021 on Wages (derived from the Job Creation Law / Law No. 6 of 2023). Hourly wage = 1/173 × monthly wage (basic salary + fixed allowance).",
+    peringatanBatas: `⚠️ The overtime hours entered exceed the daily maximum limit. Under Article 26 of PP No. 35 of 2021 (derived from the Job Creation Law/Law No. 6 of 2023, which amended the Manpower Law), overtime work on a regular working day may only be performed for a maximum of ${MAX_JAM_LEMBUR_HARIAN} hours per day and ${MAX_JAM_LEMBUR_MINGGUAN} hours per week.`,
     jamKe: (from, to) => (from === to ? `Hour ${from}` : `Hours ${from}–${to}`),
     dayOptions: {
       biasa: 'Regular Working Day (Mon–Fri)',
@@ -126,7 +133,7 @@ const translations = {
     fields: {
       upahSebulan: { label: 'Upah Sebulan (Monthly Wage)', tip: 'Basic salary + fixed allowance per month. Base for the hourly wage calculation (1/173 × monthly wage).' },
       jenisHari: { label: 'Jenis Hari (Day Type)', tip: 'The type of day overtime is worked determines the pay multiplier per hour, per PP 35/2021.' },
-      jamLembur: { label: 'Jumlah Jam Lembur (Overtime Hours)', tip: 'Total overtime hours worked on the selected day. Each hour may have a different multiplier depending on its sequence.' },
+      jamLembur: { label: 'Overtime Hours', tip: 'Total overtime hours worked today. Each hour may have a different multiplier depending on its sequence. For regular working days, the legal maximum is 4 hours/day per PP 35/2021.' },
     },
   },
 };
@@ -204,7 +211,10 @@ export default function KalkulatorLembur() {
     const breakdown = computeBreakdown(inputs.dayType, jamLembur, upahPerJam);
     const total = breakdown.reduce((sum, seg) => sum + seg.subtotal, 0);
 
-    setResult({ upahPerJam, breakdown, total, dayType: inputs.dayType });
+    // Peringatan batas maksimal hanya berlaku untuk hari kerja biasa (Pasal 26 PP 35/2021)
+    const melebihiBatas = inputs.dayType === 'biasa' && jamLembur > MAX_JAM_LEMBUR_HARIAN;
+
+    setResult({ upahPerJam, breakdown, total, dayType: inputs.dayType, jamLembur, melebihiBatas });
   };
 
   const inputClass =
@@ -294,6 +304,12 @@ export default function KalkulatorLembur() {
 
             {result && (
               <>
+                {result.melebihiBatas && (
+                  <div className="border border-amber-400 bg-amber-50 text-amber-900 text-xs leading-relaxed px-4 py-3 mb-6 rounded-sm">
+                    {t.peringatanBatas}
+                  </div>
+                )}
+
                 <div className="border border-[#E0E0E0] mb-6">
                   <Row label={t.upahPerJamLabel} value={formatRupiah(result.upahPerJam)} />
                 </div>

@@ -206,19 +206,13 @@ export default function AdminLowonganPage() {
             <p className="text-sm text-[#6B6B6B] mt-1">{listings.length} lowongan total</p>
           </div>
           <div className="flex items-center gap-3">
-            
-              <a href="/admin"
-              className="text-sm text-[#6B6B6B] hover:text-black no-underline"
-            >
-              {'\u2190'} Dashboard Pelamar
-            </a>
-            <button
-              onClick={openCreateForm}
-              className="bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors"
-            >
-              Buat Lowongan Baru
-            </button>
-          </div>
+                <button
+                    onClick={openCreateForm}
+                    className="bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors"
+                >
+                    Buat Lowongan Baru
+                </button>
+            </div>
         </div>
 
         {/* Table */}

@@ -92,21 +92,13 @@ export default function AdminDashboardPage() {
     <section className="min-h-screen bg-[#F4F4F4] px-6 py-10">
       <div className="max-w-[1200px] mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
+        <div className="mb-8">
             <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
-              Dashboard Kandidat
+                Dashboard Kandidat
             </h1>
             <p className="text-sm text-[#6B6B6B] mt-1">
-              {applications.length} total pelamar
+                {applications.length} total pelamar
             </p>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="border border-[#E0E0E0] text-[#6B6B6B] px-5 py-2 text-sm font-medium tracking-[0.02em] hover:border-madael-red hover:text-madael-red transition-colors"
-          >
-            Logout
-          </button>
         </div>
 
         {/* Filters */}
