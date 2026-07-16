@@ -238,7 +238,7 @@ export default function KarirPage() {
             <>
               {/* ===== DESKTOP: master-detail (lg ke atas) ===== */}
               <div className="hidden lg:flex gap-8 items-start">
-                <div className="w-[360px] flex-shrink-0 flex flex-col gap-3">
+                <div className="w-[360px] flex-shrink-0 flex flex-col gap-3 lg:sticky lg:top-[88px] lg:max-h-[calc(100vh-120px)] lg:overflow-y-auto lg:pr-1">
                   {filteredJobs.map((job) => {
                     const isActive = selectedJob?.slug === job.slug;
                     return (
@@ -272,7 +272,7 @@ export default function KarirPage() {
                   })}
                 </div>
 
-                <div className="flex-1 lg:sticky lg:top-[88px]">
+                <div className="flex-1 lg:sticky lg:top-[88px] lg:max-h-[calc(100vh-120px)] lg:overflow-y-auto">
                   {selectedJob && (
                     <div className="border border-[#E0E0E0] bg-white">
                       <div className="p-8 border-b border-[#E0E0E0]">
