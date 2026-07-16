@@ -12,7 +12,7 @@ import { createClient } from '@/lib/supabase-browser';
 const ALL_MODULES = [
   { key: 'employee_list', name: 'Employee List', desc: 'Kelola data dan akses karyawan', href: '/employee/list', built: true, icon: Users },
   { key: 'job_portal', name: 'Job Portal', desc: 'Kelola lowongan dan kandidat', href: '/employee/job-portal', built: true, icon: Briefcase },
-  { key: 'statistics', name: 'Statistics', desc: 'Laporan dan statistik perusahaan', href: '/employee/statistics', built: false, icon: BarChart3 },
+  { key: 'statistics', name: 'Statistics', desc: 'Laporan dan statistik perusahaan', href: '/employee/statistics', built: true, icon: BarChart3 },
   { key: 'kalkulator', name: 'Kalkulator', desc: 'PPh 21, BPJS, dan kalkulator lainnya', href: '/kalkulator-pph21', built: true, icon: Calculator },
   { key: 'absensi', name: 'Absensi', desc: 'Kelola kehadiran karyawan', href: '/employee/absensi', built: false, icon: Clock },
   { key: 'payslip', name: 'Payslip', desc: 'Slip gaji karyawan', href: '/employee/payslip', built: false, icon: Receipt },
