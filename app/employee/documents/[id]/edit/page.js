@@ -3,7 +3,7 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
@@ -15,8 +15,6 @@ const JENIS_LABEL = {
   AGR: 'Agreement / PKS',
   ADM: 'Surat Administrasi',
 };
-
-const VALID_TYPES = Object.keys(JENIS_LABEL);
 
 const DEFAULT_FEE_NOTE =
   'Fee kami belum termasuk PPN 11%, dan sudah termasuk PPh 2% yang berlaku, serta biaya di luar kantong ("OPE") terkait pekerjaan yang harus ditagihkan di muka.';
@@ -43,7 +41,6 @@ function FieldBlock({ label, required, children }) {
 }
 
 function TextListEditor({ label, values, onChange, placeholder }) {
-  // Disimpan sebagai textarea, 1 baris = 1 poin. Di-split jadi array pas submit.
   return (
     <FieldBlock label={label}>
       <textarea
@@ -58,54 +55,35 @@ function TextListEditor({ label, values, onChange, placeholder }) {
   );
 }
 
-function getDefaultContent(type) {
-  switch (type) {
-    case 'PRO':
-      return {
-        perihal: '',
-        latar_belakang: '',
-        scope_pekerjaan: '',
-        jangka_waktu: '',
-        nilai_estimasi: '',
-        syarat_ketentuan: '',
-      };
-    case 'QUO':
-      return {
-        perihal: '',
-        items: [{ nama: '', qty: 1, harga_satuan: 0, subtotal: 0 }],
-        diskon: 0,
-        syarat_pembayaran: DEFAULT_FEE_NOTE,
-        masa_berlaku: '',
-      };
-    case 'PROQUO':
-      return {
-        perihal: '',
-        description_services: '',
-        phases: [{ title: 'Phase I', points: '' }],
-        experts: '',
-        period: '',
-        fee_details: [{ phase_label: 'Phase I', amount_note: '' }],
-        fee_not_included: DEFAULT_FEE_NOTE,
-        others_points: '',
-      };
-    case 'AGR':
-    case 'ADM':
-      return {
-        perihal: '',
-        pihak_pertama: 'PT. Madael Prima Sejahtera Indonesia',
-        pihak_kedua: '',
-        scope_pekerjaan: '',
-        nilai_kontrak: '',
-        jangka_waktu: '',
-        syarat_ketentuan: '',
-        pasal: [{ judul: '', isi: '' }],
-      };
-    default:
-      return {};
-  }
+// content dari DB untuk PROQUO/AGR/ADM menyimpan array (experts, others_points, points per fase)
+// tapi editor TextListEditor & textarea poin butuh string multi-baris — ini konversi baliknya.
+function toMultiline(value) {
+  if (Array.isArray(value)) return value.join('\n');
+  return value || '';
 }
 
-// ---------- Field groups per jenis ----------
+function normalizeContentForEdit(type, raw) {
+  const content = { ...raw };
+  if (type === 'PROQUO') {
+    content.experts = toMultiline(content.experts);
+    content.others_points = toMultiline(content.others_points);
+    content.phases = (content.phases || [{ title: 'Phase I', points: '' }]).map((p) => ({
+      ...p,
+      points: toMultiline(p.points),
+    }));
+    content.fee_details = content.fee_details || [{ phase_label: 'Phase I', amount_note: '' }];
+  }
+  if (type === 'QUO') {
+    content.items = content.items || [{ nama: '', qty: 1, harga_satuan: 0, subtotal: 0 }];
+    content.diskon = content.diskon || 0;
+  }
+  if (type === 'AGR' || type === 'ADM') {
+    content.pasal = content.pasal || [{ judul: '', isi: '' }];
+  }
+  return content;
+}
+
+// ---------- Field groups per jenis (sama seperti new/page.js) ----------
 
 function ProposalFields({ content, setContent }) {
   const set = (key, value) => setContent((c) => ({ ...c, [key]: value }));
@@ -223,9 +201,6 @@ function QuotationFields({ content, setContent }) {
           <input className={inputClass()} value={content.masa_berlaku} onChange={(e) => set('masa_berlaku', e.target.value)} />
         </FieldBlock>
       </div>
-      <p className="text-[11px] text-[#9A9A9A] -mt-3 mb-5">
-        Catatan: template Quotation asli (headhunting) sering pakai skema fee persentase, bukan tabel item×qty×harga. Field ini masih ikut struktur render lama — kasih tau kalau mau saya sesuaikan.
-      </p>
     </>
   );
 }
@@ -332,7 +307,7 @@ function ProposalQuotationFields({ content, setContent }) {
   );
 }
 
-function AgreementFields({ content, setContent, isAdm }) {
+function AgreementFields({ content, setContent }) {
   const set = (key, value) => setContent((c) => ({ ...c, [key]: value }));
 
   const updatePasal = (idx, key, value) => setContent((c) => {
@@ -402,71 +377,66 @@ function AgreementFields({ content, setContent, isAdm }) {
           <Plus size={14} /> Tambah Pasal
         </button>
       </div>
-      {isAdm && (
-        <p className="text-[11px] text-[#9A9A9A] mt-3">
-          Catatan: form ini pakai struktur Agreement sesuai keputusan sementara. Render di halaman detail (`AdministrasiContent`) masih perlu disesuaikan supaya field ini tampil benar.
-        </p>
-      )}
     </>
   );
 }
 
 // ---------- Halaman utama ----------
 
-export default function NewDocumentPage() {
+export default function EditDocumentPage() {
+  const params = useParams();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const supabase = createClient();
 
-  const typeParam = searchParams.get('type');
-  const type = VALID_TYPES.includes(typeParam) ? typeParam : 'PRO';
-
+  const [docMeta, setDocMeta] = useState(null); // { id, nomor_surat, kode_jenis }
   const [judul, setJudul] = useState('');
   const [clientId, setClientId] = useState('');
-  const [tanggalDokumen, setTanggalDokumen] = useState(() => new Date().toISOString().slice(0, 10));
+  const [tanggalDokumen, setTanggalDokumen] = useState('');
   const [catatan, setCatatan] = useState('');
-  const [content, setContent] = useState(() => getDefaultContent(type));
+  const [content, setContent] = useState(null);
 
   const [clients, setClients] = useState([]);
-  const [loadingClients, setLoadingClients] = useState(true);
-  const [employeeId, setEmployeeId] = useState(null);
-
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-
-  useEffect(() => {
-    setContent(getDefaultContent(type));
-  }, [type]);
+  const [notFound, setNotFound] = useState(false);
 
   const loadClients = useCallback(async () => {
-    setLoadingClients(true);
     const { data } = await supabase
       .from('clients')
       .select('id, nama_perusahaan, pic_nama')
       .eq('is_active', true)
       .order('nama_perusahaan', { ascending: true });
     setClients(data || []);
-    setLoadingClients(false);
   }, [supabase]);
 
-  const loadEmployee = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      router.push('/employee/login');
+  const loadDoc = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('documents')
+      .select('*')
+      .eq('id', params.id)
+      .maybeSingle();
+
+    if (error || !data) {
+      setNotFound(true);
+      setLoading(false);
       return;
     }
-    const { data: emp } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('email', user.email)
-      .maybeSingle();
-    setEmployeeId(emp?.id || null);
-  }, [supabase, router]);
+
+    setDocMeta({ id: data.id, nomor_surat: data.nomor_surat, kode_jenis: data.kode_jenis });
+    setJudul(data.judul || '');
+    setClientId(data.client_id || '');
+    setTanggalDokumen(data.tanggal_dokumen ? data.tanggal_dokumen.slice(0, 10) : '');
+    setCatatan(data.catatan || '');
+    setContent(normalizeContentForEdit(data.kode_jenis, data.content || {}));
+    setLoading(false);
+  }, [supabase, params.id]);
 
   useEffect(() => {
     loadClients();
-    loadEmployee();
-  }, [loadClients, loadEmployee]);
+    loadDoc();
+  }, [loadClients, loadDoc]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -483,8 +453,9 @@ export default function NewDocumentPage() {
 
     setSaving(true);
     try {
-      // Susun content final: field TextListEditor (string multi-baris) di-split jadi array
+      const type = docMeta.kode_jenis;
       const finalContent = { ...content };
+
       if (type === 'PROQUO') {
         finalContent.experts = content.experts.split('\n').map((s) => s.trim()).filter(Boolean);
         finalContent.others_points = content.others_points.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -499,63 +470,66 @@ export default function NewDocumentPage() {
         finalContent.total = subtotal - (Number(content.diskon) || 0);
       }
 
-      // 1. Generate nomor surat
-      const res = await fetch('/api/documents/generate-number', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kode_jenis: type }),
-      });
-      const numberData = await res.json();
-      if (!res.ok) {
-        throw new Error(numberData.error || 'Gagal generate nomor surat.');
-      }
-
-      // 2. Simpan dokumen
-      const { data: inserted, error: insertError } = await supabase
+      const { error: updateError } = await supabase
         .from('documents')
-        .insert({
-          nomor_surat: numberData.nomor_surat,
-          kode_jenis: type,
+        .update({
           judul: judul.trim(),
           client_id: clientId || null,
-          created_by: employeeId,
-          status: 'Draft',
           content: finalContent,
           catatan: catatan.trim() || null,
           tanggal_dokumen: tanggalDokumen,
         })
-        .select('id')
-        .single();
+        .eq('id', docMeta.id);
 
-      if (insertError) throw new Error(insertError.message);
+      if (updateError) throw new Error(updateError.message);
 
-      router.push(`/employee/documents/${inserted.id}`);
+      router.push(`/employee/documents/${docMeta.id}`);
     } catch (err) {
       setError(err.message);
       setSaving(false);
     }
   };
 
+  if (loading) {
+    return (
+      <div className="max-w-[800px] mx-auto px-6 py-10">
+        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+      </div>
+    );
+  }
+
+  if (notFound) {
+    return (
+      <div className="max-w-[700px] mx-auto px-6 py-10">
+        <p className="text-sm text-black mb-6">Dokumen tidak ditemukan.</p>
+        <Link href="/employee/documents" className="inline-flex items-center gap-1.5 text-sm text-madael-red hover:underline">
+          <ArrowLeft size={15} />
+          Kembali ke Dokumen
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-[800px] mx-auto px-6 py-10">
-      <Link href="/employee/documents" className="inline-flex items-center gap-1.5 text-sm text-[#6B6B6B] hover:text-madael-red transition-colors mb-6">
+      <Link href={`/employee/documents/${docMeta.id}`} className="inline-flex items-center gap-1.5 text-sm text-[#6B6B6B] hover:text-madael-red transition-colors mb-6">
         <ArrowLeft size={15} />
         Kembali ke Dokumen
       </Link>
 
       <div className="mb-8">
-        <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Dokumen Baru — {JENIS_LABEL[type]}</h1>
-        <p className="text-sm text-[#6B6B6B] mt-1">Nomor surat akan digenerate otomatis saat disimpan.</p>
+        <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Edit — {JENIS_LABEL[docMeta.kode_jenis] || docMeta.kode_jenis}</h1>
+        <p className="text-sm text-[#6B6B6B] mt-1">Nomor Surat: <span className="font-medium text-black">{docMeta.nomor_surat}</span> (tidak berubah)</p>
       </div>
 
       <form onSubmit={handleSubmit} className="bg-white border border-[#E0E0E0] p-8 sm:p-10">
         <FieldBlock label="Judul Dokumen (internal)" required>
-          <input className={inputClass()} value={judul} onChange={(e) => setJudul(e.target.value)} placeholder="Mis. Quotation Headhunting - ACS Group Semarang" />
+          <input className={inputClass()} value={judul} onChange={(e) => setJudul(e.target.value)} />
         </FieldBlock>
 
         <div className="grid grid-cols-2 gap-4">
           <FieldBlock label="Klien Terkait">
-            <select className={inputClass()} value={clientId} onChange={(e) => setClientId(e.target.value)} disabled={loadingClients}>
+            <select className={inputClass()} value={clientId} onChange={(e) => setClientId(e.target.value)}>
               <option value="">— Tidak ada / belum dipilih —</option>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -570,11 +544,11 @@ export default function NewDocumentPage() {
         </div>
 
         <div className="border-t border-[#E0E0E0] pt-6 mt-2">
-          {type === 'PRO' && <ProposalFields content={content} setContent={setContent} />}
-          {type === 'QUO' && <QuotationFields content={content} setContent={setContent} />}
-          {type === 'PROQUO' && <ProposalQuotationFields content={content} setContent={setContent} />}
-          {type === 'AGR' && <AgreementFields content={content} setContent={setContent} isAdm={false} />}
-          {type === 'ADM' && <AgreementFields content={content} setContent={setContent} isAdm={true} />}
+          {docMeta.kode_jenis === 'PRO' && <ProposalFields content={content} setContent={setContent} />}
+          {docMeta.kode_jenis === 'QUO' && <QuotationFields content={content} setContent={setContent} />}
+          {docMeta.kode_jenis === 'PROQUO' && <ProposalQuotationFields content={content} setContent={setContent} />}
+          {docMeta.kode_jenis === 'AGR' && <AgreementFields content={content} setContent={setContent} />}
+          {docMeta.kode_jenis === 'ADM' && <AgreementFields content={content} setContent={setContent} />}
         </div>
 
         <FieldBlock label="Catatan Internal (opsional)">
@@ -584,7 +558,7 @@ export default function NewDocumentPage() {
         {error && <p className="text-sm text-madael-red mb-4">{error}</p>}
 
         <div className="flex justify-end gap-3 pt-2">
-          <Link href="/employee/documents" className="px-5 py-2.5 text-sm font-medium text-[#4B5563] hover:text-black transition-colors">
+          <Link href={`/employee/documents/${docMeta.id}`} className="px-5 py-2.5 text-sm font-medium text-[#4B5563] hover:text-black transition-colors">
             Batal
           </Link>
           <button
@@ -592,7 +566,7 @@ export default function NewDocumentPage() {
             disabled={saving}
             className="bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors disabled:opacity-60"
           >
-            {saving ? 'Menyimpan...' : 'Simpan Dokumen'}
+            {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
           </button>
         </div>
       </form>
