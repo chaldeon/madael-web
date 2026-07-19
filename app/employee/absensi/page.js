@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { MapPin, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { useModuleAccess } from '@/lib/useModuleAccess';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -53,8 +54,8 @@ function getPosition() {
 
 export default function AbsensiPage() {
   const supabase = createClient();
+  const { status, employee } = useModuleAccess('absensi');
 
-  const [employee, setEmployee] = useState(null);
   const [schedule, setSchedule] = useState(null);
   const [todayRow, setTodayRow] = useState(null);
   const [history, setHistory] = useState([]);
@@ -63,33 +64,16 @@ export default function AbsensiPage() {
   const [geoError, setGeoError] = useState(null);
 
   const loadData = useCallback(async () => {
+    if (!employee) return;
     setLoading(true);
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-
-    const { data: emp } = await supabase
-      .from('employees')
-      .select('id, nama, is_superadmin')
-      .eq('email', user.email)
-      .maybeSingle();
-
-    if (!emp) {
-      setLoading(false);
-      return;
-    }
-    setEmployee(emp);
-
     const [{ data: sched }, { data: today }, { data: hist }] = await Promise.all([
-      supabase.from('work_schedule').select('*').eq('employee_id', emp.id).maybeSingle(),
-      supabase.from('attendance').select('*').eq('employee_id', emp.id).eq('tanggal', todayStr()).maybeSingle(),
+      supabase.from('work_schedule').select('*').eq('employee_id', employee.id).maybeSingle(),
+      supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', todayStr()).maybeSingle(),
       supabase
         .from('attendance')
         .select('*')
-        .eq('employee_id', emp.id)
+        .eq('employee_id', employee.id)
         .order('tanggal', { ascending: false })
         .limit(7),
     ]);
@@ -98,11 +82,11 @@ export default function AbsensiPage() {
     setTodayRow(today || null);
     setHistory(hist || []);
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, employee]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (status === 'allowed') loadData();
+  }, [status, loadData]);
 
   const handleClockIn = async () => {
     setGeoError(null);
@@ -163,10 +147,26 @@ export default function AbsensiPage() {
     }
   };
 
-  if (loading) {
+  if (status === 'loading' || loading) {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
         <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+      </section>
+    );
+  }
+
+  if (status === 'denied') {
+    return (
+      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
+        <div className="w-full max-w-[420px] border-t-4 border-madael-red bg-white p-8 text-center">
+          <p className="text-sm text-black mb-6">Kamu tidak punya akses ke halaman Absensi.</p>
+          <Link
+            href="/employee/absensi/jadwal"
+            className="inline-block bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
+          >
+            Kembali
+          </Link>
+        </div>
       </section>
     );
   }
@@ -181,7 +181,7 @@ export default function AbsensiPage() {
       {!schedule && (
         <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mb-6">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          Jadwal kerja kamu belum diatur superadmin, jadi status telat belum bisa dihitung. Clock in/out tetap bisa dilakukan.
+          Jadwal kerja kamu belum diatur, jadi status telat belum bisa dihitung. Clock in/out tetap bisa dilakukan.
         </div>
       )}
       {schedule && !isWorkday && (
@@ -288,12 +288,6 @@ export default function AbsensiPage() {
           </tbody>
         </table>
       </div>
-
-      {employee?.is_superadmin && (
-        <Link href="/employee/absensi/jadwal" className="inline-block mt-6 text-xs text-[#6B6B6B] hover:text-madael-red">
-          Kelola jadwal kerja karyawan →
-        </Link>
-      )}
     </div>
   );
 }

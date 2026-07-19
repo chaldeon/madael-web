@@ -3,10 +3,10 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { X, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { useModuleAccess } from '@/lib/useModuleAccess';
 
 const HARI_OPTIONS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
 const DEFAULT_HARI = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
@@ -18,12 +18,8 @@ function formatJam(value) {
 }
 
 export default function JadwalKerjaPage() {
-  const router = useRouter();
   const supabase = createClient();
-
-  const [authorized, setAuthorized] = useState(false);
-  const [authError, setAuthError] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const { status } = useModuleAccess('absensi_jadwal');
 
   const [employees, setEmployees] = useState([]);
   const [schedules, setSchedules] = useState({}); // employee_id -> schedule row
@@ -32,30 +28,6 @@ export default function JadwalKerjaPage() {
   const [editingEmp, setEditingEmp] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-
-  const checkAccess = useCallback(async () => {
-    setAuthLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      router.push('/employee/login');
-      return;
-    }
-    const { data: emp } = await supabase
-      .from('employees')
-      .select('is_superadmin, status')
-      .eq('email', user.email)
-      .maybeSingle();
-
-    if (!emp || !emp.is_superadmin || emp.status !== 'Aktif') {
-      setAuthError('Halaman ini khusus untuk superadmin.');
-      setAuthLoading(false);
-      return;
-    }
-    setAuthorized(true);
-    setAuthLoading(false);
-  }, [supabase, router]);
-
-  useEffect(() => { checkAccess(); }, [checkAccess]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -75,8 +47,8 @@ export default function JadwalKerjaPage() {
   }, [supabase]);
 
   useEffect(() => {
-    if (authorized) loadData();
-  }, [authorized, loadData]);
+    if (status === 'allowed') loadData();
+  }, [status, loadData]);
 
   const openEdit = (emp) => {
     const existing = schedules[emp.id];
@@ -120,7 +92,7 @@ export default function JadwalKerjaPage() {
     setEditingEmp(null);
   };
 
-  if (authLoading) {
+  if (status === 'loading') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
         <p className="text-sm text-[#6B6B6B]">Memuat...</p>
@@ -128,11 +100,11 @@ export default function JadwalKerjaPage() {
     );
   }
 
-  if (authError) {
+  if (status === 'denied') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
         <div className="w-full max-w-[420px] border-t-4 border-madael-red bg-white p-8 text-center">
-          <p className="text-sm text-black mb-6">{authError}</p>
+          <p className="text-sm text-black mb-6">Kamu tidak punya akses ke halaman ini.</p>
           <Link
             href="/employee/dashboard"
             className="inline-block bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"

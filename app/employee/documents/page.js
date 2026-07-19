@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { Plus, ChevronDown, ExternalLink } from 'lucide-react';
+import { Plus, ChevronDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 
 const JENIS_OPTIONS = [
@@ -142,13 +142,6 @@ export default function DocumentsListPage() {
           <p className="text-sm text-[#6B6B6B] mt-1">{documents.length} total dokumen</p>
         </div>
         <div className="flex items-center gap-3">
-          <Link
-            href="/employee/documents/nomor-surat"
-            className="flex items-center gap-1.5 text-sm text-[#4B5563] hover:text-madael-red transition-colors"
-          >
-            <ExternalLink size={14} />
-            Nomor Surat
-          </Link>
           <NewDocumentDropdown />
         </div>
       </div>

@@ -256,6 +256,7 @@ export default function DocumentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [canManage, setCanManage] = useState(false);
 
   const fetchDoc = useCallback(async () => {
     setLoading(true);
@@ -272,6 +273,28 @@ export default function DocumentDetailPage() {
       setError('Dokumen tidak ditemukan.');
     } else {
       setDoc(data);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: emp } = await supabase
+          .from('employees')
+          .select('id, is_superadmin')
+          .eq('email', user.email)
+          .maybeSingle();
+        if (emp) {
+          if (emp.is_superadmin || emp.id === data.created_by) {
+            setCanManage(true);
+          } else {
+            const { data: mod } = await supabase
+              .from('employee_modules')
+              .select('module_name')
+              .eq('employee_id', emp.id)
+              .eq('module_name', 'document_manage')
+              .maybeSingle();
+            setCanManage(!!mod);
+          }
+        }
+      }
     }
     setLoading(false);
   }, [supabase, params.id]);
@@ -324,23 +347,29 @@ export default function DocumentDetailPage() {
         </Link>
 
         <div className="flex items-center gap-3">
-          <select
-            value={doc.status}
-            onChange={(e) => handleStatusChange(e.target.value)}
-            disabled={updatingStatus}
-            className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-          <Link
-            href={`/employee/documents/${doc.id}/edit`}
-            className="flex items-center gap-1.5 border border-[#E0E0E0] px-4 py-2 text-sm font-medium text-[#4B5563] hover:border-madael-red hover:text-madael-red transition-colors"
-          >
-            <Pencil size={14} />
-            Edit
-          </Link>
+          {canManage ? (
+            <select
+              value={doc.status}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              disabled={updatingStatus}
+              className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+            >
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          ) : (
+            <StatusBadge status={doc.status} />
+          )}
+          {canManage && (
+            <Link
+              href={`/employee/documents/${doc.id}/edit`}
+              className="flex items-center gap-1.5 border border-[#E0E0E0] px-4 py-2 text-sm font-medium text-[#4B5563] hover:border-madael-red hover:text-madael-red transition-colors"
+            >
+              <Pencil size={14} />
+              Edit
+            </Link>
+          )}
           <button
             onClick={handlePrint}
             className="flex items-center gap-2 bg-madael-red text-white px-5 py-2 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors"
@@ -352,7 +381,7 @@ export default function DocumentDetailPage() {
       </div>
 
       {/* Dokumen — bagian ini yang ikut ke-print */}
-      <div className="bg-white border border-[#E0E0E0] print:border-0 p-8 sm:p-10">
+      <div className="printable-doc bg-white border border-[#E0E0E0] print:border-0 p-8 sm:p-10">
         <div className="flex items-start justify-between border-b-2 border-madael-red pb-5 mb-6">
           <div className="flex items-center gap-3">
             <Image
@@ -428,11 +457,11 @@ export default function DocumentDetailPage() {
           body * {
             visibility: hidden;
           }
-          .print\\:border-0,
-          .print\\:border-0 * {
+          .printable-doc,
+          .printable-doc * {
             visibility: visible;
           }
-          .print\\:border-0 {
+          .printable-doc {
             position: absolute;
             left: 0;
             top: 0;
