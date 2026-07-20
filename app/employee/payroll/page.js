@@ -3,13 +3,32 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { X, Plus, Pencil, Trash2 } from 'lucide-react';
+import { X, Plus, Pencil, Trash2, Calculator } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { hitungPPh21TER, hitungBPJS, hitungBrutoPPh21, PTKP_DATA, JKK_OPTIONS } from '@/lib/payroll/calculations';
 
 const STATUS_OPTIONS = ['PHL', 'Tetap'];
+const NPWP_OPTIONS = [
+  { value: '', label: '— Belum diisi —' },
+  { value: 'ada', label: 'Ada NPWP' },
+  { value: 'tidak', label: 'Tidak Ada NPWP' },
+];
+const PTKP_OPTIONS = [
+  { value: '', label: '— Belum diisi —' },
+  ...Object.entries(PTKP_DATA).map(([key, v]) => ({ value: key, label: v.label })),
+];
+const JKK_SELECT_OPTIONS = [
+  { value: '', label: '— Belum diisi —' },
+  ...JKK_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+];
+
+function currentMonthValue() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
 
 const EMPTY_FORM = {
   nama: '',
@@ -19,6 +38,10 @@ const EMPTY_FORM = {
   gaji_pokok: 0,
   tunjangan: 0,
   komponen_lain: [], // [{ key, value }] saat di-edit, dikonversi ke/dari jsonb saat load/save
+  linked_employee_id: '',
+  status_ptkp: '',
+  npwp_status: '',
+  jkk_rate: '',
 };
 
 function formatRupiah(value) {
@@ -92,7 +115,7 @@ function SelectField({ label, value, onChange, options }) {
   );
 }
 
-function EmployeeModal({ clients, form, setForm, onClose, onSubmit, saving, saveError }) {
+function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onSubmit, saving, saveError }) {
   const set = (key) => (val) => setForm((f) => ({ ...f, [key]: val }));
 
   const updatePair = (idx, field, val) => {
@@ -128,7 +151,20 @@ function EmployeeModal({ clients, form, setForm, onClose, onSubmit, saving, save
           <SelectField label="Status" value={form.status} onChange={set('status')} options={STATUS_OPTIONS} />
           <NumberField label="Gaji Pokok" value={form.gaji_pokok} onChange={set('gaji_pokok')} />
           <NumberField label="Tunjangan" value={form.tunjangan} onChange={set('tunjangan')} />
+          <SelectField
+            label="Akun Absensi (opsional)"
+            value={form.linked_employee_id}
+            onChange={set('linked_employee_id')}
+            options={[{ value: '', label: '— Belum terhubung —' }, ...linkableEmployees.map((e) => ({ value: e.id, label: e.nama }))]}
+          />
+          <SelectField label="Status PTKP" value={form.status_ptkp} onChange={set('status_ptkp')} options={PTKP_OPTIONS} />
+          <SelectField label="Status NPWP" value={form.npwp_status} onChange={set('npwp_status')} options={NPWP_OPTIONS} />
+          <SelectField label="Tingkat Risiko JKK" value={form.jkk_rate} onChange={set('jkk_rate')} options={JKK_SELECT_OPTIONS} />
         </div>
+
+        <p className="text-xs text-[#9A9A9A] -mt-2 mb-4">
+          "Akun Absensi", PTKP, NPWP, dan JKK dipakai untuk fitur Hitung PPh21/BPJS & referensi kehadiran — boleh dikosongkan dulu kalau belum ada datanya.
+        </p>
 
         <div className="mb-6">
           <div className="flex items-center justify-between mb-2">
@@ -190,39 +226,169 @@ function EmployeeModal({ clients, form, setForm, onClose, onSubmit, saving, save
   );
 }
 
+function HitungModal({ row, periode, onClose }) {
+  const supabase = createClient();
+  const [attSummary, setAttSummary] = useState(null);
+  const [attLoading, setAttLoading] = useState(false);
+
+  useEffect(() => {
+    if (!row.linked_employee_id) {
+      setAttSummary(null);
+      return;
+    }
+    let cancelled = false;
+    setAttLoading(true);
+    const [year, month] = periode.split('-').map(Number);
+    const firstDay = `${periode}-01`;
+    const lastDayNum = new Date(year, month, 0).getDate();
+    const lastDay = `${periode}-${String(lastDayNum).padStart(2, '0')}`;
+
+    supabase
+      .from('attendance')
+      .select('clock_in, status_telat')
+      .eq('employee_id', row.linked_employee_id)
+      .gte('tanggal', firstDay)
+      .lte('tanggal', lastDay)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const rows = data || [];
+        setAttSummary({
+          totalHadir: rows.filter((r) => r.clock_in).length,
+          totalTelat: rows.filter((r) => r.status_telat).length,
+        });
+        setAttLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [supabase, row.linked_employee_id, periode]);
+
+  const gajiPokok = Number(row.gaji_pokok) || 0; // Gross Salary — basis BPJS
+  const allowance = totalTunjangan(row); // tunjangan + komponen lain
+  const totalGajiTakeHome = gajiPokok + allowance;
+
+  const bpjs = row.jkk_rate != null ? hitungBPJS(gajiPokok, row.jkk_rate) : null;
+  const brutoPPh21 = bpjs ? hitungBrutoPPh21(gajiPokok, allowance, bpjs) : null;
+  const pph21 = (bpjs && row.status_ptkp) ? hitungPPh21TER(brutoPPh21, row.status_ptkp) : null;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] p-4">
+      <div className="bg-white w-full max-w-[560px] max-h-[90vh] overflow-y-auto p-8 relative">
+        <button onClick={onClose} className="absolute top-6 right-6 text-[#6B6B6B] hover:text-black">
+          <X size={20} />
+        </button>
+        <h2 className="text-lg font-semibold text-black mb-1">Preview Hitung — {row.nama}</h2>
+        <p className="text-xs text-[#9A9A9A] mb-6">Periode {periode} · belum final run/approval.</p>
+
+        <div className="text-sm mb-6 pb-4 border-b border-[#E0E0E0] flex flex-col gap-1">
+          <div className="flex justify-between">
+            <span className="text-[#6B6B6B]">Gaji Pokok (Basis BPJS)</span>
+            <span className="text-black">{formatRupiah(gajiPokok)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-[#6B6B6B]">Tunjangan + Komponen Lain</span>
+            <span className="text-black">{formatRupiah(allowance)}</span>
+          </div>
+          <div className="flex justify-between font-medium">
+            <span className="text-black">Total Gaji</span>
+            <span className="text-black">{formatRupiah(totalGajiTakeHome)}</span>
+          </div>
+        </div>
+
+        <div className="mb-6">
+          <h3 className="text-sm font-semibold text-black mb-2">PPh21 (TER Bulanan)</h3>
+          {pph21 ? (
+            <div className="text-sm text-[#6B6B6B] flex flex-col gap-1">
+              <div className="flex justify-between"><span>Bruto PPh21 (Gaji + BPJS ditanggung perusahaan)</span><span className="text-black">{formatRupiah(brutoPPh21)}</span></div>
+              <div className="flex justify-between"><span>Kategori TER</span><span className="text-black">{pph21.category}</span></div>
+              <div className="flex justify-between"><span>Tarif</span><span className="text-black">{pph21.rate}%</span></div>
+              <div className="flex justify-between font-medium"><span className="text-black">PPh21 Bulanan</span><span className="text-black">{formatRupiah(pph21.pph)}</span></div>
+            </div>
+          ) : !bpjs ? (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2">
+              Tingkat Risiko JKK employee ini belum diisi — bruto PPh21 butuh BPJS employer dihitung dulu. Buka Edit Employee untuk melengkapi.
+            </p>
+          ) : (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2">
+              Status PTKP employee ini belum diisi — buka Edit Employee untuk melengkapi.
+            </p>
+          )}
+        </div>
+
+        <div className="mb-6">
+          <h3 className="text-sm font-semibold text-black mb-2">BPJS</h3>
+          {bpjs ? (
+            <div className="text-sm text-[#6B6B6B] flex flex-col gap-1">
+              <div className="flex justify-between"><span>Tanggungan Perusahaan</span><span className="text-black">{formatRupiah(bpjs.totalEmployer)}</span></div>
+              <div className="flex justify-between"><span>Potongan Karyawan</span><span className="text-black">{formatRupiah(bpjs.totalEmployee)}</span></div>
+              <div className="flex justify-between font-medium"><span className="text-black">Grand Total BPJS</span><span className="text-black">{formatRupiah(bpjs.grandTotal)}</span></div>
+            </div>
+          ) : (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2">
+              Tingkat Risiko JKK employee ini belum diisi — buka Edit Employee untuk melengkapi.
+            </p>
+          )}
+        </div>
+
+        <div>
+          <h3 className="text-sm font-semibold text-black mb-2">Referensi Kehadiran</h3>
+          {!row.linked_employee_id ? (
+            <p className="text-xs text-[#6B6B6B] bg-[#F4F4F4] border border-[#E0E0E0] px-3 py-2">
+              Employee ini belum terhubung ke akun Absensi — data kehadiran tidak tersedia. Hubungkan lewat Edit Employee.
+            </p>
+          ) : attLoading ? (
+            <p className="text-xs text-[#9A9A9A]">Memuat data kehadiran...</p>
+          ) : (
+            <div className="text-sm text-[#6B6B6B] flex flex-col gap-1">
+              <div className="flex justify-between"><span>Total Hadir</span><span className="text-black">{attSummary?.totalHadir ?? 0} hari</span></div>
+              <div className="flex justify-between"><span>Total Telat</span><span className="text-black">{attSummary?.totalTelat ?? 0} hari</span></div>
+              <p className="text-[11px] text-[#9A9A9A] mt-1">Referensi saja — belum masuk rumus otomatis di atas. Potongan (Penalty) terkait telat/tidak hadir belum diimplementasikan, bruto PPh21 di atas dihitung dengan Penalty = Rp0.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PayrollManagerPage() {
   const supabase = createClient();
 
   const [clients, setClients] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [linkableEmployees, setLinkableEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [filterClient, setFilterClient] = useState('');
+  const [periode, setPeriode] = useState(currentMonthValue());
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
+  const [hitungRow, setHitungRow] = useState(null);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const [clRes, empRes] = await Promise.all([
+    const [clRes, empRes, linkableRes] = await Promise.all([
       supabase.from('payroll_clients').select('id, nama_klien').order('nama_klien', { ascending: true }),
       supabase
         .from('employees_master')
-        .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, created_at')
+        .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, jkk_rate, created_at')
         .order('created_at', { ascending: false }),
+      supabase.from('employees').select('id, nama').eq('status', 'Aktif').order('nama'),
     ]);
 
-    if (clRes.error || empRes.error) {
-      setLoadError((clRes.error || empRes.error).message || 'Gagal memuat data payroll.');
+    if (clRes.error || empRes.error || linkableRes.error) {
+      setLoadError((clRes.error || empRes.error || linkableRes.error).message || 'Gagal memuat data payroll.');
       setLoading(false);
       return;
     }
 
     setClients(clRes.data || []);
     setEmployees(empRes.data || []);
+    setLinkableEmployees(linkableRes.data || []);
     setLoading(false);
   }, [supabase]);
 
@@ -250,6 +416,10 @@ export default function PayrollManagerPage() {
       gaji_pokok: row.gaji_pokok || 0,
       tunjangan: row.tunjangan || 0,
       komponen_lain: objToPairs(row.komponen_lain),
+      linked_employee_id: row.linked_employee_id || '',
+      status_ptkp: row.status_ptkp || '',
+      npwp_status: row.npwp_status || '',
+      jkk_rate: row.jkk_rate ?? '',
     });
     setModalOpen(true);
   };
@@ -267,6 +437,10 @@ export default function PayrollManagerPage() {
       gaji_pokok: form.gaji_pokok,
       tunjangan: form.tunjangan,
       komponen_lain: pairsToObj(form.komponen_lain),
+      linked_employee_id: form.linked_employee_id || null,
+      status_ptkp: form.status_ptkp || null,
+      npwp_status: form.npwp_status || null,
+      jkk_rate: form.jkk_rate === '' ? null : Number(form.jkk_rate),
     };
 
     const { error } = form.id
@@ -301,13 +475,22 @@ export default function PayrollManagerPage() {
         </button>
       </div>
 
-      <div className="mb-4">
+      <div className="flex flex-wrap gap-3 mb-4">
         <SelectField
           label="Filter Klien"
           value={filterClient}
           onChange={setFilterClient}
           options={[{ value: '', label: 'Semua Klien' }, ...clients.map((c) => ({ value: c.id, label: c.nama_klien }))]}
         />
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-[#6B6B6B]">Periode (untuk Hitung)</span>
+          <input
+            type="month"
+            value={periode}
+            onChange={(e) => setPeriode(e.target.value)}
+            className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+          />
+        </label>
       </div>
 
       {loading ? (
@@ -356,9 +539,18 @@ export default function PayrollManagerPage() {
                   <td className="px-4 py-3 text-right text-black">{formatRupiah(row.gaji_pokok)}</td>
                   <td className="px-4 py-3 text-right text-black">{formatRupiah(totalTunjangan(row))}</td>
                   <td className="px-4 py-3 text-right">
-                    <button onClick={() => openEdit(row)} className="text-[#6B6B6B] hover:text-madael-red">
-                      <Pencil size={16} />
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => setHitungRow(row)}
+                        className="inline-flex items-center gap-1 text-xs text-madael-red hover:text-madael-dark font-medium"
+                      >
+                        <Calculator size={14} />
+                        Hitung
+                      </button>
+                      <button onClick={() => openEdit(row)} className="text-[#6B6B6B] hover:text-madael-red">
+                        <Pencil size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -370,12 +562,21 @@ export default function PayrollManagerPage() {
       {modalOpen && (
         <EmployeeModal
           clients={clients}
+          linkableEmployees={linkableEmployees}
           form={form}
           setForm={setForm}
           onClose={() => setModalOpen(false)}
           onSubmit={handleSubmit}
           saving={saving}
           saveError={saveError}
+        />
+      )}
+
+      {hitungRow && (
+        <HitungModal
+          row={hitungRow}
+          periode={periode}
+          onClose={() => setHitungRow(null)}
         />
       )}
     </div>
