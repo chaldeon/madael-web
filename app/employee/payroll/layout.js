@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import LoadingState from '@/components/LoadingState';
 
 export default function PayrollLayout({ children }) {
   const router = useRouter();
@@ -19,7 +20,7 @@ export default function PayrollLayout({ children }) {
   if (status === 'loading') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat..." />
       </section>
     );
   }

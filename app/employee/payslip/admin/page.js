@@ -7,6 +7,9 @@ import Link from 'next/link';
 import { X, Plus, Eye, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
+import EmptyState from '@/components/EmptyState';
 
 const PENDAPATAN_FIELDS = [
   { key: 'gaji_pokok', label: 'Gaji Pokok' },
@@ -82,7 +85,7 @@ function TextField({ label, value, onChange, type = 'text' }) {
   );
 }
 
-function PayslipFormModal({ form, setForm, employees, onClose, onSubmit, saving, isEdit }) {
+function PayslipFormModal({ form, setForm, employees, onClose, onSubmit, saving, isEdit, saveError }) {
   const bpjsTkPerusahaan =
     (form.jkk_perusahaan || 0) + (form.jkm_perusahaan || 0) + (form.jht_perusahaan || 0) + (form.jp_perusahaan || 0);
   const totalPendapatan =
@@ -193,6 +196,12 @@ function PayslipFormModal({ form, setForm, employees, onClose, onSubmit, saving,
           </div>
         </div>
 
+        {saveError && (
+          <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 mt-4">
+            <span>{saveError}</span>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mt-6 pt-4 border-t border-[#E0E0E0]">
           <label className="flex items-center gap-2 text-sm text-[#3D3D3D]">
             <input
@@ -227,6 +236,8 @@ export default function PayslipAdminPage() {
   const [payslips, setPayslips] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [actionError, setActionError] = useState(null);
 
   const [filterEmployee, setFilterEmployee] = useState('');
   const [filterPeriode, setFilterPeriode] = useState('');
@@ -235,10 +246,12 @@ export default function PayslipAdminPage() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [{ data: slips }, { data: emps }] = await Promise.all([
+    setLoadError(null);
+    const [slipsRes, empsRes] = await Promise.all([
       supabase
         .from('payslips')
         .select('*, employees ( id, nama )')
@@ -249,8 +262,15 @@ export default function PayslipAdminPage() {
         .eq('status', 'Aktif')
         .order('nama'),
     ]);
-    setPayslips(slips || []);
-    setEmployees(emps || []);
+
+    if (slipsRes.error || empsRes.error) {
+      setLoadError((slipsRes.error || empsRes.error).message || 'Gagal memuat data slip gaji.');
+      setLoading(false);
+      return;
+    }
+
+    setPayslips(slipsRes.data || []);
+    setEmployees(empsRes.data || []);
     setLoading(false);
   }, [supabase]);
 
@@ -289,6 +309,7 @@ export default function PayslipAdminPage() {
 
   const handleSubmit = async (bpjsTkPerusahaan) => {
     setSaving(true);
+    setSaveError(null);
     const payload = { ...form, bpjs_tk_perusahaan: bpjsTkPerusahaan };
     NUMERIC_KEYS.forEach((k) => { payload[k] = Number(payload[k]) || 0; });
     if (!payload.tanggal_pembayaran) payload.tanggal_pembayaran = null;
@@ -301,22 +322,23 @@ export default function PayslipAdminPage() {
       ({ error } = await supabase.from('payslips').insert(payload));
     }
 
-    if (error) {
-      alert('Gagal menyimpan: ' + error.message);
-    } else {
-      setModalOpen(false);
-      loadData();
-    }
     setSaving(false);
+    if (error) {
+      setSaveError(error.message || 'Gagal menyimpan, coba lagi.');
+      return;
+    }
+    setModalOpen(false);
+    loadData();
   };
 
   const togglePublish = async (p) => {
+    setActionError(null);
     const { error } = await supabase
       .from('payslips')
       .update({ is_published: !p.is_published })
       .eq('id', p.id);
     if (error) {
-      alert('Gagal update status: ' + error.message);
+      setActionError(`Gagal update status "${p.employees?.nama || 'slip ini'}": ${error.message}`);
     } else {
       setPayslips((prev) => prev.map((x) => (x.id === p.id ? { ...x, is_published: !p.is_published } : x)));
     }
@@ -333,7 +355,7 @@ export default function PayslipAdminPage() {
   if (status === 'loading') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat..." />
       </section>
     );
   }
@@ -349,6 +371,16 @@ export default function PayslipAdminPage() {
           >
             Kembali ke Dashboard
           </Link>
+        </div>
+      </section>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
+        <div className="w-full max-w-[420px]">
+          <ErrorState message={loadError} onRetry={loadData} />
         </div>
       </section>
     );
@@ -370,6 +402,13 @@ export default function PayslipAdminPage() {
         </button>
       </div>
 
+      {actionError && (
+        <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-3 mb-4">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} className="shrink-0 hover:text-red-900">✕</button>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-3 mb-6">
         <select value={filterEmployee} onChange={(e) => setFilterEmployee(e.target.value)} className={selectClass}>
           <option value="">Semua Karyawan</option>
@@ -387,9 +426,15 @@ export default function PayslipAdminPage() {
 
       <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
         {loading ? (
-          <p className="text-sm text-[#6B6B6B] p-6">Memuat data...</p>
+          <LoadingState label="Memuat data slip gaji..." />
         ) : filtered.length === 0 ? (
-          <p className="text-sm text-[#6B6B6B] p-6">Belum ada slip gaji.</p>
+          <EmptyState
+            message={
+              filterEmployee || filterPeriode
+                ? 'Tidak ada slip gaji yang cocok dengan filter ini.'
+                : 'Belum ada slip gaji. Klik "Tambah Slip Gaji" untuk mulai.'
+            }
+          />
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -445,6 +490,7 @@ export default function PayslipAdminPage() {
           onSubmit={handleSubmit}
           saving={saving}
           isEdit={!!editingId}
+          saveError={saveError}
         />
       )}
     </div>

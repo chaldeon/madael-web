@@ -4,6 +4,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import LoadingState from '@/components/LoadingState';
 
 export default function PayslipLayout({ children }) {
   const pathname = usePathname();
@@ -20,7 +21,7 @@ export default function PayslipLayout({ children }) {
   if (status === 'loading') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat..." />
       </section>
     );
   }

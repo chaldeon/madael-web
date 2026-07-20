@@ -7,6 +7,9 @@ import Link from 'next/link';
 import { Pencil, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
+import EmptyState from '@/components/EmptyState';
 
 const STATUS_STYLES = {
   Draft: 'bg-[#F3F4F6] text-[#4B5563]',
@@ -36,7 +39,7 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function EditCounterModal({ counter, onClose, onSave, saving }) {
+function EditCounterModal({ counter, onClose, onSave, saving, saveError }) {
   const [value, setValue] = useState(counter.last_number);
 
   return (
@@ -59,6 +62,12 @@ function EditCounterModal({ counter, onClose, onSave, saving }) {
             className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
           />
         </label>
+
+        {saveError && (
+          <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 mb-4">
+            <span>{saveError}</span>
+          </div>
+        )}
 
         <div className="flex justify-end gap-3">
           <button
@@ -88,14 +97,17 @@ export default function NomorSuratPage() {
   const [archivedCounters, setArchivedCounters] = useState([]);
   const [recentDocs, setRecentDocs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [showArchive, setShowArchive] = useState(false);
 
   const [editingCounter, setEditingCounter] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [{ data: cnt }, { data: docs }] = await Promise.all([
+    setLoadError(null);
+    const [cntRes, docsRes] = await Promise.all([
       supabase
         .from('document_counters')
         .select('id, kode, nama, last_number')
@@ -107,10 +119,16 @@ export default function NomorSuratPage() {
         .limit(10),
     ]);
 
-    const all = cnt || [];
+    if (cntRes.error || docsRes.error) {
+      setLoadError((cntRes.error || docsRes.error).message || 'Gagal memuat data nomor surat.');
+      setLoading(false);
+      return;
+    }
+
+    const all = cntRes.data || [];
     setActiveCounters(all.filter((c) => ACTIVE_COUNTER_KODE.includes(c.kode)));
     setArchivedCounters(all.filter((c) => !ACTIVE_COUNTER_KODE.includes(c.kode)));
-    setRecentDocs(docs || []);
+    setRecentDocs(docsRes.data || []);
     setLoading(false);
   }, [supabase]);
 
@@ -120,6 +138,7 @@ export default function NomorSuratPage() {
 
   const handleSaveCounter = async (newValue) => {
     setSaving(true);
+    setSaveError(null);
     const { error } = await supabase
       .from('document_counters')
       .update({ last_number: newValue })
@@ -127,7 +146,7 @@ export default function NomorSuratPage() {
     setSaving(false);
 
     if (error) {
-      alert('Gagal update nomor: ' + error.message);
+      setSaveError(error.message || 'Gagal update nomor, coba lagi.');
       return;
     }
     setEditingCounter(null);
@@ -137,7 +156,7 @@ export default function NomorSuratPage() {
   if (status === 'loading') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat..." />
       </section>
     );
   }
@@ -158,6 +177,16 @@ export default function NomorSuratPage() {
     );
   }
 
+  if (loadError) {
+    return (
+      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
+        <div className="w-full max-w-[420px]">
+          <ErrorState message={loadError} onRetry={loadData} />
+        </div>
+      </section>
+    );
+  }
+
   return (
     <div className="max-w-[1100px] mx-auto px-6 py-10">
       <div className="mb-8">
@@ -166,7 +195,7 @@ export default function NomorSuratPage() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-[#6B6B6B]">Memuat data...</p>
+        <LoadingState label="Memuat data nomor surat..." />
       ) : (
         <>
           <div className="mb-3">
@@ -277,7 +306,9 @@ export default function NomorSuratPage() {
                   ))}
                   {recentDocs.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-6 text-center text-[#9A9A9A]">Belum ada dokumen.</td>
+                      <td colSpan={6} className="p-0">
+                        <EmptyState message="Belum ada dokumen yang dibuat." />
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -293,6 +324,7 @@ export default function NomorSuratPage() {
           onClose={() => setEditingCounter(null)}
           onSave={handleSaveCounter}
           saving={saving}
+          saveError={saveError}
         />
       )}
     </div>

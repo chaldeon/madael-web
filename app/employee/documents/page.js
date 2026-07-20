@@ -6,6 +6,9 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { Plus, ChevronDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
+import EmptyState from '@/components/EmptyState';
 
 const JENIS_OPTIONS = [
   { kode: 'PRO', label: 'Proposal' },
@@ -170,12 +173,10 @@ export default function DocumentsListPage() {
         </select>
       </div>
 
-      {error && (
-        <p className="text-sm text-madael-red mb-4">Gagal memuat data: {error}</p>
-      )}
-
       {loading ? (
-        <p className="text-sm text-[#6B6B6B]">Memuat data...</p>
+        <LoadingState label="Memuat data dokumen..." />
+      ) : error ? (
+        <ErrorState message={`Gagal memuat data: ${error}`} onRetry={fetchDocuments} />
       ) : (
         <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
           <table className="w-full text-sm">
@@ -208,7 +209,15 @@ export default function DocumentsListPage() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-[#9A9A9A]">Belum ada dokumen.</td>
+                  <td colSpan={7} className="p-0">
+                    <EmptyState
+                      message={
+                        filterJenis || filterStatus
+                          ? 'Tidak ada dokumen yang cocok dengan filter ini.'
+                          : 'Belum ada dokumen. Klik "Buat Dokumen Baru" untuk mulai.'
+                      }
+                    />
+                  </td>
                 </tr>
               )}
             </tbody>

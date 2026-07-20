@@ -7,6 +7,8 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
 
 const JENIS_LABEL = {
   PRO: 'Proposal',
@@ -400,6 +402,7 @@ export default function EditDocumentPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [canEdit, setCanEdit] = useState(null); // null = belum dicek, true/false setelah resolve
 
   const checkCanEdit = useCallback(async (createdBy) => {
@@ -432,13 +435,20 @@ export default function EditDocumentPage() {
 
   const loadDoc = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
+    setNotFound(false);
     const { data, error } = await supabase
       .from('documents')
       .select('*')
       .eq('id', params.id)
       .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
+      setLoadError(error.message || 'Gagal memuat data dokumen.');
+      setLoading(false);
+      return;
+    }
+    if (!data) {
       setNotFound(true);
       setLoading(false);
       return;
@@ -514,7 +524,15 @@ export default function EditDocumentPage() {
   if (loading) {
     return (
       <div className="max-w-[800px] mx-auto px-6 py-10">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat dokumen..." />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="max-w-[420px] mx-auto px-6 py-10">
+        <ErrorState message={loadError} onRetry={loadDoc} />
       </div>
     );
   }

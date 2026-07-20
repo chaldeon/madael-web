@@ -6,6 +6,8 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Receipt, ChevronRight } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
 
 function formatRupiah(value) {
   return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
@@ -24,30 +26,48 @@ export default function PayslipListPage() {
 
   const [payslips, setPayslips] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
 
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      setLoadError('Sesi login tidak ditemukan. Silakan login ulang.');
+      setLoading(false);
+      return;
+    }
 
-    const { data: emp } = await supabase
+    const { data: emp, error: empError } = await supabase
       .from('employees')
       .select('id')
       .eq('email', user.email)
       .maybeSingle();
+
+    if (empError) {
+      setLoadError(empError.message || 'Gagal memuat data karyawan.');
+      setLoading(false);
+      return;
+    }
 
     if (!emp) {
       setLoading(false);
       return;
     }
 
-    const { data: slips } = await supabase
+    const { data: slips, error: slipsError } = await supabase
       .from('payslips')
       .select('*')
       .eq('employee_id', emp.id)
       .eq('is_published', true)
       .order('periode', { ascending: false });
+
+    if (slipsError) {
+      setLoadError(slipsError.message || 'Gagal memuat slip gaji.');
+      setLoading(false);
+      return;
+    }
 
     setPayslips(slips || []);
     setLoading(false);
@@ -65,7 +85,9 @@ export default function PayslipListPage() {
       <p className="text-sm text-[#6B6B6B] mb-8">Riwayat slip gaji bulanan kamu.</p>
 
       {loading ? (
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat slip gaji..." />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={loadData} />
       ) : payslips.length === 0 ? (
         <div className="bg-white border border-[#E0E0E0] p-10 text-center">
           <Receipt size={28} className="mx-auto mb-3 text-[#C9C9C9]" />

@@ -8,6 +8,9 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { AlertTriangle, MapPin } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
+import EmptyState from '@/components/EmptyState';
 
 function currentMonthValue() {
   const d = new Date();
@@ -78,15 +81,17 @@ export default function RekapDetailPage() {
   const [rows, setRows] = useState([]);
   const [photoUrls, setPhotoUrls] = useState({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     const [year, month] = monthValue.split('-').map(Number);
     const firstDay = `${monthValue}-01`;
     const lastDayNum = new Date(year, month, 0).getDate();
     const lastDay = `${monthValue}-${String(lastDayNum).padStart(2, '0')}`;
 
-    const [{ data: empData }, { data: att }] = await Promise.all([
+    const [empRes, attRes] = await Promise.all([
       supabase.from('employees').select('id, nama, perusahaan').eq('id', employeeId).maybeSingle(),
       supabase
         .from('attendance')
@@ -97,11 +102,17 @@ export default function RekapDetailPage() {
         .order('tanggal', { ascending: false }),
     ]);
 
-    setEmp(empData || null);
-    setRows(att || []);
+    if (empRes.error || attRes.error) {
+      setLoadError((empRes.error || attRes.error).message || 'Gagal memuat data rekap karyawan.');
+      setLoading(false);
+      return;
+    }
+
+    setEmp(empRes.data || null);
+    setRows(attRes.data || []);
 
     const paths = [];
-    (att || []).forEach((r) => {
+    (attRes.data || []).forEach((r) => {
       if (r.foto_clock_in_url) paths.push(r.foto_clock_in_url);
       if (r.foto_clock_out_url) paths.push(r.foto_clock_out_url);
     });
@@ -129,7 +140,7 @@ export default function RekapDetailPage() {
   if (status === 'loading') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat data..." />
       </section>
     );
   }
@@ -145,6 +156,16 @@ export default function RekapDetailPage() {
           >
             Kembali
           </Link>
+        </div>
+      </section>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
+        <div className="w-full max-w-[420px]">
+          <ErrorState message={loadError} onRetry={loadData} />
         </div>
       </section>
     );
@@ -172,7 +193,7 @@ export default function RekapDetailPage() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat log kehadiran..." />
       ) : (
         <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
           <table className="w-full text-sm">
@@ -187,8 +208,8 @@ export default function RekapDetailPage() {
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-6 text-center text-xs text-[#9A9A9A]">
-                    Belum ada data absensi bulan ini.
+                  <td colSpan={4} className="p-0">
+                    <EmptyState message="Belum ada data absensi bulan ini." />
                   </td>
                 </tr>
               ) : (
