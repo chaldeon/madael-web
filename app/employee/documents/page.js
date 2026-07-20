@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase-browser';
 const JENIS_OPTIONS = [
   { kode: 'PRO', label: 'Proposal' },
   { kode: 'QUO', label: 'Quotation' },
+  { kode: 'PROQUO', label: 'Proposal & Quotation' },
   { kode: 'AGR', label: 'Agreement' },
   { kode: 'ADM', label: 'Administrasi' },
   { kode: 'INV', label: 'Invoice' },
@@ -20,6 +21,7 @@ const STATUS_OPTIONS = ['Draft', 'Final', 'Terkirim', 'Ditandatangani'];
 const JENIS_STYLES = {
   PRO: 'bg-[#E8F0FE] text-[#1A56DB]',
   QUO: 'bg-[#EDE9FE] text-[#6D28D9]',
+  PROQUO: 'bg-[#FCE7F3] text-[#BE185D]',
   AGR: 'bg-[#FFEDD5] text-[#C2410C]',
   ADM: 'bg-[#F3F4F6] text-[#4B5563]',
   INV: 'bg-[#DCFCE7] text-[#166534]',

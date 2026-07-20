@@ -24,14 +24,14 @@ export default function CalculatorDevWarning() {
   return (
     <section className="bg-[#FEF3C7] border-b border-[#F5D783] px-10 py-3">
       <div className="max-w-[1100px] mx-auto flex items-center justify-between flex-wrap gap-2">
-        <p className="text-xs sm:text-sm text-[#7A5B00] leading-relaxed">
+        <p className="text-xs sm:text-sm text-[#C1272D] leading-relaxed">
           <span className="font-semibold">{t.label}:</span> {t.message}
         </p>
         <a
           href="https://wa.me/6285121548247?text=Halo%20Madael%20Consult%2C%20saya%20menemukan%20kemungkinan%20kesalahan%20di%20kalkulator."
           target="_blank"
           rel="noopener noreferrer"
-          className="text-xs sm:text-sm font-medium text-[#7A5B00] underline underline-offset-2 hover:text-black transition-colors whitespace-nowrap"
+          className="text-xs sm:text-sm font-medium text-[#C1272D] underline underline-offset-2 hover:text-black transition-colors whitespace-nowrap"
         >
           {t.cta}
         </a>

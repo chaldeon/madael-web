@@ -3,27 +3,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import {
-  Users, Briefcase, BarChart3, Calculator, Clock,
-  Receipt, CalendarDays, Wallet, FileText, ShieldCheck, Lock, Handshake,
-} from 'lucide-react';
+import { Lock } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-
-const ALL_MODULES = [
-  { key: 'employee_list', name: 'Employee List', desc: 'Kelola data dan akses karyawan', href: '/employee/list', built: true, icon: Users },
-  { key: 'job_portal', name: 'Job Portal', desc: 'Kelola lowongan dan kandidat', href: '/employee/job-portal', built: true, icon: Briefcase },
-  { key: 'crm', name: 'CRM', desc: 'Pipeline klien dan BD Madael', href: '/employee/crm', built: true, icon: Handshake },
-  { key: 'statistics', name: 'Statistics', desc: 'Laporan dan statistik perusahaan', href: '/employee/statistics', built: true, icon: BarChart3 },
-  { key: 'kalkulator', name: 'Kalkulator', desc: 'PPh 21, BPJS, dan kalkulator lainnya', href: '/kalkulator-pph21', built: true, icon: Calculator },
-  { key: 'absensi', name: 'Absensi', desc: 'Kelola kehadiran karyawan', href: '/employee/absensi', built: false, icon: Clock },
-  { key: 'payslip', name: 'Payslip', desc: 'Slip gaji karyawan', href: '/employee/payslip', built: true, icon: Receipt },
-  { key: 'payslip_admin', name: 'Kelola Payslip', desc: 'Upload dan kelola slip gaji karyawan', href: '/employee/payslip/admin', built: true, icon: Wallet, superadminOnly: true },
-  { key: 'leave_request', name: 'Leave Request', desc: 'Pengajuan cuti karyawan', href: '/employee/leave-request', built: false, icon: CalendarDays },
-  { key: 'payroll', name: 'Payroll', desc: 'Kelola penggajian', href: '/employee/payroll', built: false, icon: Wallet },
-  { key: 'document_generator', name: 'Documents', desc: 'Generate proposal, quotation, dan agreement', href: '/employee/documents', built: true, icon: FileText },
-  { key: 'document_generator', name: 'Nomor Surat', desc: 'Monitor dan koreksi counter nomor surat', href: '/employee/documents/nomor-surat', built: true, icon: FileText, superadminOnly: true },
-  { key: 'compliance_monitor', name: 'Compliance Monitor', desc: 'Pantau kepatuhan hukum', href: '/employee/compliance-monitor', built: false, icon: ShieldCheck },
-];
+import { MODULE_REGISTRY } from '@/lib/employeeModules';
 
 export default function EmployeeDashboardPage() {
   const router = useRouter();
@@ -135,11 +117,12 @@ export default function EmployeeDashboardPage() {
         <p className="text-sm text-[#6B6B6B] mb-8">Pilih modul yang ingin kamu akses.</p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {ALL_MODULES
+          {MODULE_REGISTRY
             .filter((mod) => !mod.superadminOnly || employee.is_superadmin)
             .map((mod) => {
             const Icon = mod.icon;
-            const active = mod.built && hasAccess(mod.key);
+            const isLive = mod.status === 'live';
+            const active = isLive && hasAccess(mod.key);
             const CardTag = active ? Link : 'div';
             const cardProps = active ? { href: mod.href } : {};
 
@@ -161,7 +144,7 @@ export default function EmployeeDashboardPage() {
                   >
                     <Icon size={18} />
                   </div>
-                  {!mod.built ? (
+                  {!isLive ? (
                     <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-[#E0E0E0] text-[#6B6B6B]">
                       COMING SOON
                     </span>

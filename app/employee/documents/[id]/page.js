@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase-browser';
 const TYPE_LABEL = {
   PRO: 'Proposal',
   QUO: 'Quotation',
+  PROQUO: 'Proposal & Quotation',
   AGR: 'Agreement / PKS',
   ADM: 'Surat Administrasi',
   INV: 'Invoice',
@@ -147,11 +148,101 @@ function AgreementContent({ content }) {
   );
 }
 
-function AdministrasiContent({ content }) {
+function ProposalQuotationContent({ content }) {
+  const phases = content.phases || [];
+  const experts = content.experts || [];
+  const feeDetails = content.fee_details || [];
+  const others = content.others_points || [];
+
   return (
     <>
       <Field label="Perihal">{content.perihal || '-'}</Field>
-      <Field label="Isi Surat">{content.isi_surat || '-'}</Field>
+      <Field label="Description on Provided Services">{content.description_services || '-'}</Field>
+
+      {phases.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-medium text-[#6B6B6B] uppercase tracking-[0.04em] mb-2">Scope of Work</p>
+          <div className="space-y-3">
+            {phases.map((p, idx) => (
+              <div key={idx}>
+                <p className="text-sm font-semibold text-black">{p.title || `Phase ${idx + 1}`}</p>
+                <ul className="list-disc list-inside text-sm text-black">
+                  {(p.points || []).map((pt, i) => <li key={i}>{pt}</li>)}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {experts.length > 0 && (
+        <Field label="Experts">
+          <ul className="list-disc list-inside">
+            {experts.map((e, i) => <li key={i}>{e}</li>)}
+          </ul>
+        </Field>
+      )}
+
+      <Field label="Period of Service">{content.period || '-'}</Field>
+
+      {feeDetails.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-medium text-[#6B6B6B] uppercase tracking-[0.04em] mb-2">Details of Fee</p>
+          <table className="w-full text-sm border border-[#E0E0E0]">
+            <tbody>
+              {feeDetails.map((f, idx) => (
+                <tr key={idx} className="border-b border-[#F0F0F0] last:border-0">
+                  <td className="px-3 py-2 font-medium w-40">{f.phase_label}</td>
+                  <td className="px-3 py-2">{f.amount_note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <Field label="Fee not Included">{content.fee_not_included || '-'}</Field>
+
+      {others.length > 0 && (
+        <Field label="Others">
+          <ul className="list-disc list-inside">
+            {others.map((o, i) => <li key={i}>{o}</li>)}
+          </ul>
+        </Field>
+      )}
+    </>
+  );
+}
+
+function AdministrasiContent({ content }) {
+  const pasal = content.pasal || [];
+  return (
+    <>
+      <Field label="Perihal">{content.perihal || '-'}</Field>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Pihak Pertama">{content.pihak_pertama || '-'}</Field>
+        <Field label="Pihak Kedua">{content.pihak_kedua || '-'}</Field>
+      </div>
+      <Field label="Scope Pekerjaan">{content.scope_pekerjaan || '-'}</Field>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Nilai Kontrak">{formatRupiah(content.nilai_kontrak)}</Field>
+        <Field label="Jangka Waktu">{content.jangka_waktu || '-'}</Field>
+      </div>
+      <Field label="Syarat dan Ketentuan (umum)">{content.syarat_ketentuan || '-'}</Field>
+
+      {pasal.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-medium text-[#6B6B6B] uppercase tracking-[0.04em] mb-2">Pasal-Pasal</p>
+          <div className="space-y-3">
+            {pasal.map((p, idx) => (
+              <div key={idx}>
+                <p className="text-sm font-semibold text-black">Pasal {idx + 1} — {p.judul || '(tanpa judul)'}</p>
+                <p className="text-sm text-black whitespace-pre-line">{p.isi || '-'}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -315,6 +406,7 @@ export default function DocumentDetailPage() {
         <div className="border-t border-[#E0E0E0] pt-6">
           {doc.kode_jenis === 'PRO' && <ProposalContent content={content} />}
           {doc.kode_jenis === 'QUO' && <QuotationContent content={content} />}
+          {doc.kode_jenis === 'PROQUO' && <ProposalQuotationContent content={content} />}
           {doc.kode_jenis === 'AGR' && <AgreementContent content={content} />}
           {doc.kode_jenis === 'ADM' && <AdministrasiContent content={content} />}
         </div>

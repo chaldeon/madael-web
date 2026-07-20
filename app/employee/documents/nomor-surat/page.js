@@ -15,6 +15,14 @@ const STATUS_STYLES = {
   Ditandatangani: 'bg-[#DCFCE7] text-[#166534]',
 };
 
+// Hanya kode ini yang aktif dipakai generate nomor surat sekarang
+const ACTIVE_COUNTER_KODE = ['GLOBAL', 'INV'];
+
+const COUNTER_DESC = {
+  GLOBAL: 'Dipakai untuk Proposal, Quotation, Proposal & Quotation, Agreement, dan Administrasi (satu urutan nomor bersama)',
+  INV: 'Dipakai khusus untuk Invoice (urutan nomor terpisah)',
+};
+
 function StatusBadge({ status }) {
   return (
     <span className={`inline-block px-2.5 py-1 text-[11px] font-medium rounded ${STATUS_STYLES[status] || 'bg-[#F3F4F6] text-[#4B5563]'}`}>
@@ -80,9 +88,11 @@ export default function NomorSuratPage() {
   const [authError, setAuthError] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  const [counters, setCounters] = useState([]);
+  const [activeCounters, setActiveCounters] = useState([]);
+  const [archivedCounters, setArchivedCounters] = useState([]);
   const [recentDocs, setRecentDocs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showArchive, setShowArchive] = useState(false);
 
   const [editingCounter, setEditingCounter] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -124,7 +134,10 @@ export default function NomorSuratPage() {
         .order('created_at', { ascending: false })
         .limit(10),
     ]);
-    setCounters(cnt || []);
+
+    const all = cnt || [];
+    setActiveCounters(all.filter((c) => ACTIVE_COUNTER_KODE.includes(c.kode)));
+    setArchivedCounters(all.filter((c) => !ACTIVE_COUNTER_KODE.includes(c.kode)));
     setRecentDocs(docs || []);
     setLoading(false);
   }, [supabase]);
@@ -189,22 +202,29 @@ export default function NomorSuratPage() {
         <p className="text-sm text-[#6B6B6B]">Memuat data...</p>
       ) : (
         <>
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold text-black">Counter Aktif</h2>
+            <p className="text-xs text-[#6B6B6B] mt-0.5">Nomor surat baru akan diambil dari sini.</p>
+          </div>
           <div className="bg-white border border-[#E0E0E0] mb-10 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[#E0E0E0] text-left text-[#6B6B6B]">
                   <th className="px-4 py-3 font-medium">Kode</th>
-                  <th className="px-4 py-3 font-medium">Jenis Dokumen</th>
+                  <th className="px-4 py-3 font-medium">Dipakai Untuk</th>
                   <th className="px-4 py-3 font-medium">Nomor Terakhir</th>
                   <th className="px-4 py-3 font-medium">Nomor Berikutnya</th>
                   <th className="px-4 py-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
-                {counters.map((c) => (
+                {activeCounters.map((c) => (
                   <tr key={c.id} className="border-b border-[#F0F0F0] last:border-0">
                     <td className="px-4 py-3 font-medium text-black">{c.kode}</td>
-                    <td className="px-4 py-3 text-black">{c.nama}</td>
+                    <td className="px-4 py-3 text-black">
+                      <p>{c.nama}</p>
+                      <p className="text-xs text-[#9A9A9A] mt-0.5">{COUNTER_DESC[c.kode]}</p>
+                    </td>
                     <td className="px-4 py-3 text-black">{String(c.last_number).padStart(3, '0')}</td>
                     <td className="px-4 py-3 text-black">{String(c.last_number + 1).padStart(3, '0')}</td>
                     <td className="px-4 py-3 text-right">
@@ -218,14 +238,50 @@ export default function NomorSuratPage() {
                     </td>
                   </tr>
                 ))}
-                {counters.length === 0 && (
+                {activeCounters.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-[#9A9A9A]">Belum ada data counter.</td>
+                    <td colSpan={5} className="px-4 py-6 text-center text-[#9A9A9A]">
+                      Counter GLOBAL/INV belum ada — jalankan SQL setup dulu.
+                    </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
+
+          {archivedCounters.length > 0 && (
+            <div className="mb-10">
+              <button
+                onClick={() => setShowArchive((s) => !s)}
+                className="text-xs font-medium text-[#6B6B6B] hover:text-madael-red transition-colors mb-3"
+              >
+                {showArchive ? '− Sembunyikan' : '+ Tampilkan'} Arsip Counter Lama ({archivedCounters.length})
+              </button>
+
+              {showArchive && (
+                <div className="bg-white border border-[#E0E0E0] overflow-x-auto opacity-70">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[#E0E0E0] text-left text-[#6B6B6B]">
+                        <th className="px-4 py-3 font-medium">Kode</th>
+                        <th className="px-4 py-3 font-medium">Nama</th>
+                        <th className="px-4 py-3 font-medium">Nomor Terakhir (tidak dipakai lagi)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {archivedCounters.map((c) => (
+                        <tr key={c.id} className="border-b border-[#F0F0F0] last:border-0">
+                          <td className="px-4 py-3 font-medium text-black">{c.kode}</td>
+                          <td className="px-4 py-3 text-black">{c.nama}</td>
+                          <td className="px-4 py-3 text-black">{String(c.last_number).padStart(3, '0')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <h2 className="text-sm font-semibold text-black mb-3">10 Dokumen Terbaru</h2>
