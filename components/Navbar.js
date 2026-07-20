@@ -24,7 +24,7 @@ export default function Navbar() {
   const contactHref = isAbout ? '/about#contact' : '/#contact';
 
   return (
-    <nav className="flex items-center justify-between px-10 h-[68px] border-b border-[#E0E0E0] bg-white sticky top-0 z-[999]">
+    <nav className="print:hidden flex items-center justify-between px-10 h-[68px] border-b border-[#E0E0E0] bg-white sticky top-0 z-[999]">
       <Link href="/" className="flex items-center gap-2.5 no-underline">
         <Image
           src="/logos/madael_logo_transparent.png"
