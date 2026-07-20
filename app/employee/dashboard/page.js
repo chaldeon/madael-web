@@ -5,13 +5,14 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Users, Briefcase, BarChart3, Calculator, Clock,
-  Receipt, CalendarDays, Wallet, FileText, ShieldCheck, Lock,
+  Receipt, CalendarDays, Wallet, FileText, ShieldCheck, Lock, Handshake,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 
 const ALL_MODULES = [
   { key: 'employee_list', name: 'Employee List', desc: 'Kelola data dan akses karyawan', href: '/employee/list', built: true, icon: Users },
   { key: 'job_portal', name: 'Job Portal', desc: 'Kelola lowongan dan kandidat', href: '/employee/job-portal', built: true, icon: Briefcase },
+  { key: 'crm', name: 'CRM', desc: 'Pipeline klien dan BD Madael', href: '/employee/crm', built: true, icon: Handshake },
   { key: 'statistics', name: 'Statistics', desc: 'Laporan dan statistik perusahaan', href: '/employee/statistics', built: true, icon: BarChart3 },
   { key: 'kalkulator', name: 'Kalkulator', desc: 'PPh 21, BPJS, dan kalkulator lainnya', href: '/kalkulator-pph21', built: true, icon: Calculator },
   { key: 'absensi', name: 'Absensi', desc: 'Kelola kehadiran karyawan', href: '/employee/absensi', built: false, icon: Clock },
@@ -19,7 +20,8 @@ const ALL_MODULES = [
   { key: 'payslip_admin', name: 'Kelola Payslip', desc: 'Upload dan kelola slip gaji karyawan', href: '/employee/payslip/admin', built: true, icon: Wallet, superadminOnly: true },
   { key: 'leave_request', name: 'Leave Request', desc: 'Pengajuan cuti karyawan', href: '/employee/leave-request', built: false, icon: CalendarDays },
   { key: 'payroll', name: 'Payroll', desc: 'Kelola penggajian', href: '/employee/payroll', built: false, icon: Wallet },
-  { key: 'document_generator', name: 'Document Generator', desc: 'Buat dokumen HR otomatis', href: '/employee/document-generator', built: false, icon: FileText },
+  { key: 'document_generator', name: 'Documents', desc: 'Generate proposal, quotation, dan agreement', href: '/employee/documents', built: true, icon: FileText },
+  { key: 'document_generator', name: 'Nomor Surat', desc: 'Monitor dan koreksi counter nomor surat', href: '/employee/documents/nomor-surat', built: true, icon: FileText, superadminOnly: true },
   { key: 'compliance_monitor', name: 'Compliance Monitor', desc: 'Pantau kepatuhan hukum', href: '/employee/compliance-monitor', built: false, icon: ShieldCheck },
 ];
 
@@ -143,7 +145,7 @@ export default function EmployeeDashboardPage() {
 
             return (
               <CardTag
-                key={mod.key}
+                key={mod.href}
                 {...cardProps}
                 className={`block border p-5 transition-colors ${
                   active

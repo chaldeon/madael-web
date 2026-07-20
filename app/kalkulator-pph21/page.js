@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useLanguage } from '@/context/LanguageContext';
+import CalculatorDevWarning from '@/components/CalculatorDevWarning';
 
 // ============ DATA PTKP & KATEGORI TER ============
 const PTKP_DATA = {
@@ -335,6 +336,8 @@ export default function KalkulatorPPh21() {
           <p className="text-[#AAA] text-sm max-w-[480px]">{t.subtitle}</p>
         </div>
       </section>
+
+      <CalculatorDevWarning />
 
       <section className="px-10 pt-10 bg-white">
         <div className="max-w-[1100px] mx-auto flex gap-2">

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useLanguage } from '@/context/LanguageContext';
+import CalculatorDevWarning from '@/components/CalculatorDevWarning';
 
 function formatRupiah(num) {
   return new Intl.NumberFormat('id-ID', {
@@ -240,6 +241,8 @@ export default function KalkulatorPKWT() {
           <p className="text-[#AAA] text-sm max-w-[480px]">{t.subtitle}</p>
         </div>
       </section>
+
+      <CalculatorDevWarning />
 
       <section className="px-10 py-10 bg-white">
         <div className="max-w-[1100px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-12">
