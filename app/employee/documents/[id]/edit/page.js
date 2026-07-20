@@ -400,6 +400,26 @@ export default function EditDocumentPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const [canEdit, setCanEdit] = useState(null); // null = belum dicek, true/false setelah resolve
+
+  const checkCanEdit = useCallback(async (createdBy) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setCanEdit(false); return; }
+    const { data: emp } = await supabase
+      .from('employees')
+      .select('id, is_superadmin')
+      .eq('email', user.email)
+      .maybeSingle();
+    if (!emp) { setCanEdit(false); return; }
+    if (emp.is_superadmin || emp.id === createdBy) { setCanEdit(true); return; }
+    const { data: mod } = await supabase
+      .from('employee_modules')
+      .select('module_name')
+      .eq('employee_id', emp.id)
+      .eq('module_name', 'document_manage')
+      .maybeSingle();
+    setCanEdit(!!mod);
+  }, [supabase]);
 
   const loadClients = useCallback(async () => {
     const { data } = await supabase
@@ -431,7 +451,8 @@ export default function EditDocumentPage() {
     setCatatan(data.catatan || '');
     setContent(normalizeContentForEdit(data.kode_jenis, data.content || {}));
     setLoading(false);
-  }, [supabase, params.id]);
+    checkCanEdit(data.created_by);
+  }, [supabase, params.id, checkCanEdit]);
 
   useEffect(() => {
     loadClients();
@@ -503,6 +524,18 @@ export default function EditDocumentPage() {
       <div className="max-w-[700px] mx-auto px-6 py-10">
         <p className="text-sm text-black mb-6">Dokumen tidak ditemukan.</p>
         <Link href="/employee/documents" className="inline-flex items-center gap-1.5 text-sm text-madael-red hover:underline">
+          <ArrowLeft size={15} />
+          Kembali ke Dokumen
+        </Link>
+      </div>
+    );
+  }
+
+  if (canEdit === false) {
+    return (
+      <div className="max-w-[700px] mx-auto px-6 py-10">
+        <p className="text-sm text-black mb-6">Kamu tidak punya akses untuk mengedit dokumen ini — hanya pembuat dokumen atau yang punya izin "Kelola Dokumen" yang bisa.</p>
+        <Link href={`/employee/documents/${params.id}`} className="inline-flex items-center gap-1.5 text-sm text-madael-red hover:underline">
           <ArrowLeft size={15} />
           Kembali ke Dokumen
         </Link>

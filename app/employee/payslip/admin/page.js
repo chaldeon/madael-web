@@ -3,10 +3,10 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { X, Plus, Eye, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { useModuleAccess } from '@/lib/useModuleAccess';
 
 const PENDAPATAN_FIELDS = [
   { key: 'gaji_pokok', label: 'Gaji Pokok' },
@@ -221,12 +221,8 @@ function PayslipFormModal({ form, setForm, employees, onClose, onSubmit, saving,
 }
 
 export default function PayslipAdminPage() {
-  const router = useRouter();
   const supabase = createClient();
-
-  const [authorized, setAuthorized] = useState(false);
-  const [authError, setAuthError] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const { status } = useModuleAccess('payslip_admin');
 
   const [payslips, setPayslips] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -239,30 +235,6 @@ export default function PayslipAdminPage() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-
-  const checkAccess = useCallback(async () => {
-    setAuthLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      router.push('/employee/login');
-      return;
-    }
-    const { data: emp } = await supabase
-      .from('employees')
-      .select('is_superadmin, status')
-      .eq('email', user.email)
-      .maybeSingle();
-
-    if (!emp || !emp.is_superadmin || emp.status !== 'Aktif') {
-      setAuthError('Halaman ini khusus untuk superadmin.');
-      setAuthLoading(false);
-      return;
-    }
-    setAuthorized(true);
-    setAuthLoading(false);
-  }, [supabase, router]);
-
-  useEffect(() => { checkAccess(); }, [checkAccess]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -283,8 +255,8 @@ export default function PayslipAdminPage() {
   }, [supabase]);
 
   useEffect(() => {
-    if (authorized) loadData();
-  }, [authorized, loadData]);
+    if (status === 'allowed') loadData();
+  }, [status, loadData]);
 
   const filtered = useMemo(() => {
     return payslips.filter((p) => {
@@ -358,7 +330,7 @@ export default function PayslipAdminPage() {
   const selectClass =
     'border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
 
-  if (authLoading) {
+  if (status === 'loading') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
         <p className="text-sm text-[#6B6B6B]">Memuat...</p>
@@ -366,11 +338,11 @@ export default function PayslipAdminPage() {
     );
   }
 
-  if (authError) {
+  if (status === 'denied') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
         <div className="w-full max-w-[420px] border-t-4 border-madael-red bg-white p-8 text-center">
-          <p className="text-sm text-black mb-6">{authError}</p>
+          <p className="text-sm text-black mb-6">Kamu tidak punya akses ke halaman Kelola Slip Gaji.</p>
           <Link
             href="/employee/dashboard"
             className="inline-block bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"

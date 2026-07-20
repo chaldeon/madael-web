@@ -68,6 +68,7 @@ export default function EmployeeDashboardPage() {
   };
 
   const hasAccess = (key) => employee?.is_superadmin || moduleKeys.includes(key);
+  const hasAnyAccess = (mod) => hasAccess(mod.key) || (mod.altKeys || []).some(hasAccess);
 
   if (loading) {
     return (
@@ -118,11 +119,17 @@ export default function EmployeeDashboardPage() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {MODULE_REGISTRY
-            .filter((mod) => !mod.superadminOnly || employee.is_superadmin)
+            .filter((mod) => {
+              const isLive = mod.status === 'live';
+              const active = isLive && hasAnyAccess(mod);
+              // Superadmin tetap lihat semua (termasuk locked/coming soon) sebagai roadmap.
+              // Employee biasa cuma lihat modul yang benar-benar bisa dia akses.
+              return employee?.is_superadmin || active;
+            })
             .map((mod) => {
             const Icon = mod.icon;
             const isLive = mod.status === 'live';
-            const active = isLive && hasAccess(mod.key);
+            const active = isLive && hasAnyAccess(mod);
             const CardTag = active ? Link : 'div';
             const cardProps = active ? { href: mod.href } : {};
 

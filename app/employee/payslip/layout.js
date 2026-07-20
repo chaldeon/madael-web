@@ -9,7 +9,7 @@ export default function PayslipLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
-  const { status, employee } = useModuleAccess('payslip');
+  const { status, hasModule } = useModuleAccess(['payslip', 'payslip_admin']);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -54,16 +54,18 @@ export default function PayslipLayout({ children }) {
           <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
             ← Dashboard
           </Link>
-          {employee?.is_superadmin && (
-            <div className="flex items-center gap-6">
+          <div className="flex items-center gap-6">
+            {hasModule('payslip') && (
               <Link href="/employee/payslip" className={tabClass(!isAdmin)}>
                 Slip Gaji Saya
               </Link>
+            )}
+            {hasModule('payslip_admin') && (
               <Link href="/employee/payslip/admin" className={tabClass(isAdmin)}>
                 Kelola Slip Gaji
               </Link>
-            </div>
-          )}
+            )}
+          </div>
         </div>
         <button
           onClick={handleLogout}

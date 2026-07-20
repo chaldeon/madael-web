@@ -118,12 +118,26 @@ export default function Navbar() {
           </Link>
         </li>
         <li className="w-0.5 h-5 bg-[#E0E0E0] mr-1" aria-hidden="true" />
-        <li>
+        <li className="flex border border-[#E0E0E0]">
           <button
-            onClick={toggleLang}
-            className="bg-transparent border border-[#E0E0E0] text-[#6B6B6B] text-xs font-semibold tracking-[0.04em] px-3 py-1.5 cursor-pointer hover:border-madael-red hover:text-madael-red transition-all"
+            onClick={() => lang !== 'id' && toggleLang()}
+            className={`px-3 py-1.5 text-xs font-semibold tracking-[0.04em] cursor-pointer transition-colors ${
+              lang === 'id'
+                ? 'bg-madael-red text-white'
+                : 'bg-transparent text-[#6B6B6B] hover:text-black'
+            }`}
           >
-            {lang === 'id' ? 'EN' : 'ID'}
+            ID
+          </button>
+          <button
+            onClick={() => lang !== 'en' && toggleLang()}
+            className={`px-3 py-1.5 text-xs font-semibold tracking-[0.04em] cursor-pointer transition-colors border-l border-[#E0E0E0] ${
+              lang === 'en'
+                ? 'bg-madael-red text-white'
+                : 'bg-transparent text-[#6B6B6B] hover:text-black'
+            }`}
+          >
+            EN
           </button>
         </li>
         <li className="w-0.5 h-5 bg-[#E0E0E0] mr-1" aria-hidden="true" />

@@ -1,14 +1,15 @@
 'use client';
 
+import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 
 export default function DocumentsLayout({ children }) {
+  const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
-  const { status } = useModuleAccess('document_generator');
+  const { status, hasModule } = useModuleAccess(['document_generator', 'nomor_surat']);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -40,12 +41,32 @@ export default function DocumentsLayout({ children }) {
     );
   }
 
+  const isNomorSurat = pathname.startsWith('/employee/documents/nomor-surat');
+  const tabClass = (active) =>
+    `text-sm tracking-[0.02em] transition-colors ${
+      active ? 'text-black font-medium' : 'text-[#6B6B6B] hover:text-black'
+    }`;
+
   return (
     <section className="min-h-screen bg-[#F4F4F4]">
       <div className="print:hidden flex items-center justify-between px-10 h-[68px] border-b border-[#E0E0E0] bg-white sticky top-0 z-[999]">
-        <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
-          ← Dashboard
-        </Link>
+        <div className="flex items-center gap-8">
+          <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
+            ← Dashboard
+          </Link>
+          <div className="flex items-center gap-6">
+            {hasModule('document_generator') && (
+              <Link href="/employee/documents" className={tabClass(!isNomorSurat)}>
+                Documents
+              </Link>
+            )}
+            {hasModule('nomor_surat') && (
+              <Link href="/employee/documents/nomor-surat" className={tabClass(isNomorSurat)}>
+                Nomor Surat
+              </Link>
+            )}
+          </div>
+        </div>
         <button
           onClick={handleLogout}
           className="bg-madael-red text-white px-5 py-2 text-[13px] font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors cursor-pointer border-0"

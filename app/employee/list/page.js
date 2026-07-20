@@ -132,6 +132,8 @@ export default function EmployeeListPage() {
         .eq('module_name', moduleKey);
       if (!error) {
         setAccessModules((prev) => prev.filter((m) => m !== moduleKey));
+      } else {
+        alert('Gagal menghapus akses modul: ' + error.message);
       }
     } else {
       const { error } = await supabase
@@ -139,6 +141,8 @@ export default function EmployeeListPage() {
         .insert([{ employee_id: accessEmployee.id, module_name: moduleKey }]);
       if (!error) {
         setAccessModules((prev) => [...prev, moduleKey]);
+      } else {
+        alert('Gagal menambah akses modul: ' + error.message);
       }
     }
     setAccessSavingKey(null);

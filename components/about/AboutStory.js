@@ -28,6 +28,7 @@ const journeyItems = [
   },
   {
     year: '2024 — Sekarang',
+    yearEn: '2024 — Present',
     id: 'Terus bertumbuh melayani klien lokal dan multinasional di berbagai sektor industri di seluruh Indonesia.',
     en: 'Continuing to grow, serving local and multinational clients across various industries throughout Indonesia.',
     dark: true,
@@ -66,7 +67,7 @@ export default function AboutStory() {
                       item.dark ? 'text-black' : 'text-madael-red'
                     }`}
                   >
-                    {item.year}
+                    {lang === 'en' && item.yearEn ? item.yearEn : item.year}
                   </div>
                   <div className="text-sm text-[#3D3D3D] leading-[1.65]">
                     {lang === 'id' ? item.id : item.en}
