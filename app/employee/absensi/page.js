@@ -21,6 +21,15 @@ function todayStr() {
   return `${y}-${m}-${day}`;
 }
 
+function yesterdayStr() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function timeStr(date) {
   return date.toTimeString().slice(0, 8); // HH:MM:SS, dibandingkan sebagai string vs kolom time
 }
@@ -83,6 +92,7 @@ export default function AbsensiPage() {
   const [schedule, setSchedule] = useState(null);
   const [todayRow, setTodayRow] = useState(null);
   const [history, setHistory] = useState([]);
+  const [forgotClockOut, setForgotClockOut] = useState(null); // record kemarin kalau clock in ada tapi clock out kosong
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [acting, setActing] = useState(false);
@@ -100,7 +110,7 @@ export default function AbsensiPage() {
     setLoading(true);
     setLoadError(null);
 
-    const [schedRes, todayRes, histRes] = await Promise.all([
+    const [schedRes, todayRes, histRes, yesterdayRes] = await Promise.all([
       supabase.from('work_schedule').select('*').eq('employee_id', employee.id).maybeSingle(),
       supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', todayStr()).maybeSingle(),
       supabase
@@ -109,9 +119,10 @@ export default function AbsensiPage() {
         .eq('employee_id', employee.id)
         .order('tanggal', { ascending: false })
         .limit(7),
+      supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', yesterdayStr()).maybeSingle(),
     ]);
 
-    const firstError = schedRes.error || todayRes.error || histRes.error;
+    const firstError = schedRes.error || todayRes.error || histRes.error || yesterdayRes.error;
     if (firstError) {
       setLoadError(firstError.message || 'Gagal memuat data absensi. Periksa koneksi internet kamu.');
       setLoading(false);
@@ -121,6 +132,8 @@ export default function AbsensiPage() {
     setSchedule(schedRes.data || null);
     setTodayRow(todayRes.data || null);
     setHistory(histRes.data || []);
+    const yRow = yesterdayRes.data || null;
+    setForgotClockOut(yRow && yRow.clock_in && !yRow.clock_out ? yRow : null);
     setLoading(false);
   }, [supabase, employee]);
 
@@ -275,6 +288,13 @@ export default function AbsensiPage() {
       <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">Absensi</h1>
       <p className="text-sm text-[#6B6B6B] mb-8">Halo, {employee?.nama}. {formatTanggal(todayStr())}.</p>
 
+      {forgotClockOut && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mb-6">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          Kamu clock in pada {formatTanggal(forgotClockOut.tanggal)} pukul {formatWaktu(forgotClockOut.clock_in)} tapi belum clock out.
+          Kalau ini kelupaan, hubungi admin untuk koreksi manual.
+        </div>
+      )}
       {!schedule && (
         <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mb-6">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />

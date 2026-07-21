@@ -80,7 +80,9 @@ export async function POST(request) {
     const bulanRomawi = ROMAWI_BULAN[now.getMonth()];
     const tahun = now.getFullYear();
 
-    const nomorSurat = `${nomorPadded}/${config.label}/MPSI/${bulanRomawi}-${tahun}`;
+    const nomorSurat = kode_jenis === 'INV'
+      ? `${config.label}/${tahun}/${nomorPadded}`
+      : `${nomorPadded}/${config.label}/MPSI/${bulanRomawi}-${tahun}`;
 
     return NextResponse.json(
       { success: true, nomor_surat: nomorSurat, kode_jenis, nomor: newNumber },

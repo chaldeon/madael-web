@@ -33,6 +33,40 @@ function countScheduledWorkdays(year, month, hariKerja, cutoffDate) {
   return count;
 }
 
+// Bikin CSV manual dari data yang sudah ditampilkan di tabel (tanpa library
+// tambahan). BOM di depan supaya Excel buka karakter non-ASCII dengan benar.
+function toCsvValue(value) {
+  const str = String(value ?? '');
+  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+  return str;
+}
+
+function downloadRekapCsv(rows, monthValue) {
+  const header = ['Nama', 'Perusahaan', 'Total Hadir', 'Total Telat', 'Tidak Hadir'];
+  const lines = [header.map(toCsvValue).join(',')];
+
+  rows.forEach(({ emp, totalHadir, totalTelat, totalTidakHadir }) => {
+    lines.push([
+      emp.nama,
+      emp.perusahaan || '',
+      totalHadir,
+      totalTelat,
+      totalTidakHadir === null ? '' : totalTidakHadir,
+    ].map(toCsvValue).join(','));
+  });
+
+  const csvContent = '\uFEFF' + lines.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `rekap-absensi-${monthValue}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export default function RekapAbsensiPage() {
   const supabase = createClient();
   const { status, employee } = useModuleAccess('absensi');
@@ -153,14 +187,9 @@ export default function RekapAbsensiPage() {
 
   return (
     <div className="max-w-[900px] mx-auto px-6 py-10">
-      <div className="flex items-end justify-between mb-8 flex-wrap gap-4">
-        <div>
-          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Rekap Bulanan</h1>
-          <p className="text-sm text-[#6B6B6B] mt-1">Rekap kehadiran per employee per bulan.</p>
-        </div>
-        <Link href="/employee/absensi" className="text-sm text-[#6B6B6B] hover:text-madael-red">
-          ← Absensi
-        </Link>
+      <div className="mb-8">
+        <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Rekap Bulanan</h1>
+        <p className="text-sm text-[#6B6B6B] mt-1">Rekap kehadiran per employee per bulan.</p>
       </div>
 
       <div className="flex flex-wrap gap-3 mb-6">
@@ -180,6 +209,13 @@ export default function RekapAbsensiPage() {
             <option key={emp.id} value={emp.id}>{emp.nama}</option>
           ))}
         </select>
+        <button
+          onClick={() => downloadRekapCsv(rows, monthValue)}
+          disabled={loading || rows.length === 0}
+          className="bg-madael-red text-white px-5 py-2 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+        >
+          Export ke CSV
+        </button>
       </div>
 
       <div className="flex items-start gap-2 bg-[#F4F4F4] border border-[#E0E0E0] text-[#6B6B6B] text-xs px-4 py-3 mb-6">

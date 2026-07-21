@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { DEFAULT_MODULE_ACCESS } from '@/lib/employeeModules';
 
 export async function POST(request) {
   try {
@@ -88,6 +89,22 @@ export async function POST(request) {
         { error: 'Gagal menyimpan data employee: ' + empError.message },
         { status: 500 }
       );
+    }
+
+    // Grant akses default (Kalkulator, Absensi, Payslip, Leave Request) untuk
+    // employee non-superadmin. Superadmin sudah otomatis punya akses ke semua
+    // modul jadi tidak perlu row di employee_modules.
+    // Kegagalan di sini tidak fatal — employee tetap berhasil dibuat, superadmin
+    // tinggal assign manual lewat "Kelola Akses" kalau ada yang gagal.
+    if (!empRow.is_superadmin) {
+      const defaultRows = DEFAULT_MODULE_ACCESS.map((module_name) => ({
+        employee_id: empRow.id,
+        module_name,
+      }));
+      const { error: accessError } = await admin.from('employee_modules').insert(defaultRows);
+      if (accessError) {
+        console.error('Gagal insert akses default:', accessError.message);
+      }
     }
 
     return NextResponse.json(
