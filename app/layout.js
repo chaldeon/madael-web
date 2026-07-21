@@ -15,9 +15,29 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "Madael Consult — HR & Legal Consulting Indonesia",
+  metadataBase: new URL('https://madael.id'),
+  title: {
+    default: "Madael Consult — HR & Legal Consulting Indonesia",
+    template: "%s | Madael Consult",
+  },
   description:
     "Madael Consult membantu perusahaan lokal dan asing mengelola SDM, kepatuhan hukum, dan operasional HR secara efektif di Indonesia.",
+  openGraph: {
+    type: "website",
+    locale: "id_ID",
+    siteName: "Madael Consult",
+    title: "Madael Consult — HR & Legal Consulting Indonesia",
+    description:
+      "Madael Consult membantu perusahaan lokal dan asing mengelola SDM, kepatuhan hukum, dan operasional HR secara efektif di Indonesia.",
+    images: [{ url: "/logos/madael_logo.jpg", width: 200, height: 170, alt: "Madael Consult" }],
+  },
+  twitter: {
+    card: "summary",
+    title: "Madael Consult — HR & Legal Consulting Indonesia",
+    description:
+      "Madael Consult membantu perusahaan lokal dan asing mengelola SDM, kepatuhan hukum, dan operasional HR secara efektif di Indonesia.",
+    images: ["/logos/madael_logo.jpg"],
+  },
 };
 
 export default function RootLayout({ children }) {
