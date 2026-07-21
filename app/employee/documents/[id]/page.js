@@ -8,6 +8,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { ArrowLeft, Printer, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
 
 const TYPE_LABEL = {
   PRO: 'Proposal',
@@ -257,6 +259,7 @@ export default function DocumentDetailPage() {
   const [error, setError] = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [canManage, setCanManage] = useState(false);
+  const [statusError, setStatusError] = useState(null);
 
   const fetchDoc = useCallback(async () => {
     setLoading(true);
@@ -305,10 +308,11 @@ export default function DocumentDetailPage() {
 
   const handleStatusChange = async (newStatus) => {
     setUpdatingStatus(true);
+    setStatusError(null);
     const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id);
     setUpdatingStatus(false);
     if (error) {
-      alert('Gagal update status: ' + error.message);
+      setStatusError(error.message || 'Gagal update status, coba lagi.');
       return;
     }
     setDoc((d) => ({ ...d, status: newStatus }));
@@ -319,19 +323,21 @@ export default function DocumentDetailPage() {
   if (loading) {
     return (
       <div className="max-w-[800px] mx-auto px-6 py-10">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat dokumen..." />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="max-w-[700px] mx-auto px-6 py-10">
-        <p className="text-sm text-black mb-6">{error}</p>
-        <Link href="/employee/documents" className="inline-flex items-center gap-1.5 text-sm text-madael-red hover:underline">
-          <ArrowLeft size={15} />
-          Kembali ke Dokumen
-        </Link>
+      <div className="max-w-[420px] mx-auto px-6 py-10">
+        <ErrorState message={error} onRetry={fetchDoc} />
+        <div className="text-center mt-4">
+          <Link href="/employee/documents" className="inline-flex items-center gap-1.5 text-sm text-madael-red hover:underline">
+            <ArrowLeft size={15} />
+            Kembali ke Dokumen
+          </Link>
+        </div>
       </div>
     );
   }
@@ -340,6 +346,13 @@ export default function DocumentDetailPage() {
 
   return (
     <div className="max-w-[800px] mx-auto px-6 py-10">
+      {statusError && (
+        <div className="print:hidden flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-3 mb-4">
+          <span>{statusError}</span>
+          <button onClick={() => setStatusError(null)} className="shrink-0 hover:text-red-900">✕</button>
+        </div>
+      )}
+
       <div className="print:hidden flex items-center justify-between flex-wrap gap-4 mb-6">
         <Link href="/employee/documents" className="inline-flex items-center gap-1.5 text-sm text-[#6B6B6B] hover:text-madael-red transition-colors">
           <ArrowLeft size={15} />

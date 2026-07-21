@@ -7,6 +7,9 @@ import Link from 'next/link';
 import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
+import EmptyState from '@/components/EmptyState';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -81,19 +84,23 @@ export default function AbsensiPage() {
   const [todayRow, setTodayRow] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [acting, setActing] = useState(false);
   const [geoError, setGeoError] = useState(null);
+  const [lastMode, setLastMode] = useState(null); // untuk tombol retry saat gagal simpan
 
   const [cameraMode, setCameraMode] = useState(null); // 'in' | 'out' | null
   const [cameraError, setCameraError] = useState(null);
   const [cameraStream, setCameraStream] = useState(null);
   const videoRef = useRef(null);
+  
 
   const loadData = useCallback(async () => {
     if (!employee) return;
     setLoading(true);
+    setLoadError(null);
 
-    const [{ data: sched }, { data: today }, { data: hist }] = await Promise.all([
+    const [schedRes, todayRes, histRes] = await Promise.all([
       supabase.from('work_schedule').select('*').eq('employee_id', employee.id).maybeSingle(),
       supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', todayStr()).maybeSingle(),
       supabase
@@ -104,9 +111,16 @@ export default function AbsensiPage() {
         .limit(7),
     ]);
 
-    setSchedule(sched || null);
-    setTodayRow(today || null);
-    setHistory(hist || []);
+    const firstError = schedRes.error || todayRes.error || histRes.error;
+    if (firstError) {
+      setLoadError(firstError.message || 'Gagal memuat data absensi. Periksa koneksi internet kamu.');
+      setLoading(false);
+      return;
+    }
+
+    setSchedule(schedRes.data || null);
+    setTodayRow(todayRes.data || null);
+    setHistory(histRes.data || []);
     setLoading(false);
   }, [supabase, employee]);
 
@@ -117,6 +131,7 @@ export default function AbsensiPage() {
   const openCamera = async (mode) => {
     setGeoError(null);
     setCameraError(null);
+    setLastMode(mode);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user' },
@@ -222,7 +237,7 @@ export default function AbsensiPage() {
   if (status === 'loading' || loading) {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat data absensi..." />
       </section>
     );
   }
@@ -238,6 +253,16 @@ export default function AbsensiPage() {
           >
             Kembali
           </Link>
+        </div>
+      </section>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
+        <div className="w-full max-w-[420px]">
+          <ErrorState message={loadError} onRetry={loadData} />
         </div>
       </section>
     );
@@ -263,9 +288,19 @@ export default function AbsensiPage() {
         </div>
       )}
       {geoError && (
-        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-3 mb-6">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          {geoError}
+        <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-3 mb-6">
+          <span className="flex items-start gap-2">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            {geoError}
+          </span>
+          {lastMode && (
+            <button
+              onClick={() => openCamera(lastMode)}
+              className="shrink-0 underline font-medium hover:text-red-900"
+            >
+              Coba Lagi
+            </button>
+          )}
         </div>
       )}
       {cameraError && (
@@ -339,8 +374,8 @@ export default function AbsensiPage() {
           <tbody>
             {history.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-xs text-[#9A9A9A]">
-                  Belum ada riwayat absensi.
+                <td colSpan={4} className="p-0">
+                  <EmptyState message="Belum ada data absensi bulan ini." />
                 </td>
               </tr>
             ) : (

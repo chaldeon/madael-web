@@ -5,6 +5,9 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { X, Plus, Pencil, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
+import EmptyState from '@/components/EmptyState';
 
 const STATUS_OPTIONS = ['PHL', 'Tetap'];
 
@@ -89,7 +92,7 @@ function SelectField({ label, value, onChange, options }) {
   );
 }
 
-function EmployeeModal({ clients, form, setForm, onClose, onSubmit, saving }) {
+function EmployeeModal({ clients, form, setForm, onClose, onSubmit, saving, saveError }) {
   const set = (key) => (val) => setForm((f) => ({ ...f, [key]: val }));
 
   const updatePair = (idx, field, val) => {
@@ -162,6 +165,14 @@ function EmployeeModal({ clients, form, setForm, onClose, onSubmit, saving }) {
           </div>
         </div>
 
+        {saveError && (
+          <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 mb-4">
+            <span>{saveError}</span>
+            <button onClick={onSubmit} className="shrink-0 underline font-medium hover:text-red-900">
+              Coba Lagi
+            </button>
+          </div>
+        )}
         <div className="flex justify-end gap-3">
           <button onClick={onClose} className="px-5 py-2.5 text-sm text-[#6B6B6B] hover:text-black transition-colors">
             Batal
@@ -185,23 +196,33 @@ export default function PayrollManagerPage() {
   const [clients, setClients] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [filterClient, setFilterClient] = useState('');
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [{ data: cl }, { data: emp }] = await Promise.all([
+    setLoadError(null);
+    const [clRes, empRes] = await Promise.all([
       supabase.from('payroll_clients').select('id, nama_klien').order('nama_klien', { ascending: true }),
       supabase
         .from('employees_master')
         .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, created_at')
         .order('created_at', { ascending: false }),
     ]);
-    setClients(cl || []);
-    setEmployees(emp || []);
+
+    if (clRes.error || empRes.error) {
+      setLoadError((clRes.error || empRes.error).message || 'Gagal memuat data payroll.');
+      setLoading(false);
+      return;
+    }
+
+    setClients(clRes.data || []);
+    setEmployees(empRes.data || []);
     setLoading(false);
   }, [supabase]);
 
@@ -236,6 +257,7 @@ export default function PayrollManagerPage() {
   const handleSubmit = async () => {
     if (!form.nama.trim()) return;
     setSaving(true);
+    setSaveError(null);
 
     const payload = {
       nama: form.nama.trim(),
@@ -254,7 +276,7 @@ export default function PayrollManagerPage() {
     setSaving(false);
 
     if (error) {
-      alert('Gagal menyimpan: ' + error.message);
+      setSaveError(error.message || 'Gagal menyimpan, coba lagi.');
       return;
     }
 
@@ -289,9 +311,19 @@ export default function PayrollManagerPage() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat data payroll..." />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={loadData} />
       ) : filteredEmployees.length === 0 ? (
-        <p className="text-sm text-[#6B6B6B]">Belum ada employee.</p>
+        <div className="bg-white border border-[#E0E0E0]">
+          <EmptyState
+            message={
+              filterClient
+                ? 'Tidak ada employee untuk klien ini.'
+                : 'Belum ada employee. Klik "Tambah Employee" untuk mulai.'
+            }
+          />
+        </div>
       ) : (
         <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
           <table className="w-full text-sm">
@@ -343,6 +375,7 @@ export default function PayrollManagerPage() {
           onClose={() => setModalOpen(false)}
           onSubmit={handleSubmit}
           saving={saving}
+          saveError={saveError}
         />
       )}
     </div>

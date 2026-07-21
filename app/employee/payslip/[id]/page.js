@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import LoadingState from '@/components/LoadingState';
 
 function formatRupiah(value) {
   return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
@@ -42,7 +43,11 @@ export default function PayslipDetailPage() {
     setError(null);
 
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      setError('Sesi login tidak ditemukan. Silakan login ulang.');
+      setLoading(false);
+      return;
+    }
 
     const { data: currentEmp } = await supabase
       .from('employees')
@@ -91,19 +96,31 @@ export default function PayslipDetailPage() {
   }, [loadData]);
 
   if (loading) {
-    return <p className="text-sm text-[#6B6B6B] px-6 py-10">Memuat...</p>;
+    return (
+      <section className="min-h-[50vh] flex items-center justify-center">
+        <LoadingState label="Memuat slip gaji..." />
+      </section>
+    );
   }
 
   if (error) {
     return (
       <div className="max-w-[420px] mx-auto mt-16 border-t-4 border-madael-red bg-white p-8 text-center">
         <p className="text-sm text-black mb-6">{error}</p>
-        <Link
-          href="/employee/payslip"
-          className="inline-block bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
-        >
-          Kembali
-        </Link>
+        <div className="flex items-center justify-center gap-3">
+          <button
+            onClick={loadData}
+            className="border border-[#E0E0E0] text-[#6B6B6B] px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:text-black transition-colors"
+          >
+            Coba Lagi
+          </button>
+          <Link
+            href="/employee/payslip"
+            className="inline-block bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
+          >
+            Kembali
+          </Link>
+        </div>
       </div>
     );
   }

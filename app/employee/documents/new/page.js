@@ -429,6 +429,7 @@ export default function NewDocumentPage() {
 
   const [clients, setClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(true);
+  const [clientsError, setClientsError] = useState(null);
   const [employeeId, setEmployeeId] = useState(null);
 
   const [saving, setSaving] = useState(false);
@@ -440,11 +441,15 @@ export default function NewDocumentPage() {
 
   const loadClients = useCallback(async () => {
     setLoadingClients(true);
-    const { data } = await supabase
+    setClientsError(null);
+    const { data, error } = await supabase
       .from('clients')
       .select('id, nama_perusahaan, pic_nama')
       .eq('is_active', true)
       .order('nama_perusahaan', { ascending: true });
+    if (error) {
+      setClientsError('Gagal memuat daftar klien.');
+    }
     setClients(data || []);
     setLoadingClients(false);
   }, [supabase]);
@@ -563,6 +568,15 @@ export default function NewDocumentPage() {
                 </option>
               ))}
             </select>
+            {clientsError && (
+              <button
+                type="button"
+                onClick={loadClients}
+                className="text-[11px] text-madael-red hover:underline mt-1 text-left"
+              >
+                {clientsError} — Coba lagi
+              </button>
+            )}
           </FieldBlock>
           <FieldBlock label="Tanggal Dokumen">
             <input type="date" className={inputClass()} value={tanggalDokumen} onChange={(e) => setTanggalDokumen(e.target.value)} />

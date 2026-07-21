@@ -7,6 +7,9 @@ import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
+import EmptyState from '@/components/EmptyState';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -40,17 +43,19 @@ export default function RekapAbsensiPage() {
   const [schedules, setSchedules] = useState({}); // employee_id -> row
   const [attendance, setAttendance] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   const isSuperadmin = !!employee?.is_superadmin;
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     const [year, month] = monthValue.split('-').map(Number);
     const firstDay = `${monthValue}-01`;
     const lastDayNum = new Date(year, month, 0).getDate();
     const lastDay = `${monthValue}-${String(lastDayNum).padStart(2, '0')}`;
 
-    const [{ data: emps }, { data: scheds }, { data: att }] = await Promise.all([
+    const [empRes, schedRes, attRes] = await Promise.all([
       supabase
         .from('employees')
         .select('id, nama, employee_id, perusahaan, status')
@@ -64,11 +69,18 @@ export default function RekapAbsensiPage() {
         .lte('tanggal', lastDay),
     ]);
 
-    setEmployees(emps || []);
+    const firstError = empRes.error || schedRes.error || attRes.error;
+    if (firstError) {
+      setLoadError(firstError.message || 'Gagal memuat data rekap.');
+      setLoading(false);
+      return;
+    }
+
+    setEmployees(empRes.data || []);
     const byEmp = {};
-    (scheds || []).forEach((s) => { byEmp[s.employee_id] = s; });
+    (schedRes.data || []).forEach((s) => { byEmp[s.employee_id] = s; });
     setSchedules(byEmp);
-    setAttendance(att || []);
+    setAttendance(attRes.data || []);
     setLoading(false);
   }, [supabase, monthValue]);
 
@@ -105,7 +117,7 @@ export default function RekapAbsensiPage() {
   if (status === 'loading') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat data..." />
       </section>
     );
   }
@@ -121,6 +133,16 @@ export default function RekapAbsensiPage() {
           >
             Kembali
           </Link>
+        </div>
+      </section>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
+        <div className="w-full max-w-[420px]">
+          <ErrorState message={loadError} onRetry={loadData} />
         </div>
       </section>
     );
@@ -167,7 +189,7 @@ export default function RekapAbsensiPage() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat rekap..." />
       ) : (
         <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
           <table className="w-full text-sm">
@@ -184,8 +206,8 @@ export default function RekapAbsensiPage() {
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-xs text-[#9A9A9A]">
-                    Tidak ada data untuk bulan ini.
+                  <td colSpan={6} className="p-0">
+                    <EmptyState message="Tidak ada data karyawan untuk bulan atau filter ini." />
                   </td>
                 </tr>
               ) : (

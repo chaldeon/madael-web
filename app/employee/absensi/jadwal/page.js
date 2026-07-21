@@ -7,6 +7,9 @@ import Link from 'next/link';
 import { X, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
+import EmptyState from '@/components/EmptyState';
 
 const HARI_OPTIONS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
 const DEFAULT_HARI = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
@@ -24,14 +27,18 @@ export default function JadwalKerjaPage() {
   const [employees, setEmployees] = useState([]);
   const [schedules, setSchedules] = useState({}); // employee_id -> schedule row
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   const [editingEmp, setEditingEmp] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [{ data: emps }, { data: scheds }] = await Promise.all([
+    setLoadError(null);
+
+    const [empRes, schedRes] = await Promise.all([
       supabase
         .from('employees')
         .select('id, nama, employee_id, perusahaan, status')
@@ -39,9 +46,17 @@ export default function JadwalKerjaPage() {
         .order('nama'),
       supabase.from('work_schedule').select('*'),
     ]);
-    setEmployees(emps || []);
+
+    const firstError = empRes.error || schedRes.error;
+    if (firstError) {
+      setLoadError(firstError.message || 'Gagal memuat data jadwal kerja.');
+      setLoading(false);
+      return;
+    }
+
+    setEmployees(empRes.data || []);
     const byEmp = {};
-    (scheds || []).forEach((s) => { byEmp[s.employee_id] = s; });
+    (schedRes.data || []).forEach((s) => { byEmp[s.employee_id] = s; });
     setSchedules(byEmp);
     setLoading(false);
   }, [supabase]);
@@ -69,6 +84,7 @@ export default function JadwalKerjaPage() {
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveError(null);
     const { data, error } = await supabase
       .from('work_schedule')
       .upsert(
@@ -85,7 +101,7 @@ export default function JadwalKerjaPage() {
 
     setSaving(false);
     if (error) {
-      alert('Gagal menyimpan jadwal: ' + error.message);
+      setSaveError(error.message || 'Gagal menyimpan jadwal, coba lagi.');
       return;
     }
     setSchedules((s) => ({ ...s, [editingEmp.id]: data }));
@@ -95,7 +111,7 @@ export default function JadwalKerjaPage() {
   if (status === 'loading') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat data..." />
       </section>
     );
   }
@@ -111,6 +127,16 @@ export default function JadwalKerjaPage() {
           >
             Kembali ke Dashboard
           </Link>
+        </div>
+      </section>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
+        <div className="w-full max-w-[420px]">
+          <ErrorState message={loadError} onRetry={loadData} />
         </div>
       </section>
     );
@@ -132,7 +158,11 @@ export default function JadwalKerjaPage() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat data jadwal..." />
+      ) : employees.length === 0 ? (
+        <div className="bg-white border border-[#E0E0E0]">
+          <EmptyState message="Belum ada employee aktif yang bisa diatur jadwalnya." />
+        </div>
       ) : (
         <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
           <table className="w-full text-sm">
@@ -228,6 +258,14 @@ export default function JadwalKerjaPage() {
               })}
             </div>
 
+            {saveError && (
+              <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 mb-3">
+                <span>{saveError}</span>
+                <button onClick={handleSave} className="shrink-0 underline font-medium hover:text-red-900">
+                  Coba Lagi
+                </button>
+              </div>
+            )}
             <button
               onClick={handleSave}
               disabled={saving}
