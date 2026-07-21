@@ -2,9 +2,9 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { MapPin, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 
@@ -52,6 +52,27 @@ function getPosition() {
   });
 }
 
+function captureFrame(videoEl) {
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = videoEl.videoWidth;
+    canvas.height = videoEl.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      reject(new Error('Gagal membuat canvas untuk foto.'));
+      return;
+    }
+    ctx.drawImage(videoEl, 0, 0);
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('Gagal mengambil foto dari kamera.'));
+        return;
+      }
+      resolve(blob);
+    }, 'image/jpeg', 0.85);
+  });
+}
+
 export default function AbsensiPage() {
   const supabase = createClient();
   const { status, employee } = useModuleAccess('absensi');
@@ -62,6 +83,11 @@ export default function AbsensiPage() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [geoError, setGeoError] = useState(null);
+
+  const [cameraMode, setCameraMode] = useState(null); // 'in' | 'out' | null
+  const [cameraError, setCameraError] = useState(null);
+  const [cameraStream, setCameraStream] = useState(null);
+  const videoRef = useRef(null);
 
   const loadData = useCallback(async () => {
     if (!employee) return;
@@ -88,58 +114,104 @@ export default function AbsensiPage() {
     if (status === 'allowed') loadData();
   }, [status, loadData]);
 
-  const handleClockIn = async () => {
+  const openCamera = async (mode) => {
     setGeoError(null);
-    setActing(true);
+    setCameraError(null);
     try {
-      const pos = await getPosition();
-      const now = new Date();
-      const isLate = schedule ? timeStr(now) > schedule.jam_masuk : false;
-
-      const { data, error } = await supabase
-        .from('attendance')
-        .insert([{
-          employee_id: employee.id,
-          tanggal: todayStr(),
-          clock_in: now.toISOString(),
-          clock_in_lat: pos.coords.latitude,
-          clock_in_lng: pos.coords.longitude,
-          status_telat: isLate,
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-      setTodayRow(data);
-      setHistory((h) => [data, ...h.filter((r) => r.tanggal !== data.tanggal)].slice(0, 7));
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+        audio: false,
+      });
+      setCameraStream(stream);
+      setCameraMode(mode);
     } catch (err) {
-      setGeoError(err.message || 'Gagal mengambil lokasi. Pastikan izin lokasi diaktifkan.');
-    } finally {
-      setActing(false);
+      setCameraError('Tidak bisa mengakses kamera. Pastikan izin kamera diaktifkan di browser.');
     }
   };
 
-  const handleClockOut = async () => {
-    setGeoError(null);
+  // Video element baru mount setelah cameraMode diset, jadi stream baru
+  // di-attach setelah render berikutnya.
+  useEffect(() => {
+    if (cameraStream && videoRef.current) {
+      videoRef.current.srcObject = cameraStream;
+    }
+  }, [cameraStream, cameraMode]);
+
+  const closeCamera = () => {
+    cameraStream?.getTracks().forEach((t) => t.stop());
+    setCameraStream(null);
+    setCameraMode(null);
+  };
+
+  const uploadFoto = async (blob, mode) => {
+    const path = `${employee.id}/${todayStr()}-${mode}-${Date.now()}.jpg`;
+    const { error } = await supabase.storage.from('attendance-photos').upload(path, blob, {
+      contentType: 'image/jpeg',
+    });
+    if (error) throw error;
+    return path;
+  };
+
+  const handleConfirmCapture = async () => {
+    const mode = cameraMode;
     setActing(true);
+    setGeoError(null);
+
+    let fotoPath = null;
+    let wajahOk = false;
+    try {
+      const blob = await captureFrame(videoRef.current);
+      fotoPath = await uploadFoto(blob, mode);
+      wajahOk = true;
+    } catch (err) {
+      // Foto gagal diambil/diupload — tetap lanjut absen, tapi flag verifikasi
+      // ditandai gagal supaya bisa dicek manual nanti.
+      setGeoError('Foto gagal disimpan, tapi absen tetap diproses. (' + (err.message || 'error kamera') + ')');
+    }
+    closeCamera();
+
     try {
       const pos = await getPosition();
       const now = new Date();
 
-      const { data, error } = await supabase
-        .from('attendance')
-        .update({
-          clock_out: now.toISOString(),
-          clock_out_lat: pos.coords.latitude,
-          clock_out_lng: pos.coords.longitude,
-        })
-        .eq('id', todayRow.id)
-        .select()
-        .single();
+      if (mode === 'in') {
+        const isLate = schedule ? timeStr(now) > schedule.jam_masuk : false;
+        const { data, error } = await supabase
+          .from('attendance')
+          .insert([{
+            employee_id: employee.id,
+            tanggal: todayStr(),
+            clock_in: now.toISOString(),
+            clock_in_lat: pos.coords.latitude,
+            clock_in_lng: pos.coords.longitude,
+            status_telat: isLate,
+            foto_clock_in_url: fotoPath,
+            wajah_terverifikasi: wajahOk,
+          }])
+          .select()
+          .single();
 
-      if (error) throw error;
-      setTodayRow(data);
-      setHistory((h) => h.map((r) => (r.id === data.id ? data : r)));
+        if (error) throw error;
+        setTodayRow(data);
+        setHistory((h) => [data, ...h.filter((r) => r.tanggal !== data.tanggal)].slice(0, 7));
+      } else {
+        const { data, error } = await supabase
+          .from('attendance')
+          .update({
+            clock_out: now.toISOString(),
+            clock_out_lat: pos.coords.latitude,
+            clock_out_lng: pos.coords.longitude,
+            foto_clock_out_url: fotoPath,
+            wajah_terverifikasi: todayRow.wajah_terverifikasi || wajahOk,
+          })
+          .eq('id', todayRow.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        setTodayRow(data);
+        setHistory((h) => h.map((r) => (r.id === data.id ? data : r)));
+      }
     } catch (err) {
       setGeoError(err.message || 'Gagal mengambil lokasi. Pastikan izin lokasi diaktifkan.');
     } finally {
@@ -196,6 +268,12 @@ export default function AbsensiPage() {
           {geoError}
         </div>
       )}
+      {cameraError && (
+        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-3 mb-6">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          {cameraError}
+        </div>
+      )}
 
       <div className="bg-white border border-[#E0E0E0] p-6 mb-8">
         {schedule && (
@@ -208,12 +286,12 @@ export default function AbsensiPage() {
           <>
             <p className="text-sm text-black mb-4">Kamu belum clock in hari ini.</p>
             <button
-              onClick={handleClockIn}
+              onClick={() => openCamera('in')}
               disabled={acting}
               className="flex items-center gap-2 bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
             >
-              <MapPin size={16} />
-              {acting ? 'Mengambil lokasi...' : 'Clock In'}
+              <Camera size={16} />
+              {acting ? 'Memproses...' : 'Clock In'}
             </button>
           </>
         ) : (
@@ -230,12 +308,12 @@ export default function AbsensiPage() {
 
             {!todayRow.clock_out ? (
               <button
-                onClick={handleClockOut}
+                onClick={() => openCamera('out')}
                 disabled={acting}
                 className="flex items-center gap-2 bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
               >
-                <MapPin size={16} />
-                {acting ? 'Mengambil lokasi...' : 'Clock Out'}
+                <Camera size={16} />
+                {acting ? 'Memproses...' : 'Clock Out'}
               </button>
             ) : (
               <div className="flex items-center gap-2 text-sm text-black">
@@ -288,6 +366,42 @@ export default function AbsensiPage() {
           </tbody>
         </table>
       </div>
+
+      {cameraMode && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] px-6">
+          <div className="bg-white w-full max-w-[420px] p-6 relative">
+            <button
+              onClick={closeCamera}
+              className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black"
+            >
+              <X size={18} />
+            </button>
+            <h2 className="text-sm font-medium text-black mb-4">
+              Foto {cameraMode === 'in' ? 'Clock In' : 'Clock Out'}
+            </h2>
+            <div className="bg-black mb-4 aspect-[3/4] overflow-hidden">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover scale-x-[-1]"
+              />
+            </div>
+            <p className="text-xs text-[#9A9A9A] mb-4">
+              Pastikan wajah kamu terlihat jelas di kamera sebelum ambil foto.
+            </p>
+            <button
+              onClick={handleConfirmCapture}
+              disabled={acting}
+              className="w-full flex items-center justify-center gap-2 bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+            >
+              <Camera size={16} />
+              {acting ? 'Memproses...' : `Ambil Foto & ${cameraMode === 'in' ? 'Clock In' : 'Clock Out'}`}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
