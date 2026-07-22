@@ -39,6 +39,32 @@ function menitTelat(clockInIso, jamMasuk) {
   return Math.max(0, clockMinutes - jamMasukMinutes);
 }
 
+// Distribusi pembulatan "largest remainder": memastikan total dari beberapa
+// komponen yang dibulatkan SELALU sama dengan pembulatan dari total presisi
+// (bukan sekadar menjumlah komponen yang sudah dibulatkan sendiri-sendiri,
+// yang bisa selisih 1 rupiah). Komponen dengan sisa desimal terbesar yang
+// "dinaikkan" duluan.
+function roundDistributed(values) {
+  const keys = Object.keys(values);
+  const floors = {};
+  let flooredSum = 0;
+  keys.forEach((k) => {
+    floors[k] = Math.floor(values[k]);
+    flooredSum += floors[k];
+  });
+  const rawSum = keys.reduce((sum, k) => sum + values[k], 0);
+  const target = Math.round(rawSum);
+  const remainder = target - flooredSum;
+  const sortedByRemainder = [...keys].sort(
+    (a, b) => (values[b] - floors[b]) - (values[a] - floors[a])
+  );
+  const result = { ...floors };
+  for (let i = 0; i < remainder && i < sortedByRemainder.length; i++) {
+    result[sortedByRemainder[i]] += 1;
+  }
+  return result;
+}
+
 const PENDAPATAN_FIELDS = [
   { key: 'gaji_pokok', label: 'Gaji Pokok' },
   { key: 'lembur', label: 'Lembur' },
@@ -129,7 +155,7 @@ function TextField({ label, value, onChange, type = 'text' }) {
       <span className="text-xs text-[#6B6B6B]">{label}</span>
       <input
         type={type}
-        value={value}
+        value={value ?? ''}
         onChange={(e) => onChange(e.target.value)}
         className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
       />
@@ -169,17 +195,26 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
     const brutoPPh21 = hitungBrutoPPh21(gajiPokok, allowance, bpjs, penalty);
     const pph21Result = merged.ptkp ? hitungPPh21TER(brutoPPh21, merged.ptkp) : null;
 
+    // Grup BPJS TK Perusahaan (JKK+JKM+JHT+JP) dibulatkan sekaligus supaya totalnya pas
+    const tkPerusahaan = roundDistributed({
+      jkk: bpjs.jkk, jkm: bpjs.jkm, jht: bpjs.jhtEmployer, jp: bpjs.jpEmployer,
+    });
+    // Grup BPJS Karyawan (Kesehatan+JHT+JP) juga sama, supaya Total Potongan pas
+    const karyawan = roundDistributed({
+      kes: bpjs.kesehatanEmployee, jht: bpjs.jhtEmployee, jp: bpjs.jpEmployee,
+    });
+
     setForm((prev) => ({
       ...prev,
       ...overrides,
       bpjs_k_perusahaan: Math.round(bpjs.kesehatanEmployer),
-      bpjs_k_karyawan: Math.round(bpjs.kesehatanEmployee),
-      jkk_perusahaan: Math.round(bpjs.jkk),
-      jkm_perusahaan: Math.round(bpjs.jkm),
-      jht_perusahaan: Math.round(bpjs.jhtEmployer),
-      jht_karyawan: Math.round(bpjs.jhtEmployee),
-      jp_perusahaan: Math.round(bpjs.jpEmployer),
-      jp_karyawan: Math.round(bpjs.jpEmployee),
+      bpjs_k_karyawan: karyawan.kes,
+      jkk_perusahaan: tkPerusahaan.jkk,
+      jkm_perusahaan: tkPerusahaan.jkm,
+      jht_perusahaan: tkPerusahaan.jht,
+      jht_karyawan: karyawan.jht,
+      jp_perusahaan: tkPerusahaan.jp,
+      jp_karyawan: karyawan.jp,
       // PPh21 dibulatkan ke bawah (floor) — konvensi resmi DJP untuk PPh21 TER,
       // bukan dibulatkan ke terdekat. Ini penting supaya Total Potongan & THP pas.
       pph21: pph21Result ? Math.floor(pph21Result.pph) : prev.pph21,
@@ -279,7 +314,21 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
         .maybeSingle();
 
       if (lastSlip) {
-        setForm((prev) => ({ ...prev, ...lastSlip }));
+        // Saring null (kolom yang di database kosong) supaya tidak jadi controlled input value={null}
+        const sanitized = {};
+        Object.keys(lastSlip).forEach((key) => {
+          if (lastSlip[key] !== null && lastSlip[key] !== undefined) sanitized[key] = lastSlip[key];
+        });
+        // Rekening/NPWP/no. BPJS dll cukup di-carry apa adanya, tapi BPJS & PPh21
+        // dihitung ULANG (bukan sekadar di-copy dari bulan lalu) supaya selalu
+        // sinkron dengan Gaji Pokok + PTKP + Kategori JKK saat ini.
+        setForm((prev) => ({ ...prev, ...sanitized }));
+        recalcFromPendapatan({
+          gaji_pokok: sanitized.gaji_pokok ?? 0,
+          tunjangan_transport: sanitized.tunjangan_transport ?? 0,
+          tunjangan_lain: sanitized.tunjangan_lain ?? 0,
+          ptkp: sanitized.ptkp ?? '',
+        });
         return;
       }
 
@@ -386,6 +435,31 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
             <TextField label="Rekening" value={form.rekening} onChange={set('rekening')} />
           </div>
 
+          {/* Data pajak & BPJS */}
+          <div>
+            <p className="text-xs font-medium tracking-[0.04em] text-black border-b border-[#E0E0E0] pb-2 mb-3">
+              DATA PAJAK &amp; BPJS
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <TextField label="NPWP" value={form.npwp} onChange={set('npwp')} />
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-[#6B6B6B]">PTKP</span>
+                <select
+                  value={form.ptkp}
+                  onChange={(e) => recalcFromPendapatan({ ptkp: e.target.value })}
+                  className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+                >
+                  <option value="">Pilih PTKP...</option>
+                  {Object.entries(PTKP_DATA).map(([key, v]) => (
+                    <option key={key} value={key}>{v.label}</option>
+                  ))}
+                </select>
+              </label>
+              <TextField label="Nomor BPJS Kesehatan" value={form.no_bpjs_k} onChange={set('no_bpjs_k')} />
+              <TextField label="Nomor BPJS Ketenagakerjaan" value={form.no_bpjs_tk} onChange={set('no_bpjs_tk')} />
+            </div>
+          </div>
+
           {/* Pendapatan */}
           <div>
             <p className="text-xs font-medium tracking-[0.04em] text-black border-b border-[#E0E0E0] pb-2 mb-3">
@@ -462,31 +536,6 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
             <div className="grid grid-cols-2 gap-4">
               <TextField label="Metode Pembayaran" value={form.metode_pembayaran} onChange={set('metode_pembayaran')} />
               <TextField label="Tanggal Pembayaran" type="date" value={form.tanggal_pembayaran} onChange={set('tanggal_pembayaran')} />
-            </div>
-          </div>
-
-          {/* Data pajak & BPJS */}
-          <div>
-            <p className="text-xs font-medium tracking-[0.04em] text-black border-b border-[#E0E0E0] pb-2 mb-3">
-              DATA PAJAK &amp; BPJS
-            </p>
-            <div className="grid grid-cols-2 gap-4">
-              <TextField label="NPWP" value={form.npwp} onChange={set('npwp')} />
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-[#6B6B6B]">PTKP</span>
-                <select
-                  value={form.ptkp}
-                  onChange={(e) => recalcFromPendapatan({ ptkp: e.target.value })}
-                  className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
-                >
-                  <option value="">Pilih PTKP...</option>
-                  {Object.entries(PTKP_DATA).map(([key, v]) => (
-                    <option key={key} value={key}>{v.label}</option>
-                  ))}
-                </select>
-              </label>
-              <TextField label="Nomor BPJS Kesehatan" value={form.no_bpjs_k} onChange={set('no_bpjs_k')} />
-              <TextField label="Nomor BPJS Ketenagakerjaan" value={form.no_bpjs_tk} onChange={set('no_bpjs_tk')} />
             </div>
           </div>
 
@@ -593,7 +642,8 @@ export default function PayslipAdminPage() {
   }, [payslips]);
 
   const openCreate = async () => {
-    setForm(EMPTY_FORM);
+    const tahunSekarang = String(new Date().getFullYear());
+    setForm({ ...EMPTY_FORM, periode: `${tahunSekarang}-`, periode_label: '' });
     setEditingId(null);
     setModalOpen(true);
     const { data } = await supabase
@@ -622,6 +672,17 @@ export default function PayslipAdminPage() {
     NUMERIC_KEYS.forEach((k) => { payload[k] = Number(payload[k]) || 0; });
     if (!payload.tanggal_pembayaran) payload.tanggal_pembayaran = null;
     delete payload.employees;
+
+    // Jaga-jaga: selalu turunkan ulang Periode Label dari Periode tepat sebelum
+    // disimpan, supaya tidak pernah kosong walau ada celah sinkronisasi di form.
+    if (/^\d{4}-\d{2}$/.test(payload.periode || '')) {
+      const [tahunFinal, bulanFinal] = payload.periode.split('-');
+      payload.periode_label = buildPeriodeLabel(tahunFinal, bulanFinal);
+    } else {
+      setSaving(false);
+      setSaveError('Periode belum lengkap, pilih Tahun dan Bulan terlebih dahulu.');
+      return;
+    }
 
     // Nomor dokumen baru hanya digenerate (dan counter INV di-increment) saat membuat slip baru
     if (!editingId) {

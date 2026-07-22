@@ -63,6 +63,10 @@ export default function KoreksiAbsensiPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
+  const [addForm, setAddForm] = useState({ employeeId: '', tanggal: '' });
+  const [addError, setAddError] = useState(null);
+  const [checkingAdd, setCheckingAdd] = useState(false);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -129,6 +133,44 @@ export default function KoreksiAbsensiPage() {
     setEditingRow(row);
   };
 
+  // Case: employee tidak clock in sama sekali seharian (mis. HP mati total),
+  // jadi tidak ada row attendance yang bisa di-edit lewat tabel. Admin pilih
+  // employee + tanggal manual, lalu buka modal koreksi yang sama dengan
+  // editingRow "virtual" (id null) supaya handleSave tahu ini insert baru.
+  const handleStartNew = async () => {
+    setAddError(null);
+    if (!addForm.employeeId || !addForm.tanggal) {
+      setAddError('Pilih employee dan tanggal dulu.');
+      return;
+    }
+    setCheckingAdd(true);
+    const { data: existing, error } = await supabase
+      .from('attendance')
+      .select('id')
+      .eq('employee_id', addForm.employeeId)
+      .eq('tanggal', addForm.tanggal)
+      .maybeSingle();
+    setCheckingAdd(false);
+
+    if (error) {
+      setAddError(error.message || 'Gagal mengecek record yang sudah ada.');
+      return;
+    }
+    if (existing) {
+      setAddError('Employee ini sudah punya record di tanggal itu — cari di tabel bawah dan pakai tombol Koreksi, bukan Tambah Record Baru.');
+      return;
+    }
+
+    openEdit({
+      id: null,
+      employee_id: addForm.employeeId,
+      tanggal: addForm.tanggal,
+      clock_in: null,
+      clock_out: null,
+      status_telat: false,
+    });
+  };
+
   const closeEdit = () => {
     setEditingRow(null);
     setSaveError(null);
@@ -139,12 +181,66 @@ export default function KoreksiAbsensiPage() {
       setSaveError('Alasan koreksi wajib diisi.');
       return;
     }
+    if (form.clockOut && !form.clockIn) {
+      setSaveError('Jam Clock In wajib diisi kalau Jam Clock Out diisi.');
+      return;
+    }
+    if (form.clockIn && form.clockOut && form.clockOut <= form.clockIn) {
+      setSaveError('Jam Clock Out harus lebih besar dari Jam Clock In. Kalau karyawan pulang lewat tengah malam, catat di alasan dan hubungi Daniel untuk koreksi lintas-hari (belum didukung form ini).');
+      return;
+    }
 
     setSaving(true);
     setSaveError(null);
 
     const newClockIn = timeInputToIso(editingRow.tanggal, form.clockIn);
     const newClockOut = timeInputToIso(editingRow.tanggal, form.clockOut);
+    const isNew = !editingRow.id;
+
+    if (isNew) {
+      const { data: inserted, error: insertError } = await supabase
+        .from('attendance')
+        .insert([{
+          employee_id: editingRow.employee_id,
+          tanggal: editingRow.tanggal,
+          clock_in: newClockIn,
+          clock_out: newClockOut,
+          status_telat: form.statusTelat,
+          wajah_terverifikasi: false,
+        }])
+        .select()
+        .single();
+
+      if (insertError) {
+        setSaving(false);
+        setSaveError(insertError.message || 'Gagal membuat record baru.');
+        return;
+      }
+
+      const { error: logError } = await supabase.from('attendance_corrections').insert([{
+        attendance_id: inserted.id,
+        employee_id: editingRow.employee_id,
+        corrected_by: employee.id,
+        alasan: form.alasan.trim(),
+        before_clock_in: null,
+        before_clock_out: null,
+        before_status_telat: null,
+        after_clock_in: newClockIn,
+        after_clock_out: newClockOut,
+        after_status_telat: form.statusTelat,
+      }]);
+
+      setSaving(false);
+      if (logError) {
+        // Record attendance sudah kebuat — jejak log gagal disimpan, tapi
+        // jangan rollback attendance-nya sendiri (butuh manual cleanup kalau ini terjadi).
+        setSaveError(`Record dibuat tapi log koreksi gagal disimpan: ${logError.message}`);
+      }
+      setAttendance((prev) => [inserted, ...prev]);
+      setAddForm({ employeeId: '', tanggal: '' });
+      if (!logError) setEditingRow(null);
+      return;
+    }
 
     // Simpan jejak koreksi dulu (nilai sebelum & sesudah) sebelum meng-update
     // record aslinya, supaya tidak ada perubahan yang overwrite tanpa jejak.
@@ -261,6 +357,38 @@ export default function KoreksiAbsensiPage() {
         </label>
       </div>
 
+      <div className="bg-white border border-[#E0E0E0] p-4 mb-6 flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-[#6B6B6B]">Tambah Record Baru (untuk hari yang absen tidak tercatat sama sekali)</span>
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={addForm.employeeId}
+              onChange={(e) => setAddForm((f) => ({ ...f, employeeId: e.target.value }))}
+              className={selectClass}
+            >
+              <option value="">Pilih Employee</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>{emp.nama}</option>
+              ))}
+            </select>
+            <input
+              type="date"
+              value={addForm.tanggal}
+              onChange={(e) => setAddForm((f) => ({ ...f, tanggal: e.target.value }))}
+              className={selectClass}
+            />
+            <button
+              onClick={handleStartNew}
+              disabled={checkingAdd}
+              className="bg-madael-red text-white px-4 py-2 text-xs font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+            >
+              {checkingAdd ? 'Mengecek...' : 'Tambah Record Baru'}
+            </button>
+          </div>
+          {addError && <p className="text-xs text-red-600 mt-1">{addError}</p>}
+        </label>
+      </div>
+
       <div className="flex items-start gap-2 bg-[#F4F4F4] border border-[#E0E0E0] text-[#6B6B6B] text-xs px-4 py-3 mb-6">
         <AlertTriangle size={14} className="mt-0.5 shrink-0" />
         Setiap koreksi wajib diisi alasan dan tercatat di log — nilai lama tidak akan hilang.
@@ -339,7 +467,7 @@ export default function KoreksiAbsensiPage() {
               <X size={18} />
             </button>
             <h2 className="text-sm font-medium text-black mb-1">
-              Koreksi — {empById[editingRow.employee_id]?.nama}
+              {editingRow.id ? 'Koreksi' : 'Tambah Record Baru'} — {empById[editingRow.employee_id]?.nama}
             </h2>
             <p className="text-xs text-[#9A9A9A] mb-4">{formatTanggal(editingRow.tanggal)}</p>
 

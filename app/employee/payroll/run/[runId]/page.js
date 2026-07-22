@@ -81,6 +81,7 @@ export default function PayrollRunDetailPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [generateNote, setGenerateNote] = useState(null);
+  const [confirmIncomplete, setConfirmIncomplete] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -130,6 +131,8 @@ export default function PayrollRunDetailPage() {
     () => items.filter((i) => !i.employees_master?.linked_employee_id).length,
     [items]
   );
+  const hasIncomplete = useMemo(() => items.some((i) => i.incomplete), [items]);
+  const approvingWithIssue = statusDraft === 'Approved' && run?.status !== 'Approved' && hasIncomplete;
 
   // Generate/update entry Payslip Portal untuk tiap item yang employee-nya
   // sudah terhubung ke akun Absensi (linked_employee_id). Item yang belum
@@ -238,6 +241,7 @@ export default function PayrollRunDetailPage() {
       setGenerateNote(note);
     }
 
+    setConfirmIncomplete(false);
     setSaving(false);
   };
 
@@ -284,7 +288,7 @@ export default function PayrollRunDetailPage() {
           <span className="text-xs text-[#6B6B6B]">Ubah Status</span>
           <select
             value={statusDraft}
-            onChange={(e) => setStatusDraft(e.target.value)}
+            onChange={(e) => { setStatusDraft(e.target.value); setConfirmIncomplete(false); }}
             className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
           >
             {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -292,7 +296,7 @@ export default function PayrollRunDetailPage() {
         </label>
         <button
           onClick={handleSaveStatus}
-          disabled={saving || statusDraft === run.status}
+          disabled={saving || statusDraft === run.status || (approvingWithIssue && !confirmIncomplete)}
           className="bg-madael-red text-white px-5 py-2 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors disabled:opacity-40"
         >
           {saving ? 'Menyimpan...' : 'Simpan Status'}
@@ -309,6 +313,24 @@ export default function PayrollRunDetailPage() {
           Total THP: <span className="text-black font-medium">{formatRupiah(totalThp)}</span>
         </div>
       </div>
+
+      {approvingWithIssue && (
+        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-3 mb-6">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          <label className="flex items-start gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={confirmIncomplete}
+              onChange={(e) => setConfirmIncomplete(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Beberapa employee di run ini punya PPh21/BPJS Rp0 karena data belum lengkap (lihat catatan di bawah tabel).
+              Slip yang digenerate akan pakai angka Rp0 tersebut. Centang ini untuk tetap lanjut Approve.
+            </span>
+          </label>
+        </div>
+      )}
 
       {saveError && (
         <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-3 mb-6">

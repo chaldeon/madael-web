@@ -6,11 +6,11 @@ import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
 
-export default function DocumentsLayout({ children }) {
+export default function LeaveRequestLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
-  const { status, employee, hasModule } = useModuleAccess(['document_generator', 'nomor_surat']);
+  const { status, employee } = useModuleAccess('leave_request');
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -30,7 +30,7 @@ export default function DocumentsLayout({ children }) {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
         <div className="w-full max-w-[420px] border-t-4 border-madael-red bg-white p-8 text-center">
-          <p className="text-sm text-black mb-6">Kamu tidak punya akses ke modul Document Generator.</p>
+          <p className="text-sm text-black mb-6">Kamu tidak punya akses ke modul Leave Request.</p>
           <Link
             href="/employee/dashboard"
             className="inline-block bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
@@ -42,8 +42,7 @@ export default function DocumentsLayout({ children }) {
     );
   }
 
-  const isNomorSurat = pathname.startsWith('/employee/documents/nomor-surat');
-  const isInvoices = pathname.startsWith('/employee/documents/invoices');
+  const isAdmin = pathname.startsWith('/employee/leave-request/admin');
   const tabClass = (active) =>
     `text-sm tracking-[0.02em] transition-colors ${
       active ? 'text-black font-medium' : 'text-[#6B6B6B] hover:text-black'
@@ -51,25 +50,18 @@ export default function DocumentsLayout({ children }) {
 
   return (
     <section className="min-h-screen bg-[#F4F4F4]">
-      <div className="print:hidden flex items-center justify-between px-10 h-[68px] border-b border-[#E0E0E0] bg-white sticky top-0 z-[999]">
+      <div className="flex items-center justify-between px-10 h-[68px] border-b border-[#E0E0E0] bg-white sticky top-0 z-[999]">
         <div className="flex items-center gap-8">
           <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
             ← Dashboard
           </Link>
           <div className="flex items-center gap-6">
-            {hasModule('document_generator') && (
-              <Link href="/employee/documents" className={tabClass(!isNomorSurat && !isInvoices)}>
-                Documents
-              </Link>
-            )}
-            {hasModule('nomor_surat') && (
-              <Link href="/employee/documents/nomor-surat" className={tabClass(isNomorSurat)}>
-                Nomor Surat
-              </Link>
-            )}
+            <Link href="/employee/leave-request" className={tabClass(!isAdmin)}>
+              Ajukan Cuti
+            </Link>
             {employee?.is_superadmin && (
-              <Link href="/employee/documents/invoices" className={tabClass(isInvoices)}>
-                Invoice
+              <Link href="/employee/leave-request/admin" className={tabClass(isAdmin)}>
+                Kelola Pengajuan
               </Link>
             )}
           </div>
