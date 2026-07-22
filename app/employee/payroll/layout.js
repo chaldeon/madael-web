@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
 
 export default function PayrollLayout({ children }) {
+  const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
   const { status } = useModuleAccess('payroll');
@@ -41,12 +42,28 @@ export default function PayrollLayout({ children }) {
     );
   }
 
+  const isRun = pathname.startsWith('/employee/payroll/run');
+  const tabClass = (active) =>
+    `text-sm tracking-[0.02em] transition-colors ${
+      active ? 'text-black font-medium' : 'text-[#6B6B6B] hover:text-black'
+    }`;
+
   return (
     <section className="min-h-screen bg-[#F4F4F4]">
       <div className="flex items-center justify-between px-10 h-[68px] border-b border-[#E0E0E0] bg-white sticky top-0 z-[999]">
-        <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
-          ← Dashboard
-        </Link>
+        <div className="flex items-center gap-8">
+          <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
+            ← Dashboard
+          </Link>
+          <div className="flex items-center gap-6">
+            <Link href="/employee/payroll" className={tabClass(!isRun)}>
+              Employee Master
+            </Link>
+            <Link href="/employee/payroll/run" className={tabClass(isRun)}>
+              Payroll Run
+            </Link>
+          </div>
+        </div>
         <button
           onClick={handleLogout}
           className="bg-madael-red text-white px-5 py-2 text-[13px] font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors cursor-pointer border-0"

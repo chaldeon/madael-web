@@ -147,14 +147,9 @@ export default function JadwalKerjaPage() {
 
   return (
     <div className="max-w-[900px] mx-auto px-6 py-10">
-      <div className="flex items-end justify-between mb-8 flex-wrap gap-4">
-        <div>
-          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Jadwal Kerja</h1>
-          <p className="text-sm text-[#6B6B6B] mt-1">Atur jam masuk, jam pulang, dan hari kerja tiap employee.</p>
-        </div>
-        <Link href="/employee/absensi" className="text-sm text-[#6B6B6B] hover:text-madael-red">
-          ← Absensi
-        </Link>
+      <div className="mb-8">
+        <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Jadwal Kerja</h1>
+        <p className="text-sm text-[#6B6B6B] mt-1">Atur jam masuk, jam pulang, dan hari kerja tiap employee.</p>
       </div>
 
       {loading ? (

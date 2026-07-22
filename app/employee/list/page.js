@@ -34,6 +34,10 @@ export default function EmployeeListPage() {
   const [accessModules, setAccessModules] = useState([]); // array module_name yang dicentang
   const [accessLoading, setAccessLoading] = useState(false);
   const [accessSavingKey, setAccessSavingKey] = useState(null);
+  const [editEmployee, setEditEmployee] = useState(null); // employee row lagi diedit
+  const [editForm, setEditForm] = useState(emptyForm);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState(null);
 
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
@@ -105,6 +109,52 @@ export default function EmployeeListPage() {
     setSubmitting(false);
   };
 
+  // ---- Edit Employee ----
+
+  const openEditModal = (employee) => {
+    setEditForm({
+      nama: employee.nama || '',
+      employee_id: employee.employee_id || '',
+      email: employee.email || '',
+      perusahaan: employee.perusahaan || '',
+      status: employee.status || 'Aktif',
+      is_superadmin: !!employee.is_superadmin,
+    });
+    setEditError(null);
+    setEditEmployee(employee);
+  };
+
+  const handleEditFormChange = (field, value) => {
+    setEditForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSubmitEdit = async (e) => {
+    e.preventDefault();
+    setEditSubmitting(true);
+    setEditError(null);
+
+    try {
+      const res = await fetch(`/api/employee/${editEmployee.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setEditError(data.error || 'Gagal mengubah data employee.');
+        setEditSubmitting(false);
+        return;
+      }
+
+      setEditEmployee(null);
+      fetchEmployees();
+    } catch (err) {
+      setEditError('Terjadi kesalahan. Coba lagi.');
+    }
+    setEditSubmitting(false);
+  };
+  
   // ---- Kelola Akses ----
 
   const openAccessModal = async (employee) => {
@@ -232,12 +282,20 @@ export default function EmployeeListPage() {
                     </span>
                   </td>
                   <td className="px-5 py-3.5">
-                    <button
-                      onClick={() => openAccessModal(emp)}
-                      className="text-madael-red hover:text-madael-dark text-xs font-medium"
-                    >
-                      Kelola Akses
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => openEditModal(emp)}
+                        className="text-[#3D3D3D] hover:text-black text-xs font-medium"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => openAccessModal(emp)}
+                        className="text-madael-red hover:text-madael-dark text-xs font-medium"
+                      >
+                        Kelola Akses
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -342,6 +400,90 @@ export default function EmployeeListPage() {
                 </button>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Edit Employee */}
+      {editEmployee && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6">
+          <div className="w-full max-w-[440px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="font-serif text-[20px] font-normal text-black">Edit Employee</h2>
+              <button onClick={() => setEditEmployee(null)} className="text-[#6B6B6B] hover:text-black">
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitEdit} className="space-y-4">
+              <div>
+                <label className={labelClass}>Nama</label>
+                <input
+                  required
+                  value={editForm.nama}
+                  onChange={(e) => handleEditFormChange('nama', e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Employee ID</label>
+                <input
+                  value={editForm.employee_id}
+                  onChange={(e) => handleEditFormChange('employee_id', e.target.value)}
+                  placeholder="MDL002"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Email</label>
+                <input
+                  disabled
+                  value={editForm.email}
+                  className={`${inputClass} bg-[#F4F4F4] text-[#9A9A9A] cursor-not-allowed`}
+                />
+                <p className="text-xs text-[#9A9A9A] mt-1">
+                  Email tidak bisa diubah di sini karena terhubung ke akun login.
+                </p>
+              </div>
+              <div>
+                <label className={labelClass}>Perusahaan</label>
+                <input
+                  value={editForm.perusahaan}
+                  onChange={(e) => handleEditFormChange('perusahaan', e.target.value)}
+                  placeholder="Madael"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Status</label>
+                <select
+                  value={editForm.status}
+                  onChange={(e) => handleEditFormChange('status', e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="Aktif">Aktif</option>
+                  <option value="Nonaktif">Nonaktif</option>
+                </select>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-black">
+                <input
+                  type="checkbox"
+                  checked={editForm.is_superadmin}
+                  onChange={(e) => handleEditFormChange('is_superadmin', e.target.checked)}
+                />
+                Superadmin
+              </label>
+
+              {editError && <p className="text-sm text-madael-red">{editError}</p>}
+
+              <button
+                type="submit"
+                disabled={editSubmitting}
+                className="w-full bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {editSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}
+              </button>
+            </form>
           </div>
         </div>
       )}

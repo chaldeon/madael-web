@@ -3,12 +3,13 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import { X, Plus, Pencil, Trash2, Calculator } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
-import { hitungPPh21TER, hitungBPJS, hitungBrutoPPh21, PTKP_DATA, JKK_OPTIONS } from '@/lib/payroll/calculations';
+import { hitungPPh21TER, hitungBPJS, hitungBrutoPPh21, hitungPenaltyTelat, PTKP_DATA, JKK_OPTIONS } from '@/lib/payroll/calculations';
 
 const STATUS_OPTIONS = ['PHL', 'Tetap'];
 const NPWP_OPTIONS = [
@@ -30,6 +31,18 @@ function currentMonthValue() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+// Sama seperti timeStr() di app/employee/absensi/page.js — dibandingkan
+// sebagai string HH:MM:SS jam lokal (browser Indonesia = WIB), konsisten
+// dengan cara status_telat diset waktu clock in.
+function menitTelat(clockInIso, jamMasuk) {
+  if (!clockInIso || !jamMasuk) return 0;
+  const d = new Date(clockInIso);
+  const clockMinutes = d.getHours() * 60 + d.getMinutes();
+  const [jh, jm] = jamMasuk.split(':').map(Number);
+  const jamMasukMinutes = jh * 60 + jm;
+  return Math.max(0, clockMinutes - jamMasukMinutes);
+}
+
 const EMPTY_FORM = {
   nama: '',
   client_id: '',
@@ -42,10 +55,19 @@ const EMPTY_FORM = {
   status_ptkp: '',
   npwp_status: '',
   jkk_rate: '',
+  nama_rekening: '',
+  no_rekening: '',
 };
 
 function formatRupiah(value) {
   return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
+}
+
+function formatNumberDisplay(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  const num = Number(value);
+  if (Number.isNaN(num)) return '';
+  return num.toLocaleString('id-ID');
 }
 
 function totalTunjangan(row) {
@@ -69,13 +91,19 @@ function pairsToObj(pairs) {
 }
 
 function NumberField({ label, value, onChange }) {
+  const handleChange = (e) => {
+    const raw = e.target.value.replace(/[^\d]/g, '');
+    onChange(raw === '' ? 0 : Number(raw));
+  };
   return (
     <label className="flex flex-col gap-1">
       <span className="text-xs text-[#6B6B6B]">{label}</span>
       <input
-        type="number"
-        value={value}
-        onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
+        type="text"
+        inputMode="numeric"
+        value={formatNumberDisplay(value)}
+        onChange={handleChange}
+        placeholder="0"
         className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
       />
     </label>
@@ -160,10 +188,12 @@ function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onS
           <SelectField label="Status PTKP" value={form.status_ptkp} onChange={set('status_ptkp')} options={PTKP_OPTIONS} />
           <SelectField label="Status NPWP" value={form.npwp_status} onChange={set('npwp_status')} options={NPWP_OPTIONS} />
           <SelectField label="Tingkat Risiko JKK" value={form.jkk_rate} onChange={set('jkk_rate')} options={JKK_SELECT_OPTIONS} />
+          <TextField label="Nama Rekening" value={form.nama_rekening} onChange={set('nama_rekening')} />
+          <TextField label="No Rekening" value={form.no_rekening} onChange={set('no_rekening')} />
         </div>
 
         <p className="text-xs text-[#9A9A9A] -mt-2 mb-4">
-          "Akun Absensi", PTKP, NPWP, dan JKK dipakai untuk fitur Hitung PPh21/BPJS & referensi kehadiran — boleh dikosongkan dulu kalau belum ada datanya.
+          "Akun Absensi", PTKP, NPWP, dan JKK dipakai untuk fitur Hitung PPh21/BPJS & referensi kehadiran — boleh dikosongkan dulu kalau belum ada datanya. Nama/No Rekening dipakai untuk Export Transfer di Payroll Run.
         </p>
 
         <div className="mb-6">
@@ -184,10 +214,11 @@ function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onS
                   className="flex-1 border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red"
                 />
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   placeholder="0"
-                  value={p.value}
-                  onChange={(e) => updatePair(idx, 'value', e.target.value)}
+                  value={formatNumberDisplay(p.value)}
+                  onChange={(e) => updatePair(idx, 'value', e.target.value.replace(/[^\d]/g, ''))}
                   className="w-32 border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red"
                 />
                 <button onClick={() => removePair(idx)} className="text-[#6B6B6B] hover:text-madael-red">
@@ -243,21 +274,28 @@ function HitungModal({ row, periode, onClose }) {
     const lastDayNum = new Date(year, month, 0).getDate();
     const lastDay = `${periode}-${String(lastDayNum).padStart(2, '0')}`;
 
-    supabase
-      .from('attendance')
-      .select('clock_in, status_telat')
-      .eq('employee_id', row.linked_employee_id)
-      .gte('tanggal', firstDay)
-      .lte('tanggal', lastDay)
-      .then(({ data }) => {
-        if (cancelled) return;
-        const rows = data || [];
-        setAttSummary({
-          totalHadir: rows.filter((r) => r.clock_in).length,
-          totalTelat: rows.filter((r) => r.status_telat).length,
-        });
-        setAttLoading(false);
+    Promise.all([
+      supabase
+        .from('attendance')
+        .select('clock_in, status_telat')
+        .eq('employee_id', row.linked_employee_id)
+        .gte('tanggal', firstDay)
+        .lte('tanggal', lastDay),
+      supabase.from('work_schedule').select('jam_masuk').eq('employee_id', row.linked_employee_id).maybeSingle(),
+    ]).then(([{ data }, { data: sched }]) => {
+      if (cancelled) return;
+      const rows = data || [];
+      const totalMenitTelat = sched?.jam_masuk
+        ? rows.reduce((sum, r) => sum + menitTelat(r.clock_in, sched.jam_masuk), 0)
+        : 0;
+      setAttSummary({
+        totalHadir: rows.filter((r) => r.clock_in).length,
+        totalTelat: rows.filter((r) => r.status_telat).length,
+        totalMenitTelat,
+        adaJadwal: !!sched?.jam_masuk,
       });
+      setAttLoading(false);
+    });
 
     return () => { cancelled = true; };
   }, [supabase, row.linked_employee_id, periode]);
@@ -265,9 +303,10 @@ function HitungModal({ row, periode, onClose }) {
   const gajiPokok = Number(row.gaji_pokok) || 0; // Gross Salary — basis BPJS
   const allowance = totalTunjangan(row); // tunjangan + komponen lain
   const totalGajiTakeHome = gajiPokok + allowance;
+  const penalty = attSummary?.adaJadwal ? hitungPenaltyTelat(attSummary.totalMenitTelat) : 0;
 
   const bpjs = row.jkk_rate != null ? hitungBPJS(gajiPokok, row.jkk_rate) : null;
-  const brutoPPh21 = bpjs ? hitungBrutoPPh21(gajiPokok, allowance, bpjs) : null;
+  const brutoPPh21 = bpjs ? hitungBrutoPPh21(gajiPokok, allowance, bpjs, penalty) : null;
   const pph21 = (bpjs && row.status_ptkp) ? hitungPPh21TER(brutoPPh21, row.status_ptkp) : null;
 
   return (
@@ -298,7 +337,8 @@ function HitungModal({ row, periode, onClose }) {
           <h3 className="text-sm font-semibold text-black mb-2">PPh21 (TER Bulanan)</h3>
           {pph21 ? (
             <div className="text-sm text-[#6B6B6B] flex flex-col gap-1">
-              <div className="flex justify-between"><span>Bruto PPh21 (Gaji + BPJS ditanggung perusahaan)</span><span className="text-black">{formatRupiah(brutoPPh21)}</span></div>
+              <div className="flex justify-between"><span>Penalty (Keterlambatan)</span><span className="text-black">− {formatRupiah(penalty)}</span></div>
+              <div className="flex justify-between"><span>Bruto PPh21 (Gaji + BPJS ditanggung perusahaan − Penalty)</span><span className="text-black">{formatRupiah(brutoPPh21)}</span></div>
               <div className="flex justify-between"><span>Kategori TER</span><span className="text-black">{pph21.category}</span></div>
               <div className="flex justify-between"><span>Tarif</span><span className="text-black">{pph21.rate}%</span></div>
               <div className="flex justify-between font-medium"><span className="text-black">PPh21 Bulanan</span><span className="text-black">{formatRupiah(pph21.pph)}</span></div>
@@ -341,7 +381,17 @@ function HitungModal({ row, periode, onClose }) {
             <div className="text-sm text-[#6B6B6B] flex flex-col gap-1">
               <div className="flex justify-between"><span>Total Hadir</span><span className="text-black">{attSummary?.totalHadir ?? 0} hari</span></div>
               <div className="flex justify-between"><span>Total Telat</span><span className="text-black">{attSummary?.totalTelat ?? 0} hari</span></div>
-              <p className="text-[11px] text-[#9A9A9A] mt-1">Referensi saja — belum masuk rumus otomatis di atas. Potongan (Penalty) terkait telat/tidak hadir belum diimplementasikan, bruto PPh21 di atas dihitung dengan Penalty = Rp0.</p>
+              {attSummary?.adaJadwal ? (
+                <>
+                  <div className="flex justify-between"><span>Total Menit Telat (sebulan)</span><span className="text-black">{attSummary.totalMenitTelat} menit</span></div>
+                  <div className="flex justify-between"><span>Penalty Keterlambatan</span><span className="text-black">{formatRupiah(penalty)}</span></div>
+                  <p className="text-[11px] text-[#9A9A9A] mt-1">Penalty sudah otomatis masuk ke rumus Bruto PPh21 di atas.</p>
+                </>
+              ) : (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 mt-1">
+                  Employee ini belum punya Jadwal Kerja (jam masuk) — penalty keterlambatan tidak bisa dihitung, dianggap Rp0 untuk sementara.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -375,7 +425,7 @@ export default function PayrollManagerPage() {
       supabase.from('payroll_clients').select('id, nama_klien').order('nama_klien', { ascending: true }),
       supabase
         .from('employees_master')
-        .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, jkk_rate, created_at')
+        .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, jkk_rate, nama_rekening, no_rekening, created_at')
         .order('created_at', { ascending: false }),
       supabase.from('employees').select('id, nama').eq('status', 'Aktif').order('nama'),
     ]);
@@ -420,6 +470,8 @@ export default function PayrollManagerPage() {
       status_ptkp: row.status_ptkp || '',
       npwp_status: row.npwp_status || '',
       jkk_rate: row.jkk_rate ?? '',
+      nama_rekening: row.nama_rekening || '',
+      no_rekening: row.no_rekening || '',
     });
     setModalOpen(true);
   };
@@ -441,6 +493,8 @@ export default function PayrollManagerPage() {
       status_ptkp: form.status_ptkp || null,
       npwp_status: form.npwp_status || null,
       jkk_rate: form.jkk_rate === '' ? null : Number(form.jkk_rate),
+      nama_rekening: form.nama_rekening.trim() || null,
+      no_rekening: form.no_rekening.trim() || null,
     };
 
     const { error } = form.id
@@ -467,12 +521,20 @@ export default function PayrollManagerPage() {
             Employee master data dan struktur gaji seluruh klien yang di-manage Madael.
           </p>
         </div>
-        <button
-          onClick={openAdd}
-          className="flex items-center gap-2 bg-madael-red text-white px-5 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors"
-        >
-          <Plus size={16} /> Tambah Employee
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/employee/payroll/run"
+            className="text-sm text-madael-red hover:text-madael-dark font-medium"
+          >
+            Payroll Run →
+          </Link>
+          <button
+            onClick={openAdd}
+            className="flex items-center gap-2 bg-madael-red text-white px-5 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors"
+          >
+            <Plus size={16} /> Tambah Employee
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-3 mb-4">

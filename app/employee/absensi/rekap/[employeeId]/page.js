@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
-import { AlertTriangle, MapPin } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, MapPin } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
@@ -173,18 +173,20 @@ export default function RekapDetailPage() {
 
   return (
     <div className="max-w-[900px] mx-auto px-6 py-10">
-      <div className="flex items-end justify-between mb-8 flex-wrap gap-4">
-        <div>
-          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
-            {loading ? 'Memuat...' : (emp?.nama || 'Karyawan tidak ditemukan')}
-          </h1>
-          <p className="text-sm text-[#6B6B6B] mt-1">
-            {emp?.perusahaan ? `${emp.perusahaan} — ` : ''}Log kehadiran bulan {monthValue}.
-          </p>
-        </div>
-        <Link href="/employee/absensi/rekap" className="text-sm text-[#6B6B6B] hover:text-madael-red">
-          ← Rekap Bulanan
+      <div className="mb-8">
+        <Link
+          href="/employee/absensi/rekap"
+          className="flex items-center gap-2 text-sm text-[#6B6B6B] hover:text-madael-red transition-colors mb-4"
+        >
+          <ArrowLeft size={16} />
+          Rekap Bulanan
         </Link>
+        <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
+          {loading ? 'Memuat...' : (emp?.nama || 'Karyawan tidak ditemukan')}
+        </h1>
+        <p className="text-sm text-[#6B6B6B] mt-1">
+          {emp?.perusahaan ? `${emp.perusahaan} — ` : ''}Log kehadiran bulan {monthValue}.
+        </p>
       </div>
 
       <div className="flex items-start gap-2 bg-[#F4F4F4] border border-[#E0E0E0] text-[#6B6B6B] text-xs px-4 py-3 mb-6">

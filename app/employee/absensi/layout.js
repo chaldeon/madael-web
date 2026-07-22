@@ -9,7 +9,7 @@ export default function AbsensiLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
-  const { status, hasModule } = useModuleAccess(['absensi', 'absensi_jadwal']);
+  const { status, employee, hasModule } = useModuleAccess(['absensi', 'absensi_jadwal']);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -42,6 +42,9 @@ export default function AbsensiLayout({ children }) {
   }
 
   const isJadwal = pathname.startsWith('/employee/absensi/jadwal');
+  const isRekap = pathname.startsWith('/employee/absensi/rekap');
+  const isKoreksi = pathname.startsWith('/employee/absensi/koreksi');
+  const isAbsensi = !isJadwal && !isRekap && !isKoreksi;
   const tabClass = (active) =>
     `text-sm tracking-[0.02em] transition-colors ${
       active ? 'text-black font-medium' : 'text-[#6B6B6B] hover:text-black'
@@ -56,13 +59,23 @@ export default function AbsensiLayout({ children }) {
           </Link>
           <div className="flex items-center gap-6">
             {hasModule('absensi') && (
-              <Link href="/employee/absensi" className={tabClass(!isJadwal)}>
+              <Link href="/employee/absensi" className={tabClass(isAbsensi)}>
                 Absensi
               </Link>
             )}
             {hasModule('absensi_jadwal') && (
               <Link href="/employee/absensi/jadwal" className={tabClass(isJadwal)}>
                 Jadwal Kerja
+              </Link>
+            )}
+            {employee?.is_superadmin && (
+              <Link href="/employee/absensi/rekap" className={tabClass(isRekap)}>
+                Rekap Bulanan
+              </Link>
+            )}
+            {employee?.is_superadmin && (
+              <Link href="/employee/absensi/koreksi" className={tabClass(isKoreksi)}>
+                Koreksi
               </Link>
             )}
           </div>

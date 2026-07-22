@@ -2,14 +2,42 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { X, Plus, Eye, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { hitungBPJS, hitungBrutoPPh21, hitungPPh21TER, hitungPenaltyTelat, PTKP_DATA, JKK_OPTIONS } from '@/lib/payroll/calculations';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+
+const MONTH_NAMES = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+];
+
+function buildPeriodeLabel(tahun, bulan) {
+  if (!tahun || !bulan) return '';
+  const nama = MONTH_NAMES[Number(bulan) - 1];
+  return nama ? `${nama} ${tahun}` : '';
+}
+
+function previewNomorDokumen(lastNumber) {
+  const tahun = new Date().getFullYear();
+  const nomorPadded = String((lastNumber || 0) + 1).padStart(3, '0');
+  return `INV/${tahun}/${nomorPadded}`;
+}
+
+// Sama persis dengan menitTelat() di employee/payroll — dipakai untuk hitung penalty keterlambatan
+function menitTelat(clockInIso, jamMasuk) {
+  if (!clockInIso || !jamMasuk) return 0;
+  const d = new Date(clockInIso);
+  const clockMinutes = d.getHours() * 60 + d.getMinutes();
+  const [jh, jm] = jamMasuk.split(':').map(Number);
+  const jamMasukMinutes = jh * 60 + jm;
+  return Math.max(0, clockMinutes - jamMasukMinutes);
+}
 
 const PENDAPATAN_FIELDS = [
   { key: 'gaji_pokok', label: 'Gaji Pokok' },
@@ -30,6 +58,7 @@ const POTONGAN_FIELDS = [
   { key: 'jp_karyawan', label: 'JP Karyawan' },
   { key: 'bpjs_k_karyawan', label: 'BPJS K Karyawan' },
   { key: 'pph21', label: 'PPh 21' },
+  { key: 'penalty', label: 'Penalty (Keterlambatan)' },
 ];
 
 const NUMERIC_KEYS = [
@@ -47,7 +76,7 @@ const EMPTY_FORM = {
   gaji_pokok: 0, lembur: 0, tunjangan_transport: 0, tunjangan_lain: 0,
   bpjs_k_perusahaan: 0,
   jkk_perusahaan: 0, jkm_perusahaan: 0, jht_perusahaan: 0, jp_perusahaan: 0,
-  jht_karyawan: 0, jp_karyawan: 0, bpjs_k_karyawan: 0, pph21: 0,
+  jht_karyawan: 0, jp_karyawan: 0, bpjs_k_karyawan: 0, pph21: 0, penalty: 0,
   rekening: '', metode_pembayaran: 'Transfer', tanggal_pembayaran: '',
   npwp: '', ptkp: '', no_bpjs_k: '', no_bpjs_tk: '',
   is_published: false,
@@ -57,16 +86,39 @@ function formatRupiah(value) {
   return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
 }
 
+function formatRibuan(value) {
+  const num = Number(value) || 0;
+  return num === 0 ? '' : num.toLocaleString('id-ID');
+}
+
 function NumberField({ label, value, onChange }) {
+  const [display, setDisplay] = useState(formatRibuan(value));
+
+  useEffect(() => {
+    setDisplay(formatRibuan(value));
+  }, [value]);
+
+  const handleChange = (e) => {
+    const digitsOnly = e.target.value.replace(/\D/g, '');
+    const num = digitsOnly === '' ? 0 : Number(digitsOnly);
+    setDisplay(digitsOnly === '' ? '' : num.toLocaleString('id-ID'));
+    onChange(num);
+  };
+
   return (
     <label className="flex flex-col gap-1">
       <span className="text-xs text-[#6B6B6B]">{label}</span>
-      <input
-        type="number"
-        value={value}
-        onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
-        className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
-      />
+      <div className="relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#9A9A9A]">Rp</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={display}
+          onChange={handleChange}
+          placeholder="0"
+          className="w-full border border-[#E0E0E0] pl-9 pr-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+        />
+      </div>
     </label>
   );
 }
@@ -85,18 +137,171 @@ function TextField({ label, value, onChange, type = 'text' }) {
   );
 }
 
-function PayslipFormModal({ form, setForm, employees, onClose, onSubmit, saving, isEdit, saveError }) {
+function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmit, saving, isEdit, saveError }) {
+  const [loadingDefaults, setLoadingDefaults] = useState(false);
+  const [loadingPenalty, setLoadingPenalty] = useState(false);
+  const [penaltyNote, setPenaltyNote] = useState('');
+  const [jkkRate, setJkkRate] = useState(JKK_OPTIONS[0].value);
   const bpjsTkPerusahaan =
     (form.jkk_perusahaan || 0) + (form.jkm_perusahaan || 0) + (form.jht_perusahaan || 0) + (form.jp_perusahaan || 0);
   const totalPendapatan =
     (form.gaji_pokok || 0) + (form.lembur || 0) + (form.tunjangan_transport || 0) + (form.tunjangan_lain || 0) +
     bpjsTkPerusahaan + (form.bpjs_k_perusahaan || 0);
+  // Total Potongan = Penalty + BPJS ditanggung karyawan (JHT 2% + JP 1% + Kesehatan 1%) + PPh21
   const totalPotongan =
-    (form.jht_karyawan || 0) + (form.jp_karyawan || 0) + (form.bpjs_k_karyawan || 0) + (form.pph21 || 0);
+    (form.penalty || 0) + (form.jht_karyawan || 0) + (form.jp_karyawan || 0) + (form.bpjs_k_karyawan || 0) + (form.pph21 || 0);
+  // Take Home Pay = Gaji Pokok + Allowance (Tunjangan) + Compensation (Lembur) − Total Potongan
   const takeHomePay =
     (form.gaji_pokok || 0) + (form.lembur || 0) + (form.tunjangan_transport || 0) + (form.tunjangan_lain || 0) - totalPotongan;
 
+  // Hitung ulang BPJS (+ PPh21 kalau PTKP sudah dipilih) pakai rumus yang
+  // SAMA PERSIS dengan employee/payroll (lib/payroll/calculations.js), basis
+  // BPJS = Gaji Pokok saja, bruto PPh21 = Gaji Pokok + Tunjangan + kenikmatan
+  // BPJS (kesehatan+JKK+JKM) yang ditanggung perusahaan − Penalty.
+  const recalcFromPendapatan = (overrides = {}, rateOverride) => {
+    const merged = { ...form, ...overrides };
+    const gajiPokok = Number(merged.gaji_pokok) || 0;
+    const allowance = (Number(merged.tunjangan_transport) || 0) + (Number(merged.tunjangan_lain) || 0);
+    const penalty = Number(merged.penalty) || 0;
+    const rate = rateOverride !== undefined ? rateOverride : jkkRate;
+
+    const bpjs = hitungBPJS(gajiPokok, rate);
+    const brutoPPh21 = hitungBrutoPPh21(gajiPokok, allowance, bpjs, penalty);
+    const pph21Result = merged.ptkp ? hitungPPh21TER(brutoPPh21, merged.ptkp) : null;
+
+    setForm((prev) => ({
+      ...prev,
+      ...overrides,
+      bpjs_k_perusahaan: Math.round(bpjs.kesehatanEmployer),
+      bpjs_k_karyawan: Math.round(bpjs.kesehatanEmployee),
+      jkk_perusahaan: Math.round(bpjs.jkk),
+      jkm_perusahaan: Math.round(bpjs.jkm),
+      jht_perusahaan: Math.round(bpjs.jhtEmployer),
+      jht_karyawan: Math.round(bpjs.jhtEmployee),
+      jp_perusahaan: Math.round(bpjs.jpEmployer),
+      jp_karyawan: Math.round(bpjs.jpEmployee),
+      // PPh21 dibulatkan ke bawah (floor) — konvensi resmi DJP untuk PPh21 TER,
+      // bukan dibulatkan ke terdekat. Ini penting supaya Total Potongan & THP pas.
+      pph21: pph21Result ? Math.floor(pph21Result.pph) : prev.pph21,
+    }));
+  };
+
+  // Hitung penalty keterlambatan otomatis dari data attendance + work_schedule
+  // karyawan pada periode yang dipilih — sama persis dengan employee/payroll.
+  const loadPenalty = async (employeeId, periode) => {
+    if (!supabase || !employeeId || !periode) return;
+    const [year, month] = periode.split('-').map(Number);
+    if (!year || !month) return;
+
+    setLoadingPenalty(true);
+    setPenaltyNote('');
+    try {
+      const firstDay = `${periode}-01`;
+      const lastDayNum = new Date(year, month, 0).getDate();
+      const lastDay = `${periode}-${String(lastDayNum).padStart(2, '0')}`;
+
+      const [{ data: rows }, { data: sched }] = await Promise.all([
+        supabase
+          .from('attendance')
+          .select('clock_in, status_telat')
+          .eq('employee_id', employeeId)
+          .gte('tanggal', firstDay)
+          .lte('tanggal', lastDay),
+        supabase.from('work_schedule').select('jam_masuk').eq('employee_id', employeeId).maybeSingle(),
+      ]);
+
+      if (!sched?.jam_masuk) {
+        setPenaltyNote('Karyawan ini belum punya Jadwal Kerja — penalty tidak bisa dihitung otomatis, dianggap Rp0 (bisa diisi manual).');
+        return;
+      }
+
+      const totalMenitTelat = (rows || []).reduce((sum, r) => sum + menitTelat(r.clock_in, sched.jam_masuk), 0);
+      const penalty = hitungPenaltyTelat(totalMenitTelat);
+      recalcFromPendapatan({ penalty });
+    } finally {
+      setLoadingPenalty(false);
+    }
+  };
+
+  const handleJkkRateChange = (val) => {
+    const rate = Number(val);
+    setJkkRate(rate);
+    recalcFromPendapatan({}, rate);
+  };
+
   const set = (key) => (val) => setForm((prev) => ({ ...prev, [key]: val }));
+
+  const bulanRef = useRef(null);
+  const [periodeTahun = '', periodeBulan = ''] = (form.periode || '').split('-');
+
+  const updatePeriode = (tahun, bulan) => {
+    const periode = tahun || bulan ? `${tahun}-${bulan}` : '';
+    setForm((prev) => ({
+      ...prev,
+      periode,
+      periode_label: buildPeriodeLabel(tahun, bulan),
+    }));
+    if (!isEdit && tahun && bulan && form.employee_id) {
+      loadPenalty(form.employee_id, `${tahun}-${bulan}`);
+    }
+  };
+
+  const handleTahunChange = (val) => {
+    const tahun = val.replace(/\D/g, '').slice(0, 4);
+    updatePeriode(tahun, periodeBulan);
+    if (tahun.length === 4) bulanRef.current?.focus();
+  };
+
+  const handleBulanChange = (val) => {
+    updatePeriode(periodeTahun, val);
+  };
+
+  const DEFAULT_KEYS = [
+    'rekening', 'metode_pembayaran', 'npwp', 'ptkp', 'no_bpjs_k', 'no_bpjs_tk',
+    'gaji_pokok', 'tunjangan_transport', 'tunjangan_lain',
+    'bpjs_k_perusahaan', 'jkk_perusahaan', 'jkm_perusahaan', 'jht_perusahaan', 'jp_perusahaan',
+    'jht_karyawan', 'jp_karyawan', 'bpjs_k_karyawan', 'pph21',
+  ];
+
+  const handleEmployeeChange = async (employeeId) => {
+    setForm((prev) => ({ ...prev, employee_id: employeeId }));
+    if (isEdit || !employeeId || !supabase) return;
+
+    setLoadingDefaults(true);
+    try {
+      // 1. Utamakan data dari slip gaji terakhir milik karyawan ini
+      const { data: lastSlip } = await supabase
+        .from('payslips')
+        .select(DEFAULT_KEYS.join(', '))
+        .eq('employee_id', employeeId)
+        .order('periode', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastSlip) {
+        setForm((prev) => ({ ...prev, ...lastSlip }));
+        return;
+      }
+
+      // 2. Belum pernah ada slip -> coba ambil dari data master karyawan (payroll)
+      const { data: master } = await supabase
+        .from('employees_master')
+        .select('gaji_pokok, tunjangan, status_ptkp')
+        .eq('linked_employee_id', employeeId)
+        .maybeSingle();
+
+      if (master) {
+        recalcFromPendapatan({
+          gaji_pokok: master.gaji_pokok || 0,
+          tunjangan_lain: master.tunjangan || 0,
+          ptkp: master.status_ptkp || '',
+        });
+      }
+    } finally {
+      setLoadingDefaults(false);
+    }
+    if (form.periode) loadPenalty(employeeId, form.periode);
+  };
 
   return (
     <div className="fixed inset-0 bg-black/40 z-[1000] flex items-start justify-center overflow-y-auto py-10 px-4">
@@ -115,7 +320,7 @@ function PayslipFormModal({ form, setForm, employees, onClose, onSubmit, saving,
               <span className="text-xs text-[#6B6B6B]">Karyawan</span>
               <select
                 value={form.employee_id}
-                onChange={(e) => set('employee_id')(e.target.value)}
+                onChange={(e) => handleEmployeeChange(e.target.value)}
                 disabled={isEdit}
                 className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors disabled:bg-[#F4F4F4]"
               >
@@ -124,10 +329,60 @@ function PayslipFormModal({ form, setForm, employees, onClose, onSubmit, saving,
                   <option key={e.id} value={e.id}>{e.nama}</option>
                 ))}
               </select>
+              {loadingDefaults && (
+                <span className="text-[11px] text-[#9A9A9A]">Mengambil data default karyawan...</span>
+              )}
             </label>
-            <TextField label="Periode (YYYY-MM)" value={form.periode} onChange={set('periode')} />
-            <TextField label="Periode Label (mis. Juli 2026)" value={form.periode_label} onChange={set('periode_label')} />
-            <TextField label="Nomor Dokumen" value={form.nomor_dokumen} onChange={set('nomor_dokumen')} />
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-[#6B6B6B]">Tahun</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                placeholder="2026"
+                value={periodeTahun}
+                onChange={(e) => handleTahunChange(e.target.value)}
+                className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-[#6B6B6B]">Bulan</span>
+              <select
+                ref={bulanRef}
+                value={periodeBulan}
+                onChange={(e) => handleBulanChange(e.target.value)}
+                className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+              >
+                <option value="">Pilih bulan...</option>
+                {MONTH_NAMES.map((nama, i) => {
+                  const val = String(i + 1).padStart(2, '0');
+                  return <option key={val} value={val}>{nama}</option>;
+                })}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 col-span-2">
+              <span className="text-xs text-[#6B6B6B]">Periode Label (otomatis)</span>
+              <input
+                type="text"
+                value={form.periode_label}
+                readOnly
+                className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-[#F4F4F4] cursor-not-allowed"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-[#6B6B6B]">Nomor Dokumen (otomatis, kode INV)</span>
+              <input
+                type="text"
+                value={form.nomor_dokumen || (isEdit ? '' : 'Menghitung nomor berikutnya...')}
+                readOnly
+                className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-[#F4F4F4] cursor-not-allowed"
+              />
+              {!isEdit && (
+                <span className="text-[11px] text-[#9A9A9A]">
+                  Preview — nomor final baru resmi dipakai (counter bertambah) saat kamu klik Simpan.
+                </span>
+              )}
+            </label>
             <TextField label="Rekening" value={form.rekening} onChange={set('rekening')} />
           </div>
 
@@ -137,11 +392,41 @@ function PayslipFormModal({ form, setForm, employees, onClose, onSubmit, saving,
               PENDAPATAN
             </p>
             <div className="grid grid-cols-2 gap-4 mb-4">
-              {PENDAPATAN_FIELDS.map((f) => (
-                <NumberField key={f.key} label={f.label} value={form[f.key]} onChange={set(f.key)} />
-              ))}
+              <NumberField
+                label="Gaji Pokok"
+                value={form.gaji_pokok}
+                onChange={(val) => recalcFromPendapatan({ gaji_pokok: val })}
+              />
+              <NumberField label="Lembur" value={form.lembur} onChange={set('lembur')} />
+              <NumberField
+                label="Tunjangan Transport"
+                value={form.tunjangan_transport}
+                onChange={(val) => recalcFromPendapatan({ tunjangan_transport: val })}
+              />
+              <NumberField
+                label="Tunjangan Lain"
+                value={form.tunjangan_lain}
+                onChange={(val) => recalcFromPendapatan({ tunjangan_lain: val })}
+              />
             </div>
-            <p className="text-[11px] text-[#9A9A9A] mb-2">Rincian BPJS TK Perusahaan (auto-total: {formatRupiah(bpjsTkPerusahaan)})</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] text-[#9A9A9A]">Rincian BPJS TK Perusahaan (auto-total: {formatRupiah(bpjsTkPerusahaan)})</p>
+              <label className="flex items-center gap-2">
+                <span className="text-[11px] text-[#9A9A9A] whitespace-nowrap">Kategori JKK</span>
+                <select
+                  value={jkkRate}
+                  onChange={(e) => handleJkkRateChange(e.target.value)}
+                  className="border border-[#E0E0E0] px-2 py-1 text-xs text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+                >
+                  {JKK_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="text-[11px] text-[#9A9A9A] mb-2 -mt-1">
+              BPJS di bawah otomatis dihitung dari Gaji Pokok (rumus sama seperti employee/payroll) — tetap bisa diedit manual kalau perlu.
+            </p>
             <div className="grid grid-cols-2 gap-4 mb-4">
               {BPJS_PERUSAHAAN_FIELDS.map((f) => (
                 <NumberField key={f.key} label={f.label} value={form[f.key]} onChange={set(f.key)} />
@@ -157,6 +442,11 @@ function PayslipFormModal({ form, setForm, employees, onClose, onSubmit, saving,
             <p className="text-xs font-medium tracking-[0.04em] text-black border-b border-[#E0E0E0] pb-2 mb-3">
               POTONGAN
             </p>
+            <p className="text-[11px] text-[#9A9A9A] mb-2">
+              BPJS Karyawan & PPh21 (TER) otomatis dihitung dari Gaji Pokok + PTKP. Penalty keterlambatan otomatis dihitung dari data absensi periode ini — semua tetap bisa diedit manual.
+            </p>
+            {loadingPenalty && <p className="text-[11px] text-[#9A9A9A] mb-2">Menghitung penalty keterlambatan...</p>}
+            {!loadingPenalty && penaltyNote && <p className="text-[11px] text-amber-600 mb-2">{penaltyNote}</p>}
             <div className="grid grid-cols-2 gap-4">
               {POTONGAN_FIELDS.map((f) => (
                 <NumberField key={f.key} label={f.label} value={form[f.key]} onChange={set(f.key)} />
@@ -182,7 +472,19 @@ function PayslipFormModal({ form, setForm, employees, onClose, onSubmit, saving,
             </p>
             <div className="grid grid-cols-2 gap-4">
               <TextField label="NPWP" value={form.npwp} onChange={set('npwp')} />
-              <TextField label="PTKP (mis. K/0)" value={form.ptkp} onChange={set('ptkp')} />
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-[#6B6B6B]">PTKP</span>
+                <select
+                  value={form.ptkp}
+                  onChange={(e) => recalcFromPendapatan({ ptkp: e.target.value })}
+                  className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+                >
+                  <option value="">Pilih PTKP...</option>
+                  {Object.entries(PTKP_DATA).map(([key, v]) => (
+                    <option key={key} value={key}>{v.label}</option>
+                  ))}
+                </select>
+              </label>
               <TextField label="Nomor BPJS Kesehatan" value={form.no_bpjs_k} onChange={set('no_bpjs_k')} />
               <TextField label="Nomor BPJS Ketenagakerjaan" value={form.no_bpjs_tk} onChange={set('no_bpjs_tk')} />
             </div>
@@ -217,7 +519,7 @@ function PayslipFormModal({ form, setForm, employees, onClose, onSubmit, saving,
             </button>
             <button
               onClick={() => onSubmit(bpjsTkPerusahaan)}
-              disabled={saving || !form.employee_id || !form.periode}
+              disabled={saving || !form.employee_id || !/^\d{4}-\d{2}$/.test(form.periode || '')}
               className="bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors disabled:opacity-40"
             >
               {saving ? 'Menyimpan...' : 'Simpan'}
@@ -290,10 +592,16 @@ export default function PayslipAdminPage() {
     return Array.from(new Set(payslips.map((p) => p.periode))).sort().reverse();
   }, [payslips]);
 
-  const openCreate = () => {
+  const openCreate = async () => {
     setForm(EMPTY_FORM);
     setEditingId(null);
     setModalOpen(true);
+    const { data } = await supabase
+      .from('document_counters')
+      .select('last_number')
+      .eq('kode', 'INV')
+      .maybeSingle();
+    setForm((prev) => ({ ...prev, nomor_dokumen: previewNomorDokumen(data?.last_number) }));
   };
 
   const openEdit = (p) => {
@@ -314,6 +622,22 @@ export default function PayslipAdminPage() {
     NUMERIC_KEYS.forEach((k) => { payload[k] = Number(payload[k]) || 0; });
     if (!payload.tanggal_pembayaran) payload.tanggal_pembayaran = null;
     delete payload.employees;
+
+    // Nomor dokumen baru hanya digenerate (dan counter INV di-increment) saat membuat slip baru
+    if (!editingId) {
+      const res = await fetch('/api/documents/generate-number', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kode_jenis: 'INV' }),
+      });
+      const numberData = await res.json();
+      if (!res.ok) {
+        setSaving(false);
+        setSaveError(numberData.error || 'Gagal generate nomor dokumen.');
+        return;
+      }
+      payload.nomor_dokumen = numberData.nomor_surat;
+    }
 
     let error;
     if (editingId) {
@@ -345,7 +669,7 @@ export default function PayslipAdminPage() {
   };
 
   const calcTHP = (p) => {
-    const totalPotongan = (p.jht_karyawan || 0) + (p.jp_karyawan || 0) + (p.bpjs_k_karyawan || 0) + (p.pph21 || 0);
+    const totalPotongan = (p.penalty || 0) + (p.jht_karyawan || 0) + (p.jp_karyawan || 0) + (p.bpjs_k_karyawan || 0) + (p.pph21 || 0);
     return (p.gaji_pokok || 0) + (p.lembur || 0) + (p.tunjangan_transport || 0) + (p.tunjangan_lain || 0) - totalPotongan;
   };
 
@@ -486,6 +810,7 @@ export default function PayslipAdminPage() {
           form={form}
           setForm={setForm}
           employees={employees}
+          supabase={supabase}
           onClose={() => setModalOpen(false)}
           onSubmit={handleSubmit}
           saving={saving}

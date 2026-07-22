@@ -133,7 +133,7 @@ export default function PayslipDetailPage() {
     (p.gaji_pokok || 0) + (p.lembur || 0) + (p.tunjangan_transport || 0) + (p.tunjangan_lain || 0) +
     bpjsTkPerusahaan + (p.bpjs_k_perusahaan || 0);
   const totalPotongan =
-    (p.jht_karyawan || 0) + (p.jp_karyawan || 0) + (p.bpjs_k_karyawan || 0) + (p.pph21 || 0);
+    (p.penalty || 0) + (p.jht_karyawan || 0) + (p.jp_karyawan || 0) + (p.bpjs_k_karyawan || 0) + (p.pph21 || 0);
   const takeHomePay =
     (p.gaji_pokok || 0) + (p.lembur || 0) + (p.tunjangan_transport || 0) + (p.tunjangan_lain || 0) - totalPotongan;
 
@@ -199,6 +199,7 @@ export default function PayslipDetailPage() {
             <Row label="BPJS TK Karyawan (JP)" value={formatRupiah(p.jp_karyawan)} />
             <Row label="BPJS K Karyawan" value={formatRupiah(p.bpjs_k_karyawan)} />
             <Row label="PPh 21" value={formatRupiah(p.pph21)} />
+            <Row label="Penalty (Keterlambatan)" value={formatRupiah(p.penalty)} />
             <Row label="Total Potongan" value={formatRupiah(totalPotongan)} bold />
           </div>
         </div>
