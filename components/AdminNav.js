@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLanguage } from '@/context/LanguageContext';
 import { createClient } from '@/lib/supabase-browser';
+import NotificationBell from '@/components/NotificationBell';
 
 export default function AdminNav() {
   const pathname = usePathname();
@@ -59,6 +60,10 @@ export default function AdminNav() {
           >
             {lang === 'id' ? 'Kembali ke Website' : 'Back to Website'}
           </Link>
+        </li>
+
+        <li>
+          <NotificationBell />
         </li>
 
         <li>

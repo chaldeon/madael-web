@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
+import EmployeeHeader from '@/components/EmployeeHeader';
 
 export default function DocumentsLayout({ children }) {
   const pathname = usePathname();
@@ -51,36 +52,34 @@ export default function DocumentsLayout({ children }) {
 
   return (
     <section className="min-h-screen bg-[#F4F4F4]">
-      <div className="print:hidden flex items-center justify-between px-10 h-[68px] border-b border-[#E0E0E0] bg-white sticky top-0 z-[999]">
-        <div className="flex items-center gap-8">
-          <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
-            ← Dashboard
-          </Link>
-          <div className="flex items-center gap-6">
-            {hasModule('document_generator') && (
-              <Link href="/employee/documents" className={tabClass(!isNomorSurat && !isInvoices)}>
-                Documents
-              </Link>
-            )}
-            {hasModule('nomor_surat') && (
-              <Link href="/employee/documents/nomor-surat" className={tabClass(isNomorSurat)}>
-                Nomor Surat
-              </Link>
-            )}
-            {employee?.is_superadmin && (
-              <Link href="/employee/documents/invoices" className={tabClass(isInvoices)}>
-                Invoice
-              </Link>
-            )}
-          </div>
-        </div>
-        <button
-          onClick={handleLogout}
-          className="bg-madael-red text-white px-5 py-2 text-[13px] font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors cursor-pointer border-0"
-        >
-          Logout
-        </button>
-      </div>
+      <EmployeeHeader
+        printHidden
+        onLogout={handleLogout}
+        left={
+          <>
+            <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
+              ← Dashboard
+            </Link>
+            <div className="flex items-center gap-6">
+              {hasModule('document_generator') && (
+                <Link href="/employee/documents" className={tabClass(!isNomorSurat && !isInvoices)}>
+                  Documents
+                </Link>
+              )}
+              {hasModule('nomor_surat') && (
+                <Link href="/employee/documents/nomor-surat" className={tabClass(isNomorSurat)}>
+                  Nomor Surat
+                </Link>
+              )}
+              {employee?.is_superadmin && (
+                <Link href="/employee/documents/invoices" className={tabClass(isInvoices)}>
+                  Invoice
+                </Link>
+              )}
+            </div>
+          </>
+        }
+      />
 
       {children}
     </section>

@@ -7,6 +7,8 @@ import Link from 'next/link';
 import { Check, X as XIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import { notifyEmployee } from '@/lib/notify';
+import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -105,6 +107,22 @@ export default function LeaveRequestAdminPage() {
       return;
     }
     setRequests((prev) => prev.map((r) => (r.id === data.id ? data : r)));
+
+    const label = decision === 'approved' ? 'disetujui' : 'ditolak';
+    notifyEmployee(supabase, {
+      userId: row.employee_id,
+      tipe: `cuti_${decision}`,
+      pesan: `Pengajuan cuti kamu (${formatTanggal(row.tanggal_mulai)} – ${formatTanggal(row.tanggal_selesai)}) telah ${label}.`,
+      link: '/employee/leave-request',
+    });
+
+    logActivity(supabase, {
+      userId: employee.id,
+      aksi: `${decision === 'approved' ? 'approve' : 'reject'}_cuti`,
+      targetTable: 'leave_requests',
+      targetId: row.id,
+      detail: { employee_id: row.employee_id, tanggal_mulai: row.tanggal_mulai, tanggal_selesai: row.tanggal_selesai },
+    });
   };
 
   if (status === 'loading') {

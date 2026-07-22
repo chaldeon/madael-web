@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { X, Plus, Pencil, Trash2, Calculator } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -418,6 +419,25 @@ export default function PayrollManagerPage() {
 
   const [hitungRow, setHitungRow] = useState(null);
 
+  // Id employee (superadmin) yang lagi login — dipakai untuk activity log,
+  // bukan untuk gating akses (itu sudah ditangani PayrollLayout).
+  const [actingEmployeeId, setActingEmployeeId] = useState(null);
+
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || ignore) return;
+      const { data: emp } = await supabase
+        .from('employees')
+        .select('id')
+        .eq('email', user.email)
+        .maybeSingle();
+      if (!ignore && emp) setActingEmployeeId(emp.id);
+    })();
+    return () => { ignore = true; };
+  }, [supabase]);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -497,7 +517,8 @@ export default function PayrollManagerPage() {
       no_rekening: form.no_rekening.trim() || null,
     };
 
-    const { error } = form.id
+    const isEdit = !!form.id;
+    const { error } = isEdit
       ? await supabase.from('employees_master').update(payload).eq('id', form.id)
       : await supabase.from('employees_master').insert(payload);
 
@@ -507,6 +528,14 @@ export default function PayrollManagerPage() {
       setSaveError(error.message || 'Gagal menyimpan, coba lagi.');
       return;
     }
+
+    logActivity(supabase, {
+      userId: actingEmployeeId,
+      aksi: isEdit ? 'edit_struktur_gaji' : 'tambah_employee_master',
+      targetTable: 'employees_master',
+      targetId: form.id || null,
+      detail: { nama: payload.nama, gaji_pokok: payload.gaji_pokok, tunjangan: payload.tunjangan },
+    });
 
     setModalOpen(false);
     loadData();

@@ -8,6 +8,8 @@ import { useParams } from 'next/navigation';
 import { ArrowLeft, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import { notifyEmployees } from '@/lib/notify';
+import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -227,6 +229,14 @@ export default function PayrollRunDetailPage() {
     }
     setRun(data);
 
+    logActivity(supabase, {
+      userId: employee.id,
+      aksi: 'ubah_status_payroll',
+      targetTable: 'payroll_runs',
+      targetId: runId,
+      detail: { periode: run.periode, status_sebelum: run.status, status_sesudah: statusDraft },
+    });
+
     if (statusDraft === 'Approved' && !wasApproved) {
       const result = await generateSlips(items, run.periode);
       const { data: refreshedItems } = await supabase
@@ -239,6 +249,15 @@ export default function PayrollRunDetailPage() {
       if (result.skipped > 0) note += ` ${result.skipped} employee dilewati (belum terhubung ke akun Absensi).`;
       if (result.errors.length > 0) note += ` Error: ${result.errors.join('; ')}`;
       setGenerateNote(note);
+
+      notifyEmployees(supabase, {
+        userIds: (refreshedItems || [])
+          .map((i) => i.employees_master?.linked_employee_id)
+          .filter(Boolean),
+        tipe: 'payroll_approved',
+        pesan: `Payslip periode ${periodeLabel(run.periode)} sudah disetujui dan bisa dilihat.`,
+        link: '/employee/payslip',
+      });
     }
 
     setConfirmIncomplete(false);

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Lock } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { MODULE_REGISTRY } from '@/lib/employeeModules';
+import EmployeeHeader from '@/components/EmployeeHeader';
 
 export default function EmployeeDashboardPage() {
   const router = useRouter();
@@ -96,20 +97,17 @@ export default function EmployeeDashboardPage() {
 
   return (
     <section className="min-h-screen bg-[#F4F4F4]">
-      <div className="flex items-center justify-between px-10 h-[68px] border-b border-[#E0E0E0] bg-white sticky top-0 z-[999]">
-        <div>
-          <p className="text-sm font-semibold text-black">{employee.nama}</p>
-          <p className="text-xs text-[#6B6B6B]">
-            {employee.perusahaan} {employee.is_superadmin && '· Superadmin'}
-          </p>
-        </div>
-        <button
-          onClick={handleLogout}
-          className="bg-madael-red text-white px-5 py-2 text-[13px] font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors cursor-pointer border-0"
-        >
-          Logout
-        </button>
-      </div>
+      <EmployeeHeader
+        onLogout={handleLogout}
+        left={
+          <div>
+            <p className="text-sm font-semibold text-black">{employee.nama}</p>
+            <p className="text-xs text-[#6B6B6B]">
+              {employee.perusahaan} {employee.is_superadmin && '· Superadmin'}
+            </p>
+          </div>
+        }
+      />
 
       <div className="max-w-[1100px] mx-auto px-6 py-10">
         <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
