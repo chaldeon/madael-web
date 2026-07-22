@@ -11,6 +11,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { hitungPPh21TER, hitungBPJS, hitungBrutoPPh21, hitungPenaltyTelat, PTKP_DATA, JKK_OPTIONS } from '@/lib/payroll/calculations';
+import { hitungSisaCuti } from '@/lib/leave';
 
 const STATUS_OPTIONS = ['PHL', 'Tetap'];
 const NPWP_OPTIONS = [
@@ -51,13 +52,14 @@ const EMPTY_FORM = {
   status: 'PHL',
   gaji_pokok: 0,
   tunjangan: 0,
-  komponen_lain: [], // [{ key, value }] saat di-edit, dikonversi ke/dari jsonb saat load/save
+  komponen_lain: [],
   linked_employee_id: '',
   status_ptkp: '',
   npwp_status: '',
   jkk_rate: '',
   nama_rekening: '',
   no_rekening: '',
+  jatah_cuti_tahunan: 12,
 };
 
 function formatRupiah(value) {
@@ -191,6 +193,7 @@ function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onS
           <SelectField label="Tingkat Risiko JKK" value={form.jkk_rate} onChange={set('jkk_rate')} options={JKK_SELECT_OPTIONS} />
           <TextField label="Nama Rekening" value={form.nama_rekening} onChange={set('nama_rekening')} />
           <TextField label="No Rekening" value={form.no_rekening} onChange={set('no_rekening')} />
+          <NumberField label="Jatah Cuti Tahunan (hari)" value={form.jatah_cuti_tahunan} onChange={set('jatah_cuti_tahunan')} />
         </div>
 
         <p className="text-xs text-[#9A9A9A] -mt-2 mb-4">
@@ -445,7 +448,7 @@ export default function PayrollManagerPage() {
       supabase.from('payroll_clients').select('id, nama_klien').order('nama_klien', { ascending: true }),
       supabase
         .from('employees_master')
-        .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, jkk_rate, nama_rekening, no_rekening, created_at')
+        .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, jkk_rate, nama_rekening, no_rekening, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, created_at')
         .order('created_at', { ascending: false }),
       supabase.from('employees').select('id, nama').eq('status', 'Aktif').order('nama'),
     ]);
@@ -492,6 +495,7 @@ export default function PayrollManagerPage() {
       jkk_rate: row.jkk_rate ?? '',
       nama_rekening: row.nama_rekening || '',
       no_rekening: row.no_rekening || '',
+      jatah_cuti_tahunan: row.jatah_cuti_tahunan ?? 12,
     });
     setModalOpen(true);
   };
@@ -515,6 +519,7 @@ export default function PayrollManagerPage() {
       jkk_rate: form.jkk_rate === '' ? null : Number(form.jkk_rate),
       nama_rekening: form.nama_rekening.trim() || null,
       no_rekening: form.no_rekening.trim() || null,
+      jatah_cuti_tahunan: Number(form.jatah_cuti_tahunan) || 12,
     };
 
     const isEdit = !!form.id;
