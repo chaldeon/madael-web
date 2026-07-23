@@ -12,12 +12,13 @@ import NotificationBell from '@/components/NotificationBell';
 //               tiap layout sudah punya instance `supabase`/`router` sendiri
 // `printHidden`: true untuk halaman yang punya mode print (documents, list,
 //               crm, statistics, payslip) — ikut pola print:hidden yang sudah ada
-export default function EmployeeHeader({ left, onLogout, printHidden = false }) {
+export default function EmployeeHeader({ left, search, onLogout, printHidden = false }) {
   return (
     <div
       className={`${printHidden ? 'print:hidden ' : ''}flex items-center justify-between px-10 h-[68px] border-b border-[#E0E0E0] bg-white sticky top-0 z-[999]`}
     >
       <div className="flex items-center gap-8">{left}</div>
+      {search && <div className="flex-1 flex justify-center px-6">{search}</div>}
       <div className="flex items-center gap-1">
         <NotificationBell />
         <button

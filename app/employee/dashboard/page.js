@@ -1,5 +1,6 @@
 'use client';
 
+import GlobalSearchBar from '@/components/GlobalSearchBar';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -107,6 +108,7 @@ export default function EmployeeDashboardPage() {
             </p>
           </div>
         }
+        search={employee.is_superadmin ? <GlobalSearchBar /> : null}
       />
 
       <div className="max-w-[1100px] mx-auto px-6 py-10">
