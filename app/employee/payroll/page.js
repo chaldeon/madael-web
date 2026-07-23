@@ -636,6 +636,12 @@ export default function PayrollManagerPage() {
                   <td className="px-4 py-3 text-right text-black">{formatRupiah(totalTunjangan(row))}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-3">
+                      <Link
+                        href={`/employee/payroll/${row.id}`}
+                        className="text-xs text-[#4B5563] hover:text-madael-red font-medium"
+                      >
+                        Detail
+                      </Link>
                       <button
                         onClick={() => setHitungRow(row)}
                         className="inline-flex items-center gap-1 text-xs text-madael-red hover:text-madael-dark font-medium"
