@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { notifySuperadmins } from '@/lib/notify';
+import { hitungHariKerja } from '@/lib/leave';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -15,13 +16,6 @@ function formatTanggal(value) {
   return new Date(value + 'T00:00:00').toLocaleDateString('id-ID', {
     day: 'numeric', month: 'short', year: 'numeric',
   });
-}
-
-function hitungJumlahHari(mulai, selesai) {
-  if (!mulai || !selesai) return 0;
-  const d1 = new Date(mulai + 'T00:00:00');
-  const d2 = new Date(selesai + 'T00:00:00');
-  return Math.round((d2 - d1) / (1000 * 60 * 60 * 24)) + 1;
 }
 
 function StatusBadge({ status }) {
@@ -43,14 +37,31 @@ export default function LeaveRequestPage() {
 
   const [employeeId, setEmployeeId] = useState(null);
   const [employeeName, setEmployeeName] = useState('');
+  const [hariKerja, setHariKerja] = useState(null); // null = belum diatur, pakai default Senin-Jumat
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+
+  const [balance, setBalance] = useState(null); // { linked, jatah, terpakai, sisa, tahun }
+  const [balanceLoading, setBalanceLoading] = useState(true);
 
   const [form, setForm] = useState({ tanggalMulai: '', tanggalSelesai: '', alasan: '' });
   const [formError, setFormError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  const loadBalance = useCallback(async () => {
+    setBalanceLoading(true);
+    try {
+      const res = await fetch('/api/leave-balance');
+      const json = await res.json();
+      setBalance(res.ok ? json : null);
+    } catch {
+      setBalance(null);
+    } finally {
+      setBalanceLoading(false);
+    }
+  }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -78,23 +89,23 @@ export default function LeaveRequestPage() {
     setEmployeeId(emp.id);
     setEmployeeName(emp.nama || '');
 
-    const { data: reqs, error: reqError } = await supabase
-      .from('leave_requests')
-      .select('*')
-      .eq('employee_id', emp.id)
-      .order('created_at', { ascending: false });
+    const [reqRes, schedRes] = await Promise.all([
+      supabase.from('leave_requests').select('*').eq('employee_id', emp.id).order('created_at', { ascending: false }),
+      supabase.from('work_schedule').select('hari_kerja').eq('employee_id', emp.id).maybeSingle(),
+    ]);
 
-    if (reqError) {
-      setLoadError(reqError.message || 'Gagal memuat riwayat pengajuan cuti.');
+    if (reqRes.error) {
+      setLoadError(reqRes.error.message || 'Gagal memuat riwayat pengajuan cuti.');
       setLoading(false);
       return;
     }
 
-    setRequests(reqs || []);
+    setRequests(reqRes.data || []);
+    setHariKerja(schedRes.data?.hari_kerja || null);
     setLoading(false);
   }, [supabase]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { loadData(); loadBalance(); }, [loadData, loadBalance]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -111,6 +122,11 @@ export default function LeaveRequestPage() {
     }
     if (!form.alasan.trim()) {
       setFormError('Alasan cuti wajib diisi.');
+      return;
+    }
+    const jumlahHari = hitungHariKerja(form.tanggalMulai, form.tanggalSelesai, hariKerja);
+    if (jumlahHari === 0) {
+      setFormError('Rentang tanggal yang dipilih tidak ada hari kerja (semua jatuh di hari libur).');
       return;
     }
 
@@ -139,7 +155,7 @@ export default function LeaveRequestPage() {
 
     notifySuperadmins(supabase, {
       tipe: 'cuti_diajukan',
-      pesan: `${employeeName || 'Karyawan'} mengajukan cuti ${formatTanggal(data.tanggal_mulai)} – ${formatTanggal(data.tanggal_selesai)}.`,
+      pesan: `${employeeName || 'Karyawan'} mengajukan cuti ${formatTanggal(data.tanggal_mulai)} – ${formatTanggal(data.tanggal_selesai)} (${jumlahHari} hari kerja).`,
       link: '/employee/leave-request/admin',
     });
   };
@@ -163,11 +179,32 @@ export default function LeaveRequestPage() {
   const inputClass =
     'border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors w-full';
 
+  const previewHari =
+    form.tanggalMulai && form.tanggalSelesai && form.tanggalSelesai >= form.tanggalMulai
+      ? hitungHariKerja(form.tanggalMulai, form.tanggalSelesai, hariKerja)
+      : null;
+
   return (
     <div className="max-w-[700px] mx-auto px-6 py-10">
-      <div className="mb-8">
+      <div className="mb-6">
         <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Ajukan Cuti</h1>
-        <p className="text-sm text-[#6B6B6B] mt-1">Isi form di bawah untuk mengajukan cuti. Atasan akan meninjau pengajuanmu.</p>
+        <p className="text-sm text-[#6B6B6B] mt-1">Isi form di bawah untuk mengajukan cuti. Atasan akan meninjau pengajuanmu. Sabtu/Minggu dan hari libur di jadwal kerjamu tidak dihitung sebagai hari cuti.</p>
+      </div>
+
+      <div className="bg-white border border-[#E0E0E0] p-5 mb-8">
+        {balanceLoading ? (
+          <p className="text-xs text-[#9A9A9A]">Memuat sisa kuota cuti...</p>
+        ) : !balance || !balance.linked ? (
+          <p className="text-xs text-[#9A9A9A]">Sisa kuota cuti belum tersedia — akunmu belum terhubung ke data master karyawan. Hubungi superadmin.</p>
+        ) : (
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-[#6B6B6B]">Sisa Kuota Cuti Tahun {balance.tahun}</p>
+              <p className="text-2xl font-serif text-black">{balance.sisa} <span className="text-sm text-[#6B6B6B] font-sans">/ {balance.jatah} hari</span></p>
+            </div>
+            <p className="text-xs text-[#9A9A9A]">{balance.terpakai} hari terpakai</p>
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleSubmit} className="bg-white border border-[#E0E0E0] p-6 mb-10">
@@ -192,9 +229,9 @@ export default function LeaveRequestPage() {
           </label>
         </div>
 
-        {form.tanggalMulai && form.tanggalSelesai && form.tanggalSelesai >= form.tanggalMulai && (
+        {previewHari !== null && (
           <p className="text-xs text-[#6B6B6B] mb-4">
-            Total: {hitungJumlahHari(form.tanggalMulai, form.tanggalSelesai)} hari
+            Total: {previewHari} hari kerja {hariKerja ? '' : '(pakai jadwal default Senin–Jumat, belum diatur admin)'}
           </p>
         )}
 
@@ -232,7 +269,7 @@ export default function LeaveRequestPage() {
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
                 <th className="px-4 py-3 font-medium">Periode</th>
-                <th className="px-4 py-3 font-medium">Hari</th>
+                <th className="px-4 py-3 font-medium">Hari Kerja</th>
                 <th className="px-4 py-3 font-medium">Alasan</th>
                 <th className="px-4 py-3 font-medium">Status</th>
               </tr>
@@ -243,7 +280,7 @@ export default function LeaveRequestPage() {
                   <td className="px-4 py-3 text-black whitespace-nowrap">
                     {formatTanggal(r.tanggal_mulai)} — {formatTanggal(r.tanggal_selesai)}
                   </td>
-                  <td className="px-4 py-3 text-[#6B6B6B]">{hitungJumlahHari(r.tanggal_mulai, r.tanggal_selesai)}</td>
+                  <td className="px-4 py-3 text-[#6B6B6B]">{hitungHariKerja(r.tanggal_mulai, r.tanggal_selesai, hariKerja)}</td>
                   <td className="px-4 py-3 text-[#6B6B6B] max-w-[220px] truncate" title={r.alasan}>{r.alasan}</td>
                   <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
                 </tr>
