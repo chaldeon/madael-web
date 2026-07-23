@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { notifySuperadmins } from '@/lib/notify';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -41,6 +42,7 @@ export default function LeaveRequestPage() {
   const supabase = createClient();
 
   const [employeeId, setEmployeeId] = useState(null);
+  const [employeeName, setEmployeeName] = useState('');
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -63,7 +65,7 @@ export default function LeaveRequestPage() {
 
     const { data: emp, error: empError } = await supabase
       .from('employees')
-      .select('id')
+      .select('id, nama')
       .eq('email', user.email)
       .maybeSingle();
 
@@ -74,6 +76,7 @@ export default function LeaveRequestPage() {
     }
 
     setEmployeeId(emp.id);
+    setEmployeeName(emp.nama || '');
 
     const { data: reqs, error: reqError } = await supabase
       .from('leave_requests')
@@ -133,6 +136,12 @@ export default function LeaveRequestPage() {
     setRequests((prev) => [data, ...prev]);
     setForm({ tanggalMulai: '', tanggalSelesai: '', alasan: '' });
     setSubmitSuccess(true);
+
+    notifySuperadmins(supabase, {
+      tipe: 'cuti_diajukan',
+      pesan: `${employeeName || 'Karyawan'} mengajukan cuti ${formatTanggal(data.tanggal_mulai)} – ${formatTanggal(data.tanggal_selesai)}.`,
+      link: '/employee/leave-request/admin',
+    });
   };
 
   if (loading) {

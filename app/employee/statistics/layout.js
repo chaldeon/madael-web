@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import EmployeeHeader from '@/components/EmployeeHeader';
 
 export default function StatisticsLayout({ children }) {
   const router = useRouter();
@@ -42,17 +43,15 @@ export default function StatisticsLayout({ children }) {
 
   return (
     <section className="min-h-screen bg-[#F4F4F4]">
-      <div className="print:hidden flex items-center justify-between px-10 h-[68px] border-b border-[#E0E0E0] bg-white sticky top-0 z-[999]">
-        <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
-          ← Dashboard
-        </Link>
-        <button
-          onClick={handleLogout}
-          className="bg-madael-red text-white px-5 py-2 text-[13px] font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors cursor-pointer border-0"
-        >
-          Logout
-        </button>
-      </div>
+      <EmployeeHeader
+        printHidden
+        onLogout={handleLogout}
+        left={
+          <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
+            ← Dashboard
+          </Link>
+        }
+      />
 
       {children}
     </section>

@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { AlertTriangle, Pencil, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -239,6 +240,14 @@ export default function KoreksiAbsensiPage() {
       setAttendance((prev) => [inserted, ...prev]);
       setAddForm({ employeeId: '', tanggal: '' });
       if (!logError) setEditingRow(null);
+
+      logActivity(supabase, {
+        userId: employee.id,
+        aksi: 'koreksi_absensi_tambah',
+        targetTable: 'attendance',
+        targetId: inserted.id,
+        detail: { employee_id: editingRow.employee_id, tanggal: editingRow.tanggal, alasan: form.alasan.trim() },
+      });
       return;
     }
 
@@ -282,6 +291,20 @@ export default function KoreksiAbsensiPage() {
 
     setAttendance((prev) => prev.map((r) => (r.id === data.id ? data : r)));
     setEditingRow(null);
+
+    logActivity(supabase, {
+      userId: employee.id,
+      aksi: 'koreksi_absensi',
+      targetTable: 'attendance',
+      targetId: data.id,
+      detail: {
+        employee_id: editingRow.employee_id,
+        tanggal: editingRow.tanggal,
+        alasan: form.alasan.trim(),
+        before: { clock_in: editingRow.clock_in, clock_out: editingRow.clock_out, status_telat: editingRow.status_telat },
+        after: { clock_in: newClockIn, clock_out: newClockOut, status_telat: form.statusTelat },
+      },
+    });
   };
 
   if (status === 'loading') {

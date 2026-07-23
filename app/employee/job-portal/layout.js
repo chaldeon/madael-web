@@ -4,6 +4,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import EmployeeHeader from '@/components/EmployeeHeader';
 
 export default function JobPortalLayout({ children }) {
   const pathname = usePathname();
@@ -49,27 +50,24 @@ export default function JobPortalLayout({ children }) {
 
   return (
     <section className="min-h-screen bg-[#F4F4F4]">
-      <div className="flex items-center justify-between px-10 h-[68px] border-b border-[#E0E0E0] bg-white sticky top-0 z-[999]">
-        <div className="flex items-center gap-8">
-          <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
-            ← Dashboard
-          </Link>
-          <div className="flex items-center gap-6">
-            <Link href="/employee/job-portal" className={tabClass(!isLowongan)}>
-              Kandidat
+      <EmployeeHeader
+        onLogout={handleLogout}
+        left={
+          <>
+            <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
+              ← Dashboard
             </Link>
-            <Link href="/employee/job-portal/lowongan" className={tabClass(isLowongan)}>
-              Lowongan
-            </Link>
-          </div>
-        </div>
-        <button
-          onClick={handleLogout}
-          className="bg-madael-red text-white px-5 py-2 text-[13px] font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors cursor-pointer border-0"
-        >
-          Logout
-        </button>
-      </div>
+            <div className="flex items-center gap-6">
+              <Link href="/employee/job-portal" className={tabClass(!isLowongan)}>
+                Kandidat
+              </Link>
+              <Link href="/employee/job-portal/lowongan" className={tabClass(isLowongan)}>
+                Lowongan
+              </Link>
+            </div>
+          </>
+        }
+      />
 
       {children}
     </section>
