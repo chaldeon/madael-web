@@ -41,7 +41,7 @@ export default function JadwalKerjaPage() {
     const [empRes, schedRes] = await Promise.all([
       supabase
         .from('employees')
-        .select('id, nama, employee_id, perusahaan, status')
+        .select('id, nama, employee_id, status, companies:client_id ( nama_perusahaan )')
         .eq('status', 'Aktif')
         .order('nama'),
       supabase.from('work_schedule').select('*'),
@@ -177,7 +177,7 @@ export default function JadwalKerjaPage() {
                 return (
                   <tr key={emp.id} className="border-b border-[#E0E0E0] last:border-0">
                     <td className="px-4 py-3 text-black">{emp.nama}</td>
-                    <td className="px-4 py-3 text-[#6B6B6B]">{emp.perusahaan || '—'}</td>
+                    <td className="px-4 py-3 text-[#6B6B6B]">{emp.companies?.nama_perusahaan || '—'}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">{sched ? formatJam(sched.jam_masuk) : '—'}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">{sched ? formatJam(sched.jam_pulang) : '—'}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">

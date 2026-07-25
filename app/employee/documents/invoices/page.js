@@ -68,7 +68,7 @@ export default function InvoiceTrackerPage() {
     setLoadError(null);
 
     const [clientRes, invRes] = await Promise.all([
-      supabase.from('clients').select('id, nama_perusahaan').eq('is_active', true).order('nama_perusahaan'),
+      supabase.from('companies').select('id, nama_perusahaan').eq('is_active', true).order('nama_perusahaan'),
       supabase.from('invoices').select('*').order('tanggal_terbit', { ascending: false }),
     ]);
 

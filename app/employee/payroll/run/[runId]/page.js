@@ -7,12 +7,14 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { hitungBPJS, hitungBrutoPPh21, hitungPPh21TER } from '@/lib/payroll/calculations';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { notifyEmployees } from '@/lib/notify';
 import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { computeSnapshot } from '@/lib/payroll/runSnapshot';
 
 const STATUS_OPTIONS = ['Draft', 'Review', 'Approved'];
 const STATUS_STYLE = {
@@ -34,6 +36,15 @@ function periodeLabel(periode) {
 
 function formatRupiah(value) {
   return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
+}
+
+// Sama seperti di employee/payroll (NumberField) — dipakai buat tampilkan
+// pemisah ribuan titik di input Overtime/Insentif/Kompensasi.
+function formatNumberDisplay(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  const num = Number(value);
+  if (Number.isNaN(num)) return '';
+  return num.toLocaleString('id-ID');
 }
 
 // CSV manual, sama pendekatannya dengan Export rekap absensi (Task 12) — tanpa
@@ -84,6 +95,8 @@ export default function PayrollRunDetailPage() {
   const [saveError, setSaveError] = useState(null);
   const [generateNote, setGenerateNote] = useState(null);
   const [confirmIncomplete, setConfirmIncomplete] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -91,7 +104,7 @@ export default function PayrollRunDetailPage() {
 
     const { data: runData, error: runError } = await supabase
       .from('payroll_runs')
-      .select('*, payroll_clients ( id, nama_klien )')
+      .select('*, companies ( id, nama_perusahaan )')
       .eq('id', runId)
       .maybeSingle();
 
@@ -102,12 +115,12 @@ export default function PayrollRunDetailPage() {
     }
 
     setRun(runData);
-    setClient(runData.payroll_clients);
+    setClient(runData.companies);
     setStatusDraft(runData.status);
 
     const { data: itemsData, error: itemsError } = await supabase
       .from('payroll_run_items')
-      .select('*, employees_master ( id, nama, posisi, linked_employee_id, nama_rekening, no_rekening )')
+      .select('*, employees_master ( id, nama, posisi, linked_employee_id, nama_rekening, no_rekening, jkk_rate, status_ptkp )')
       .eq('payroll_run_id', runId);
 
     if (itemsError) {
@@ -123,6 +136,101 @@ export default function PayrollRunDetailPage() {
   useEffect(() => {
     if (status === 'allowed') loadData();
   }, [status, loadData]);
+
+  // Employee baru yang ditambahkan di Payroll Manager SETELAH run ini dibuat
+  // tidak otomatis masuk sini — payroll_run_items itu snapshot sekali jalan
+  // waktu "Buat Draft" ditekan. Fungsi ini bandingkan employees_master klien
+  // dengan item yang sudah ada di run, lalu insert item baru (pakai
+  // computeSnapshot yang sama dengan waktu run dibuat) buat yang belum ada.
+  // Cuma untuk run yang belum Approved — run yang sudah final tidak diubah.
+  const handleSyncEmployeeBaru = async () => {
+    setSyncing(true);
+    setSyncNote(null);
+    setLoadError(null);
+
+    const { data: emps, error: empError } = await supabase
+      .from('employees_master')
+      .select('id, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, jkk_rate')
+      .eq('client_id', run.client_id);
+
+    if (empError) {
+      setSyncing(false);
+      setLoadError(`Gagal cek employee baru: ${empError.message}`);
+      return;
+    }
+
+    const existingIds = new Set(items.map((i) => i.employee_master_id));
+    const newEmps = (emps || []).filter((e) => !existingIds.has(e.id));
+
+    if (newEmps.length === 0) {
+      setSyncing(false);
+      setSyncNote('Tidak ada employee baru — semua employee klien ini sudah ada di run ini.');
+      return;
+    }
+
+    const snapshots = await Promise.all(newEmps.map((e) => computeSnapshot(supabase, e, run.periode)));
+    const itemsPayload = snapshots.map((s) => ({ ...s, payroll_run_id: run.id }));
+
+    const { error: insertError } = await supabase.from('payroll_run_items').insert(itemsPayload);
+    setSyncing(false);
+
+    if (insertError) {
+      setLoadError(`Gagal tambah employee baru ke run: ${insertError.message}`);
+      return;
+    }
+
+    setSyncNote(`${newEmps.length} employee baru berhasil ditambahkan ke run ini.`);
+    await loadData();
+  };
+
+  // Draft input Overtime/Insentif/Kompensasi per item, sebelum di-"Hitung Ulang"
+  // & disimpan. Key: item.id.
+  const [editValues, setEditValues] = useState({});
+  const [recalcSaving, setRecalcSaving] = useState(null); // item.id yang lagi disimpan
+
+  const getEditValue = (item, field) =>
+    editValues[item.id]?.[field] ?? item[field] ?? 0;
+
+  const setEditValue = (itemId, field, val) => {
+    setEditValues((prev) => ({ ...prev, [itemId]: { ...prev[itemId], [field]: val } }));
+  };
+
+  // Hitung ulang PPh21/THP persis rumus yang sama dengan Payslip:
+  // Bruto PPh21 = Gaji Pokok + Allowance + Overtime + Insentif + Kompensasi
+  //             + JKK + JKM + BPJS Kesehatan (perusahaan) − Penalty
+  const recalcAndSaveItem = async (item) => {
+    const overtime = Number(getEditValue(item, 'overtime')) || 0;
+    const insentif = Number(getEditValue(item, 'insentif')) || 0;
+    const kompensasi = Number(getEditValue(item, 'kompensasi')) || 0;
+    const master = item.employees_master;
+
+    setRecalcSaving(item.id);
+
+    const gajiPokok = Number(item.gaji_pokok) || 0;
+    const totalForBruto = (Number(item.allowance) || 0) + overtime + insentif + kompensasi;
+    const bpjs = master?.jkk_rate != null ? hitungBPJS(gajiPokok, master.jkk_rate) : null;
+    const brutoPPh21 = bpjs ? hitungBrutoPPh21(gajiPokok, totalForBruto, bpjs, item.penalty) : null;
+    const pph21Result = (bpjs && master?.status_ptkp) ? hitungPPh21TER(brutoPPh21, master.status_ptkp) : null;
+    const pph21 = pph21Result ? Math.floor(pph21Result.pph) : 0;
+    const bpjsEmployee = bpjs ? bpjs.totalEmployee : 0;
+    const takeHomePay = gajiPokok + totalForBruto - (Number(item.penalty) || 0) - bpjsEmployee - pph21;
+
+    const payload = {
+      overtime,
+      insentif,
+      kompensasi,
+      pph21,
+      take_home_pay: Math.round(takeHomePay),
+    };
+
+    const { error } = await supabase.from('payroll_run_items').update(payload).eq('id', item.id);
+    setRecalcSaving(null);
+    if (error) {
+      setLoadError(`Gagal simpan Overtime/Insentif/Kompensasi: ${error.message}`);
+      return;
+    }
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...payload } : i)));
+  };
 
   const totalThp = useMemo(() => items.reduce((sum, i) => sum + (Number(i.take_home_pay) || 0), 0), [items]);
   const missingRekening = useMemo(
@@ -168,7 +276,10 @@ export default function PayrollRunDetailPage() {
         periode,
         periode_label: periodeLabel(periode),
         gaji_pokok: item.gaji_pokok,
-        tunjangan_transport: item.allowance,
+        tunjangan_lain: item.allowance,
+        lembur: item.overtime,
+        insentif: item.insentif,
+        kompensasi: item.kompensasi,
         jht_karyawan: 0,
         jp_karyawan: 0,
         bpjs_k_karyawan: 0,
@@ -241,7 +352,7 @@ export default function PayrollRunDetailPage() {
       const result = await generateSlips(items, run.periode);
       const { data: refreshedItems } = await supabase
         .from('payroll_run_items')
-        .select('*, employees_master ( id, nama, posisi, linked_employee_id, nama_rekening, no_rekening )')
+        .select('*, employees_master ( id, nama, posisi, linked_employee_id, nama_rekening, no_rekening, jkk_rate, status_ptkp )')
         .eq('payroll_run_id', runId);
       setItems(refreshedItems || []);
 
@@ -293,7 +404,7 @@ export default function PayrollRunDetailPage() {
       <div className="flex items-start justify-between flex-wrap gap-4 mb-8">
         <div>
           <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
-            {client?.nama_klien || 'Klien'}
+            {client?.nama_perusahaan || 'Klien'}
           </h1>
           <p className="text-sm text-[#6B6B6B] mt-1">{periodeLabel(run.periode)} · {items.length} employee</p>
         </div>
@@ -320,6 +431,15 @@ export default function PayrollRunDetailPage() {
         >
           {saving ? 'Menyimpan...' : 'Simpan Status'}
         </button>
+        {run.status !== 'Approved' && (
+          <button
+            onClick={handleSyncEmployeeBaru}
+            disabled={syncing}
+            className="border border-[#E0E0E0] text-black px-5 py-2 text-sm font-medium tracking-[0.02em] hover:border-madael-red transition-colors disabled:opacity-40"
+          >
+            {syncing ? 'Mengecek...' : 'Sync Employee Baru'}
+          </button>
+        )}
         {run.status === 'Approved' && (
           <button
             onClick={() => downloadTransferCsv(items, run.periode)}
@@ -364,6 +484,13 @@ export default function PayrollRunDetailPage() {
         </div>
       )}
 
+      {syncNote && (
+        <div className="flex items-start gap-2 bg-[#F4F4F4] border border-[#E0E0E0] text-[#3D3D3D] text-xs px-4 py-3 mb-6">
+          <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-madael-red" />
+          {syncNote}
+        </div>
+      )}
+
       {unlinkedCount > 0 && (
         <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mb-6">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
@@ -384,6 +511,9 @@ export default function PayrollRunDetailPage() {
         </div>
       ) : (
         <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
+          <p className="text-xs text-[#6B6B6B] px-4 pt-3">
+            Isi Overtime/Insentif/Kompensasi per employee lalu klik "Hitung Ulang" untuk update PPh21 & THP — sama seperti di Kelola Slip Gaji.
+          </p>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
@@ -391,10 +521,14 @@ export default function PayrollRunDetailPage() {
                 <th className="px-4 py-3 font-medium">Posisi</th>
                 <th className="px-4 py-3 font-medium text-right">Gaji Pokok</th>
                 <th className="px-4 py-3 font-medium text-right">Allowance</th>
+                <th className="px-4 py-3 font-medium text-right">Overtime</th>
+                <th className="px-4 py-3 font-medium text-right">Insentif</th>
+                <th className="px-4 py-3 font-medium text-right">Kompensasi</th>
                 <th className="px-4 py-3 font-medium text-right">Penalty</th>
                 <th className="px-4 py-3 font-medium text-right">PPh21</th>
                 <th className="px-4 py-3 font-medium text-right">THP</th>
                 <th className="px-4 py-3 font-medium">Slip</th>
+                <th className="px-4 py-3 font-medium">Aksi</th>
               </tr>
             </thead>
             <tbody>
@@ -404,6 +538,36 @@ export default function PayrollRunDetailPage() {
                   <td className="px-4 py-3 text-[#6B6B6B]">{item.employees_master?.posisi || '—'}</td>
                   <td className="px-4 py-3 text-right text-[#6B6B6B]">{formatRupiah(item.gaji_pokok)}</td>
                   <td className="px-4 py-3 text-right text-[#6B6B6B]">{formatRupiah(item.allowance)}</td>
+                  <td className="px-2 py-2 text-right">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      disabled={statusDraft === 'Approved'}
+                      value={formatNumberDisplay(getEditValue(item, 'overtime'))}
+                      onChange={(e) => setEditValue(item.id, 'overtime', e.target.value.replace(/[^\d]/g, ''))}
+                      className="w-24 border border-[#E0E0E0] px-2 py-1 text-right text-sm text-black disabled:bg-[#F4F4F4] disabled:text-[#9A9A9A]"
+                    />
+                  </td>
+                  <td className="px-2 py-2 text-right">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      disabled={statusDraft === 'Approved'}
+                      value={formatNumberDisplay(getEditValue(item, 'insentif'))}
+                      onChange={(e) => setEditValue(item.id, 'insentif', e.target.value.replace(/[^\d]/g, ''))}
+                      className="w-24 border border-[#E0E0E0] px-2 py-1 text-right text-sm text-black disabled:bg-[#F4F4F4] disabled:text-[#9A9A9A]"
+                    />
+                  </td>
+                  <td className="px-2 py-2 text-right">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      disabled={statusDraft === 'Approved'}
+                      value={formatNumberDisplay(getEditValue(item, 'kompensasi'))}
+                      onChange={(e) => setEditValue(item.id, 'kompensasi', e.target.value.replace(/[^\d]/g, ''))}
+                      className="w-24 border border-[#E0E0E0] px-2 py-1 text-right text-sm text-black disabled:bg-[#F4F4F4] disabled:text-[#9A9A9A]"
+                    />
+                  </td>
                   <td className="px-4 py-3 text-right text-[#6B6B6B]">{formatRupiah(item.penalty)}</td>
                   <td className="px-4 py-3 text-right text-[#6B6B6B]">{formatRupiah(item.pph21)}</td>
                   <td className="px-4 py-3 text-right text-black font-medium">{formatRupiah(item.take_home_pay)}</td>
@@ -415,6 +579,15 @@ export default function PayrollRunDetailPage() {
                     ) : (
                       <span className="text-[10px] text-[#9A9A9A]">—</span>
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      disabled={statusDraft === 'Approved' || recalcSaving === item.id}
+                      onClick={() => recalcAndSaveItem(item)}
+                      className="text-xs text-madael-red hover:text-madael-dark font-medium disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                    >
+                      {recalcSaving === item.id ? 'Menghitung...' : 'Hitung Ulang'}
+                    </button>
                   </td>
                 </tr>
               ))}

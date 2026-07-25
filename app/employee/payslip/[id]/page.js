@@ -130,12 +130,12 @@ export default function PayslipDetailPage() {
     p.bpjs_tk_perusahaan ??
     (p.jkk_perusahaan || 0) + (p.jkm_perusahaan || 0) + (p.jht_perusahaan || 0) + (p.jp_perusahaan || 0);
   const totalPendapatan =
-    (p.gaji_pokok || 0) + (p.lembur || 0) + (p.tunjangan_transport || 0) + (p.tunjangan_lain || 0) +
+    (p.gaji_pokok || 0) + (p.lembur || 0) + (p.insentif || 0) + (p.kompensasi || 0) + (p.tunjangan_lain || 0) +
     bpjsTkPerusahaan + (p.bpjs_k_perusahaan || 0);
   const totalPotongan =
     (p.penalty || 0) + (p.jht_karyawan || 0) + (p.jp_karyawan || 0) + (p.bpjs_k_karyawan || 0) + (p.pph21 || 0);
   const takeHomePay =
-    (p.gaji_pokok || 0) + (p.lembur || 0) + (p.tunjangan_transport || 0) + (p.tunjangan_lain || 0) - totalPotongan;
+    (p.gaji_pokok || 0) + (p.lembur || 0) + (p.insentif || 0) + (p.kompensasi || 0) + (p.tunjangan_lain || 0) - totalPotongan;
 
   return (
     <div className="max-w-[820px] mx-auto px-6 py-10 print:py-0 print:px-0 print:max-w-none">
@@ -184,9 +184,10 @@ export default function PayslipDetailPage() {
               PENDAPATAN
             </p>
             <Row label="Gaji Pokok" value={formatRupiah(p.gaji_pokok)} />
-            <Row label="Lembur" value={formatRupiah(p.lembur)} />
-            <Row label="Tunjangan Transport" value={formatRupiah(p.tunjangan_transport)} />
-            <Row label="Tunjangan Lain" value={formatRupiah(p.tunjangan_lain)} />
+            <Row label="Overtime (Lembur)" value={formatRupiah(p.lembur)} />
+            <Row label="Incentive" value={formatRupiah(p.insentif)} />
+            <Row label="Compensation Fund / Festive Allowance" value={formatRupiah(p.kompensasi)} />
+            <Row label="Allowance (Transport/Travel/Communication)" value={formatRupiah(p.tunjangan_lain)} />
             <Row label="BPJS TK Perusahaan" value={formatRupiah(bpjsTkPerusahaan)} />
             <Row label="BPJS K Perusahaan" value={formatRupiah(p.bpjs_k_perusahaan)} />
             <Row label="Total Pendapatan" value={formatRupiah(totalPendapatan)} bold />

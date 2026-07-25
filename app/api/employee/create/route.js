@@ -42,7 +42,7 @@ export async function POST(request) {
     }
 
     const body = await request.json();
-    const { nama, employee_id, email, perusahaan, status, is_superadmin } = body;
+    const { nama, employee_id, email, client_id, status, is_superadmin } = body;
 
     if (!nama || !email) {
       return NextResponse.json({ error: 'Nama dan email wajib diisi.' }, { status: 400 });
@@ -74,7 +74,7 @@ export async function POST(request) {
           nama,
           employee_id: employee_id || null,
           email,
-          perusahaan: perusahaan || null,
+          client_id: client_id || null,
           status: status || 'Aktif',
           is_superadmin: !!is_superadmin,
         },

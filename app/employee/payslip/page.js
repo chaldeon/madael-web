@@ -15,7 +15,7 @@ function formatRupiah(value) {
 
 function calculateTHP(p) {
   const pendapatanTunai =
-    (p.gaji_pokok || 0) + (p.lembur || 0) + (p.tunjangan_transport || 0) + (p.tunjangan_lain || 0);
+    (p.gaji_pokok || 0) + (p.lembur || 0) + (p.insentif || 0) + (p.kompensasi || 0) + (p.tunjangan_lain || 0);
   const totalPotongan =
     (p.jht_karyawan || 0) + (p.jp_karyawan || 0) + (p.bpjs_k_karyawan || 0) + (p.pph21 || 0);
   return pendapatanTunai - totalPotongan;

@@ -9,19 +9,89 @@ const emptyForm = {
   nama: '',
   employee_id: '',
   email: '',
-  perusahaan: '',
+  client_id: '',
   status: 'Aktif',
   is_superadmin: false,
 };
+
+// Dropdown perusahaan (companies) + opsi tambah baru inline — dipakai di
+// form Tambah & Edit Employee. Perusahaan baru langsung tersimpan ke
+// `companies`, tabel yang sama dipakai Payroll Manager/CRM/dll.
+function CompanySelect({ value, onChange, companies, onAddCompany, inputClass, labelClass }) {
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleAdd = async () => {
+    if (!newName.trim()) return;
+    setSaving(true);
+    const id = await onAddCompany(newName);
+    setSaving(false);
+    if (id) {
+      onChange(id);
+      setAdding(false);
+      setNewName('');
+    }
+  };
+
+  return (
+    <div>
+      <label className={labelClass}>Perusahaan</label>
+      {!adding ? (
+        <div className="flex gap-2">
+          <select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>
+            <option value="">— Pilih Perusahaan —</option>
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>{c.nama_perusahaan}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="shrink-0 px-3 text-sm text-madael-red hover:text-madael-dark whitespace-nowrap"
+          >
+            + Baru
+          </button>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <input
+            autoFocus
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="Nama perusahaan baru"
+            className={inputClass}
+          />
+          <button
+            type="button"
+            disabled={saving}
+            onClick={handleAdd}
+            className="shrink-0 px-3 text-sm bg-madael-red text-white hover:bg-madael-dark disabled:opacity-50"
+          >
+            {saving ? '...' : 'Simpan'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setAdding(false); setNewName(''); }}
+            className="shrink-0 px-2 text-sm text-[#6B6B6B] hover:text-black"
+          >
+            Batal
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function EmployeeListPage() {
   const supabase = createClient();
 
   const [employees, setEmployees] = useState([]);
+  const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [filterPerusahaan, setFilterPerusahaan] = useState('');
+  const [filterClientId, setFilterClientId] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -39,12 +109,23 @@ export default function EmployeeListPage() {
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState(null);
 
+  // Perusahaan tempat karyawan bekerja/ditempatkan (termasuk outsourcing) —
+  // narik dari `companies`, satu sumber yang sama dipakai Payroll Manager,
+  // CRM, Invoice, dst. Employee List sendiri tetap murni data akun login.
+  const fetchCompanies = useCallback(async () => {
+    const { data } = await supabase
+      .from('companies')
+      .select('id, nama_perusahaan')
+      .order('nama_perusahaan', { ascending: true });
+    setCompanies(data || []);
+  }, [supabase]);
+
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
     setError(null);
     const { data, error } = await supabase
       .from('employees')
-      .select('id, nama, employee_id, email, perusahaan, status, is_superadmin, created_at')
+      .select('id, nama, employee_id, email, client_id, companies:client_id ( id, nama_perusahaan ), status, is_superadmin, created_at')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -57,17 +138,32 @@ export default function EmployeeListPage() {
 
   useEffect(() => {
     fetchEmployees();
-  }, [fetchEmployees]);
-
-  const perusahaanOptions = Array.from(
-    new Set(employees.map((e) => e.perusahaan).filter(Boolean))
-  );
+    fetchCompanies();
+  }, [fetchEmployees, fetchCompanies]);
 
   const filtered = employees.filter((e) => {
-    const matchPerusahaan = !filterPerusahaan || e.perusahaan === filterPerusahaan;
+    const matchPerusahaan = !filterClientId || e.client_id === filterClientId;
     const matchStatus = !filterStatus || e.status === filterStatus;
     return matchPerusahaan && matchStatus;
   });
+
+  // Tambah perusahaan baru langsung dari sini — nulis ke tabel `companies`
+  // yang sama, jadi otomatis muncul juga di Payroll Manager/CRM/dll.
+  const addCompanyInline = async (nama) => {
+    const trimmed = nama.trim();
+    if (!trimmed) return null;
+    const existing = companies.find((c) => c.nama_perusahaan.toLowerCase() === trimmed.toLowerCase());
+    if (existing) return existing.id;
+
+    const { data, error } = await supabase
+      .from('companies')
+      .insert([{ nama_perusahaan: trimmed, tipe: ['client'] }])
+      .select('id, nama_perusahaan')
+      .single();
+    if (error) return null;
+    setCompanies((prev) => [...prev, data].sort((a, b) => a.nama_perusahaan.localeCompare(b.nama_perusahaan)));
+    return data.id;
+  };
 
   // ---- Tambah Employee ----
 
@@ -116,7 +212,7 @@ export default function EmployeeListPage() {
       nama: employee.nama || '',
       employee_id: employee.employee_id || '',
       email: employee.email || '',
-      perusahaan: employee.perusahaan || '',
+      client_id: employee.client_id || '',
       status: employee.status || 'Aktif',
       is_superadmin: !!employee.is_superadmin,
     });
@@ -222,10 +318,10 @@ export default function EmployeeListPage() {
       </div>
 
       <div className="flex flex-wrap gap-3 mb-6">
-        <select value={filterPerusahaan} onChange={(e) => setFilterPerusahaan(e.target.value)} className={selectClass}>
+        <select value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} className={selectClass}>
           <option value="">Semua Perusahaan</option>
-          {perusahaanOptions.map((p) => (
-            <option key={p} value={p}>{p}</option>
+          {companies.map((c) => (
+            <option key={c.id} value={c.id}>{c.nama_perusahaan}</option>
           ))}
         </select>
 
@@ -262,7 +358,7 @@ export default function EmployeeListPage() {
                   <td className="px-5 py-3.5 text-black">{emp.nama}</td>
                   <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.employee_id || '—'}</td>
                   <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.email}</td>
-                  <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.perusahaan || '—'}</td>
+                  <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.companies?.nama_perusahaan || '—'}</td>
                   <td className="px-5 py-3.5">
                     <span
                       className={`text-xs font-medium px-2.5 py-1 ${
@@ -360,15 +456,14 @@ export default function EmployeeListPage() {
                     className={inputClass}
                   />
                 </div>
-                <div>
-                  <label className={labelClass}>Perusahaan</label>
-                  <input
-                    value={form.perusahaan}
-                    onChange={(e) => handleFormChange('perusahaan', e.target.value)}
-                    placeholder="Madael"
-                    className={inputClass}
-                  />
-                </div>
+                <CompanySelect
+                  value={form.client_id}
+                  onChange={(id) => handleFormChange('client_id', id)}
+                  companies={companies}
+                  onAddCompany={addCompanyInline}
+                  inputClass={inputClass}
+                  labelClass={labelClass}
+                />
                 <div>
                   <label className={labelClass}>Status</label>
                   <select
@@ -445,15 +540,14 @@ export default function EmployeeListPage() {
                   Email tidak bisa diubah di sini karena terhubung ke akun login.
                 </p>
               </div>
-              <div>
-                <label className={labelClass}>Perusahaan</label>
-                <input
-                  value={editForm.perusahaan}
-                  onChange={(e) => handleEditFormChange('perusahaan', e.target.value)}
-                  placeholder="Madael"
-                  className={inputClass}
-                />
-              </div>
+              <CompanySelect
+                value={editForm.client_id}
+                onChange={(id) => handleEditFormChange('client_id', id)}
+                companies={companies}
+                onAddCompany={addCompanyInline}
+                inputClass={inputClass}
+                labelClass={labelClass}
+              />
               <div>
                 <label className={labelClass}>Status</label>
                 <select

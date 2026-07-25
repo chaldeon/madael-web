@@ -69,7 +69,7 @@ export default function EmployeeDetailPage() {
 
     const { data, error } = await supabase
       .from('employees_master')
-      .select('*, clients:client_id ( nama_klien )')
+      .select('*, companies:client_id ( nama_perusahaan )')
       .eq('id', params.id)
       .maybeSingle();
 
@@ -85,7 +85,7 @@ export default function EmployeeDetailPage() {
     }
 
     setEmpMaster(data);
-    setClientName(data.clients?.nama_klien || '-');
+    setClientName(data.companies?.nama_perusahaan || '-');
     setLoading(false);
   }, [supabase, params.id]);
 

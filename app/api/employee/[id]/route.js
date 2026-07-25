@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 
 // PATCH /api/employee/[id]
-// Update data karyawan (nama, employee_id, perusahaan, status, is_superadmin).
+// Update data karyawan (nama, employee_id, client_id, status, is_superadmin).
 // Email sengaja tidak diubah lewat sini karena email = identitas login di
 // Supabase Auth — ubah email butuh flow terpisah (admin.auth.admin.updateUserById).
 export async function PATCH(request, { params }) {
@@ -47,7 +47,7 @@ export async function PATCH(request, { params }) {
     }
 
     const body = await request.json();
-    const { nama, employee_id, perusahaan, status, is_superadmin } = body;
+    const { nama, employee_id, client_id, status, is_superadmin } = body;
 
     if (!nama) {
       return NextResponse.json({ error: 'Nama wajib diisi.' }, { status: 400 });
@@ -60,7 +60,7 @@ export async function PATCH(request, { params }) {
       .update({
         nama,
         employee_id: employee_id || null,
-        perusahaan: perusahaan || null,
+        client_id: client_id || null,
         status: status || 'Aktif',
         is_superadmin: !!is_superadmin,
       })

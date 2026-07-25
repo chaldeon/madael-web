@@ -92,7 +92,7 @@ export default function ClientDetailPage() {
     setError(null);
 
     const [{ data: clientData, error: clientError }, { data: activityData }, { data: projectData }, { data: empData }] = await Promise.all([
-      supabase.from('clients').select('*, employees:assigned_to ( id, nama )').eq('id', clientId).maybeSingle(),
+      supabase.from('companies').select('*, employees:assigned_to ( id, nama )').eq('id', clientId).maybeSingle(),
       supabase.from('client_activities').select('*, employees:employee_id ( id, nama )').eq('client_id', clientId).order('tanggal', { ascending: false }),
       supabase.from('client_projects').select('*, employees:pic_madael ( id, nama )').eq('client_id', clientId).order('created_at', { ascending: false }),
       supabase.from('employees').select('id, nama').eq('status', 'Aktif').order('nama', { ascending: true }),
@@ -151,7 +151,7 @@ export default function ClientDetailPage() {
       assigned_to: editForm.assigned_to || null,
       catatan: editForm.catatan || null,
     };
-    const { error } = await supabase.from('clients').update(payload).eq('id', clientId);
+    const { error } = await supabase.from('companies').update(payload).eq('id', clientId);
     setSavingEdit(false);
     if (error) {
       alert('Gagal menyimpan: ' + error.message);
@@ -170,7 +170,7 @@ export default function ClientDetailPage() {
   const handleStageSubmit = async (e) => {
     e.preventDefault();
     setSavingStage(true);
-    const { error } = await supabase.from('clients').update({ stage: stageDraft }).eq('id', clientId);
+    const { error } = await supabase.from('companies').update({ stage: stageDraft }).eq('id', clientId);
     setSavingStage(false);
     if (error) {
       alert('Gagal ganti stage: ' + error.message);

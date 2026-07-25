@@ -56,7 +56,10 @@ const EMPTY_FORM = {
   linked_employee_id: '',
   status_ptkp: '',
   npwp_status: '',
+  npwp: '',
   jkk_rate: '',
+  no_bpjs_kesehatan: '',
+  no_bpjs_ketenagakerjaan: '',
   nama_rekening: '',
   no_rekening: '',
   jatah_cuti_tahunan: 12,
@@ -171,33 +174,47 @@ function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onS
         </h2>
 
         <div className="grid grid-cols-2 gap-4 mb-4">
-          <TextField label="Nama" value={form.nama} onChange={set('nama')} />
+          <SelectField
+            label="Nama"
+            value={form.linked_employee_id}
+            onChange={(val) => {
+              const picked = linkableEmployees.find((e) => e.id === val);
+              setForm((f) => ({
+                ...f,
+                linked_employee_id: val,
+                nama: picked?.nama || '',
+                // Perusahaan sudah dipilih di Employee List — pakai itu sebagai
+                // default di sini, tapi jangan timpa kalau Klien di baris ini
+                // udah sengaja diisi beda (mis. employee lama yang belum
+                // migrasi/beda dari perusahaan akun login-nya).
+                client_id: f.client_id || picked?.client_id || '',
+              }));
+            }}
+            options={[{ value: '', label: '— Pilih Nama —' }, ...linkableEmployees.map((e) => ({ value: e.id, label: e.nama }))]}
+          />
           <SelectField
             label="Klien"
             value={form.client_id}
             onChange={set('client_id')}
-            options={[{ value: '', label: '— Pilih Klien —' }, ...clients.map((c) => ({ value: c.id, label: c.nama_klien }))]}
+            options={[{ value: '', label: '— Pilih Klien —' }, ...clients.map((c) => ({ value: c.id, label: c.nama_perusahaan }))]}
           />
           <TextField label="Posisi" value={form.posisi} onChange={set('posisi')} />
           <SelectField label="Status" value={form.status} onChange={set('status')} options={STATUS_OPTIONS} />
           <NumberField label="Gaji Pokok" value={form.gaji_pokok} onChange={set('gaji_pokok')} />
-          <NumberField label="Tunjangan" value={form.tunjangan} onChange={set('tunjangan')} />
-          <SelectField
-            label="Akun Absensi (opsional)"
-            value={form.linked_employee_id}
-            onChange={set('linked_employee_id')}
-            options={[{ value: '', label: '— Belum terhubung —' }, ...linkableEmployees.map((e) => ({ value: e.id, label: e.nama }))]}
-          />
+          <NumberField label="Allowance (Transport/Travel/Communication)" value={form.tunjangan} onChange={set('tunjangan')} />
           <SelectField label="Status PTKP" value={form.status_ptkp} onChange={set('status_ptkp')} options={PTKP_OPTIONS} />
           <SelectField label="Status NPWP" value={form.npwp_status} onChange={set('npwp_status')} options={NPWP_OPTIONS} />
+          <TextField label="Nomor NPWP" value={form.npwp} onChange={set('npwp')} />
           <SelectField label="Tingkat Risiko JKK" value={form.jkk_rate} onChange={set('jkk_rate')} options={JKK_SELECT_OPTIONS} />
+          <TextField label="Nomor BPJS Kesehatan" value={form.no_bpjs_kesehatan} onChange={set('no_bpjs_kesehatan')} />
+          <TextField label="Nomor BPJS Ketenagakerjaan" value={form.no_bpjs_ketenagakerjaan} onChange={set('no_bpjs_ketenagakerjaan')} />
           <TextField label="Nama Rekening" value={form.nama_rekening} onChange={set('nama_rekening')} />
           <TextField label="No Rekening" value={form.no_rekening} onChange={set('no_rekening')} />
           <NumberField label="Jatah Cuti Tahunan (hari)" value={form.jatah_cuti_tahunan} onChange={set('jatah_cuti_tahunan')} />
         </div>
 
         <p className="text-xs text-[#9A9A9A] -mt-2 mb-4">
-          "Akun Absensi", PTKP, NPWP, dan JKK dipakai untuk fitur Hitung PPh21/BPJS & referensi kehadiran — boleh dikosongkan dulu kalau belum ada datanya. Nama/No Rekening dipakai untuk Export Transfer di Payroll Run.
+          Ini satu-satunya tempat isi/ubah NPWP, PTKP, JKK, no. rekening & BPJS — Payslip &amp; Payroll Run otomatis narik dari sini, tidak diinput ulang di sana. "Nama" wajib dipilih dari akun yang sudah ada — itu yang menyambungkan baris ini ke semua modul lain (Payslip, Absensi, dst).
         </p>
 
         <div className="mb-6">
@@ -250,7 +267,7 @@ function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onS
           </button>
           <button
             onClick={onSubmit}
-            disabled={saving || !form.nama.trim()}
+            disabled={saving || !form.linked_employee_id}
             className="bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors disabled:opacity-40"
           >
             {saving ? 'Menyimpan...' : 'Simpan'}
@@ -265,6 +282,9 @@ function HitungModal({ row, periode, onClose }) {
   const supabase = createClient();
   const [attSummary, setAttSummary] = useState(null);
   const [attLoading, setAttLoading] = useState(false);
+  const [manualOvertime, setManualOvertime] = useState(0);
+  const [manualInsentif, setManualInsentif] = useState(0);
+  const [manualKompensasi, setManualKompensasi] = useState(0);
 
   useEffect(() => {
     if (!row.linked_employee_id) {
@@ -307,10 +327,15 @@ function HitungModal({ row, periode, onClose }) {
   const gajiPokok = Number(row.gaji_pokok) || 0; // Gross Salary — basis BPJS
   const allowance = totalTunjangan(row); // tunjangan + komponen lain
   const totalGajiTakeHome = gajiPokok + allowance;
+  const totalManual = manualOvertime + manualInsentif + manualKompensasi;
+  // Sama seperti totalForBruto di lib/payroll/runSnapshot.js — allowance yang
+  // dipakai di rumus Bruto PPh21 ikut Overtime/Insentif/Kompensasi, walaupun
+  // "Total Gaji" di atas tetap base-only.
+  const totalForBruto = allowance + totalManual;
   const penalty = attSummary?.adaJadwal ? hitungPenaltyTelat(attSummary.totalMenitTelat) : 0;
 
   const bpjs = row.jkk_rate != null ? hitungBPJS(gajiPokok, row.jkk_rate) : null;
-  const brutoPPh21 = bpjs ? hitungBrutoPPh21(gajiPokok, allowance, bpjs, penalty) : null;
+  const brutoPPh21 = bpjs ? hitungBrutoPPh21(gajiPokok, totalForBruto, bpjs, penalty) : null;
   const pph21 = (bpjs && row.status_ptkp) ? hitungPPh21TER(brutoPPh21, row.status_ptkp) : null;
 
   return (
@@ -328,7 +353,7 @@ function HitungModal({ row, periode, onClose }) {
             <span className="text-black">{formatRupiah(gajiPokok)}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[#6B6B6B]">Tunjangan + Komponen Lain</span>
+            <span className="text-[#6B6B6B]">Allowance + Komponen Lain</span>
             <span className="text-black">{formatRupiah(allowance)}</span>
           </div>
           <div className="flex justify-between font-medium">
@@ -337,12 +362,24 @@ function HitungModal({ row, periode, onClose }) {
           </div>
         </div>
 
+        <div className="mb-6 pb-4 border-b border-[#E0E0E0]">
+          <h3 className="text-sm font-semibold text-black mb-1">Overtime / Insentif / Kompensasi (manual, opsional)</h3>
+          <p className="text-[11px] text-[#9A9A9A] mb-2">
+            Cuma untuk preview di sini — tidak disimpan. Nilai final tetap diisi nanti di Payroll Run atau Kelola Slip Gaji.
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            <NumberField label="Overtime" value={manualOvertime} onChange={setManualOvertime} />
+            <NumberField label="Insentif" value={manualInsentif} onChange={setManualInsentif} />
+            <NumberField label="Kompensasi" value={manualKompensasi} onChange={setManualKompensasi} />
+          </div>
+        </div>
+
         <div className="mb-6">
           <h3 className="text-sm font-semibold text-black mb-2">PPh21 (TER Bulanan)</h3>
           {pph21 ? (
             <div className="text-sm text-[#6B6B6B] flex flex-col gap-1">
               <div className="flex justify-between"><span>Penalty (Keterlambatan)</span><span className="text-black">− {formatRupiah(penalty)}</span></div>
-              <div className="flex justify-between"><span>Bruto PPh21 (Gaji + BPJS ditanggung perusahaan − Penalty)</span><span className="text-black">{formatRupiah(brutoPPh21)}</span></div>
+              <div className="flex justify-between"><span>Bruto PPh21 (Gaji + Overtime/Insentif/Kompensasi + BPJS ditanggung perusahaan − Penalty)</span><span className="text-black">{formatRupiah(brutoPPh21)}</span></div>
               <div className="flex justify-between"><span>Kategori TER</span><span className="text-black">{pph21.category}</span></div>
               <div className="flex justify-between"><span>Tarif</span><span className="text-black">{pph21.rate}%</span></div>
               <div className="flex justify-between font-medium"><span className="text-black">PPh21 Bulanan</span><span className="text-black">{formatRupiah(pph21.pph)}</span></div>
@@ -445,12 +482,12 @@ export default function PayrollManagerPage() {
     setLoading(true);
     setLoadError(null);
     const [clRes, empRes, linkableRes] = await Promise.all([
-      supabase.from('payroll_clients').select('id, nama_klien').order('nama_klien', { ascending: true }),
+      supabase.from('companies').select('id, nama_perusahaan').order('nama_perusahaan', { ascending: true }),
       supabase
         .from('employees_master')
-        .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, jkk_rate, nama_rekening, no_rekening, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, created_at')
+        .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan, nama_rekening, no_rekening, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, created_at, employees:linked_employee_id ( nama )')
         .order('created_at', { ascending: false }),
-      supabase.from('employees').select('id, nama').eq('status', 'Aktif').order('nama'),
+      supabase.from('employees').select('id, nama, client_id').eq('status', 'Aktif').order('nama'),
     ]);
 
     if (clRes.error || empRes.error || linkableRes.error) {
@@ -467,7 +504,7 @@ export default function PayrollManagerPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const clientName = (id) => clients.find((c) => c.id === id)?.nama_klien || '—';
+  const clientName = (id) => clients.find((c) => c.id === id)?.nama_perusahaan || '—';
 
   const filteredEmployees = useMemo(() => {
     if (!filterClient) return employees;
@@ -492,7 +529,10 @@ export default function PayrollManagerPage() {
       linked_employee_id: row.linked_employee_id || '',
       status_ptkp: row.status_ptkp || '',
       npwp_status: row.npwp_status || '',
+      npwp: row.npwp || '',
       jkk_rate: row.jkk_rate ?? '',
+      no_bpjs_kesehatan: row.no_bpjs_kesehatan || '',
+      no_bpjs_ketenagakerjaan: row.no_bpjs_ketenagakerjaan || '',
       nama_rekening: row.nama_rekening || '',
       no_rekening: row.no_rekening || '',
       jatah_cuti_tahunan: row.jatah_cuti_tahunan ?? 12,
@@ -501,7 +541,7 @@ export default function PayrollManagerPage() {
   };
 
   const handleSubmit = async () => {
-    if (!form.nama.trim()) return;
+    if (!form.linked_employee_id || !form.nama.trim()) return;
     setSaving(true);
     setSaveError(null);
 
@@ -516,7 +556,10 @@ export default function PayrollManagerPage() {
       linked_employee_id: form.linked_employee_id || null,
       status_ptkp: form.status_ptkp || null,
       npwp_status: form.npwp_status || null,
+      npwp: form.npwp.trim() || null,
       jkk_rate: form.jkk_rate === '' ? null : Number(form.jkk_rate),
+      no_bpjs_kesehatan: form.no_bpjs_kesehatan.trim() || null,
+      no_bpjs_ketenagakerjaan: form.no_bpjs_ketenagakerjaan.trim() || null,
       nama_rekening: form.nama_rekening.trim() || null,
       no_rekening: form.no_rekening.trim() || null,
       jatah_cuti_tahunan: Number(form.jatah_cuti_tahunan) || 12,
@@ -556,12 +599,6 @@ export default function PayrollManagerPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Link
-            href="/employee/payroll/run"
-            className="text-sm text-madael-red hover:text-madael-dark font-medium"
-          >
-            Payroll Run →
-          </Link>
           <button
             onClick={openAdd}
             className="flex items-center gap-2 bg-madael-red text-white px-5 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors"
@@ -576,7 +613,7 @@ export default function PayrollManagerPage() {
           label="Filter Klien"
           value={filterClient}
           onChange={setFilterClient}
-          options={[{ value: '', label: 'Semua Klien' }, ...clients.map((c) => ({ value: c.id, label: c.nama_klien }))]}
+          options={[{ value: '', label: 'Semua Klien' }, ...clients.map((c) => ({ value: c.id, label: c.nama_perusahaan }))]}
         />
         <label className="flex flex-col gap-1">
           <span className="text-xs text-[#6B6B6B]">Periode (untuk Hitung)</span>
@@ -612,15 +649,16 @@ export default function PayrollManagerPage() {
                 <th className="px-4 py-3 font-medium">Klien</th>
                 <th className="px-4 py-3 font-medium">Posisi</th>
                 <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Akun Absensi</th>
                 <th className="px-4 py-3 font-medium text-right">Gaji Pokok</th>
-                <th className="px-4 py-3 font-medium text-right">Total Tunjangan</th>
+                <th className="px-4 py-3 font-medium text-right">Allowance</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody>
               {filteredEmployees.map((row) => (
                 <tr key={row.id} className="border-b border-[#F0F0F0] last:border-0">
-                  <td className="px-4 py-3 text-black">{row.nama}</td>
+                  <td className="px-4 py-3 text-black">{row.employees?.nama || row.nama}</td>
                   <td className="px-4 py-3 text-[#6B6B6B]">{clientName(row.client_id)}</td>
                   <td className="px-4 py-3 text-[#6B6B6B]">{row.posisi || '—'}</td>
                   <td className="px-4 py-3">
@@ -631,6 +669,20 @@ export default function PayrollManagerPage() {
                     >
                       {row.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {row.linked_employee_id ? (
+                      <span className="inline-block px-2.5 py-1 text-[11px] font-medium rounded bg-[#E6F4EA] text-[#1E7A34]">
+                        Terhubung
+                      </span>
+                    ) : (
+                      <span
+                        title="Sisa kuota cuti & referensi kehadiran tidak akan muncul untuk employee ini sampai di-link ke akun absensi (klik Pencil untuk isi 'Akun Absensi')."
+                        className="inline-block px-2.5 py-1 text-[11px] font-medium rounded bg-[#FEF3C7] text-[#92400E] cursor-help"
+                      >
+                        Belum link akun
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right text-black">{formatRupiah(row.gaji_pokok)}</td>
                   <td className="px-4 py-3 text-right text-black">{formatRupiah(totalTunjangan(row))}</td>

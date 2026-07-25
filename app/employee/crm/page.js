@@ -84,7 +84,7 @@ export default function CrmClientListPage() {
     setLoading(true);
     setError(null);
     const { data, error } = await supabase
-      .from('clients')
+      .from('companies')
       .select('id, created_at, nama_perusahaan, industri, ukuran, website, alamat, kota, pic_nama, pic_jabatan, pic_email, pic_telepon, stage, assigned_to, catatan, is_active, employees:assigned_to ( id, nama )')
       .eq('is_active', true)
       .order('created_at', { ascending: false });
@@ -130,7 +130,7 @@ export default function CrmClientListPage() {
     const prev = clients;
     setClients((cur) => cur.map((c) => (c.id === clientId ? { ...c, stage: newStage } : c)));
 
-    const { error } = await supabase.from('clients').update({ stage: newStage }).eq('id', clientId);
+    const { error } = await supabase.from('companies').update({ stage: newStage }).eq('id', clientId);
     if (error) {
       setClients(prev); // rollback kalau gagal
       alert('Gagal update stage: ' + error.message);
@@ -202,7 +202,7 @@ export default function CrmClientListPage() {
       catatan: form.catatan || null,
     };
 
-    const { error } = await supabase.from('clients').insert(payload);
+    const { error } = await supabase.from('companies').insert(payload);
 
     if (error) {
       setFormError(error.message);

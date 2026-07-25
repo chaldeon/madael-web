@@ -37,7 +37,7 @@ export default function GlobalSearchBar() {
     const [empRes, invRes, docRes] = await Promise.all([
       supabase
         .from('employees')
-        .select('id, nama, employee_id, perusahaan')
+        .select('id, nama, employee_id, companies:client_id ( nama_perusahaan )')
         .or(`nama.ilike.%${q}%,employee_id.ilike.%${q}%`)
         .limit(5),
       // invoices — tabel opsional (Task 16). Kalau belum ada di environment
@@ -118,7 +118,7 @@ export default function GlobalSearchBar() {
                       <User size={14} className="text-[#9A9A9A] shrink-0" />
                       <div className="min-w-0">
                         <p className="text-xs text-black truncate">{e.nama}</p>
-                        <p className="text-[10px] text-[#9A9A9A] truncate">{e.employee_id || '—'} · {e.perusahaan || '—'}</p>
+                        <p className="text-[10px] text-[#9A9A9A] truncate">{e.employee_id || '—'} · {e.companies?.nama_perusahaan || '—'}</p>
                       </div>
                     </Link>
                   ))}
