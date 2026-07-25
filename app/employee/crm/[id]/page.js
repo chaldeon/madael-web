@@ -63,6 +63,8 @@ export default function ClientDetailPage() {
   const [client, setClient] = useState(null);
   const [activities, setActivities] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [deals, setDeals] = useState([]);
+  const [companyDocs, setCompanyDocs] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -83,18 +85,32 @@ export default function ClientDetailPage() {
   const [projectForm, setProjectForm] = useState(null);
   const [savingProject, setSavingProject] = useState(false);
 
+  const [showDealModal, setShowDealModal] = useState(false);
+  const [dealForm, setDealForm] = useState(null);
+  const [savingDeal, setSavingDeal] = useState(false);
+
   const emptyActivity = { tipe: 'Email', judul: '', deskripsi: '', tanggal: new Date().toISOString().slice(0, 10), follow_up_date: '' };
   const emptyProject = { nama_project: '', jenis_layanan: '', status: 'Aktif', nilai_kontrak: '', tanggal_mulai: '', tanggal_selesai: '', pic_madael: '', catatan: '' };
+  const emptyDeal = { stage: 'Prospek', nilai_potensial: '', pic_internal: '', catatan: '' };
 
   const loadData = useCallback(async () => {
     if (!clientId) return;
     setLoading(true);
     setError(null);
 
-    const [{ data: clientData, error: clientError }, { data: activityData }, { data: projectData }, { data: empData }] = await Promise.all([
+    const [
+      { data: clientData, error: clientError },
+      { data: activityData },
+      { data: projectData },
+      { data: dealData },
+      { data: docData },
+      { data: empData },
+    ] = await Promise.all([
       supabase.from('companies').select('*, employees:assigned_to ( id, nama )').eq('id', clientId).maybeSingle(),
       supabase.from('client_activities').select('*, employees:employee_id ( id, nama )').eq('client_id', clientId).order('tanggal', { ascending: false }),
       supabase.from('client_projects').select('*, employees:pic_madael ( id, nama )').eq('client_id', clientId).order('created_at', { ascending: false }),
+      supabase.from('crm_deals').select('*, employees:pic_internal ( id, nama )').eq('company_id', clientId).order('created_at', { ascending: false }),
+      supabase.from('documents').select('id, nomor_surat, judul, kode_jenis, status, tanggal_dokumen').eq('client_id', clientId).order('tanggal_dokumen', { ascending: false }),
       supabase.from('employees').select('id, nama').eq('status', 'Aktif').order('nama', { ascending: true }),
     ]);
 
@@ -107,6 +123,8 @@ export default function ClientDetailPage() {
     setClient(clientData);
     setActivities(activityData || []);
     setProjects(projectData || []);
+    setDeals(dealData || []);
+    setCompanyDocs(docData || []);
     setEmployees(empData || []);
     setLoading(false);
   }, [supabase, clientId]);
@@ -246,6 +264,44 @@ export default function ClientDetailPage() {
     loadData();
   };
 
+  // ---- Tambah deal ----
+  const openDealModal = () => {
+    setDealForm(emptyDeal);
+    setShowDealModal(true);
+  };
+
+  const handleDealSubmit = async (e) => {
+    e.preventDefault();
+    setSavingDeal(true);
+
+    const payload = {
+      company_id: clientId,
+      stage: dealForm.stage || 'Prospek',
+      nilai_potensial: dealForm.nilai_potensial ? Number(dealForm.nilai_potensial) : null,
+      pic_internal: dealForm.pic_internal || null,
+      catatan: dealForm.catatan || null,
+    };
+
+    const { error } = await supabase.from('crm_deals').insert(payload);
+    setSavingDeal(false);
+    if (error) {
+      alert('Gagal menyimpan deal: ' + error.message);
+      return;
+    }
+    setShowDealModal(false);
+    loadData();
+  };
+
+  const updateDealStage = async (dealId, newStage) => {
+    const prevDeals = deals;
+    setDeals((cur) => cur.map((d) => (d.id === dealId ? { ...d, stage: newStage } : d)));
+    const { error } = await supabase.from('crm_deals').update({ stage: newStage, updated_at: new Date().toISOString() }).eq('id', dealId);
+    if (error) {
+      setDeals(prevDeals);
+      alert('Gagal update stage deal: ' + error.message);
+    }
+  };
+
   if (loading) {
     return <div className="max-w-[1200px] mx-auto px-6 py-10"><p className="text-sm text-[#6B6B6B]">Memuat data klien...</p></div>;
   }
@@ -373,6 +429,98 @@ export default function ClientDetailPage() {
               ))}
               {projects.length === 0 && (
                 <tr><td colSpan={6} className="px-3 py-8 text-center text-[#B0B0B0]">Belum ada project untuk klien ini.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Section Deals/Pipeline — satu company bisa punya banyak deal sekaligus,
+          beda dari stage tunggal di atas. Lihat juga papan gabungan di /employee/crm/deals */}
+      <div className="bg-white border border-[#E0E0E0] p-5">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-xs font-semibold text-black tracking-[0.02em]">Deals / Opportunities</p>
+          <button onClick={openDealModal} className="flex items-center gap-1 text-xs font-medium text-madael-red hover:text-madael-dark cursor-pointer border-0 bg-transparent">
+            <Plus size={14} /> Tambah Deal
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[#E0E0E0] text-left text-[11px] text-[#6B6B6B] tracking-[0.04em]">
+                <th className="px-3 py-2 font-medium">Stage</th>
+                <th className="px-3 py-2 font-medium">Nilai Potensial</th>
+                <th className="px-3 py-2 font-medium">PIC Internal</th>
+                <th className="px-3 py-2 font-medium">Catatan</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deals.map((d) => (
+                <tr key={d.id} className="border-b border-[#F0F0F0] last:border-0">
+                  <td className="px-3 py-2.5">
+                    <select
+                      value={d.stage}
+                      onChange={(e) => updateDealStage(d.id, e.target.value)}
+                      className="border border-[#E0E0E0] px-2 py-1 text-xs text-black bg-white focus:outline-none focus:border-madael-red"
+                    >
+                      {STAGES.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-3 py-2.5 text-[#4B4B4B]">{d.nilai_potensial ? formatRupiah(d.nilai_potensial) : '-'}</td>
+                  <td className="px-3 py-2.5 text-[#4B4B4B]">{d.employees?.nama || '-'}</td>
+                  <td className="px-3 py-2.5 text-[#4B4B4B]">{d.catatan || '-'}</td>
+                </tr>
+              ))}
+              {deals.length === 0 && (
+                <tr><td colSpan={4} className="px-3 py-8 text-center text-[#B0B0B0]">Belum ada deal untuk klien ini.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Section Dokumen — dokumen yang pernah di-generate lewat Document
+          Generator untuk company ini (proposal/quotation/agreement, dst). */}
+      <div className="bg-white border border-[#E0E0E0] p-5">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-xs font-semibold text-black tracking-[0.02em]">Dokumen</p>
+          <Link href="/employee/documents/new" className="flex items-center gap-1 text-xs font-medium text-madael-red hover:text-madael-dark">
+            <Plus size={14} /> Buat Dokumen
+          </Link>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[#E0E0E0] text-left text-[11px] text-[#6B6B6B] tracking-[0.04em]">
+                <th className="px-3 py-2 font-medium">Nomor Surat</th>
+                <th className="px-3 py-2 font-medium">Judul</th>
+                <th className="px-3 py-2 font-medium">Jenis</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Tanggal</th>
+              </tr>
+            </thead>
+            <tbody>
+              {companyDocs.map((doc) => (
+                <tr key={doc.id} className="border-b border-[#F0F0F0] last:border-0">
+                  <td className="px-3 py-2.5 text-[#4B4B4B]">
+                    <Link href={`/employee/documents/${doc.id}`} className="text-madael-red hover:underline">
+                      {doc.nomor_surat}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2.5 font-medium text-black">{doc.judul}</td>
+                  <td className="px-3 py-2.5 text-[#4B4B4B]">{doc.kode_jenis}</td>
+                  <td className="px-3 py-2.5">
+                    <span className="inline-block px-2 py-0.5 text-[11px] font-medium rounded bg-[#F3F4F6] text-[#4B5563]">{doc.status}</span>
+                  </td>
+                  <td className="px-3 py-2.5 text-[#4B4B4B]">{formatDate(doc.tanggal_dokumen)}</td>
+                </tr>
+              ))}
+              {companyDocs.length === 0 && (
+                <tr><td colSpan={5} className="px-3 py-8 text-center text-[#B0B0B0]">Belum ada dokumen yang di-generate untuk klien ini.</td></tr>
               )}
             </tbody>
           </table>
@@ -586,6 +734,46 @@ export default function ClientDetailPage() {
                 <button type="button" onClick={() => setShowProjectModal(false)} className="px-4 py-2 text-sm text-[#6B6B6B] border border-[#E0E0E0] bg-white cursor-pointer">Batal</button>
                 <button type="submit" disabled={savingProject} className="px-4 py-2 text-sm font-medium text-white bg-madael-red hover:bg-madael-dark cursor-pointer border-0 disabled:opacity-60">
                   {savingProject ? 'Menyimpan...' : 'Simpan Project'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showDealModal && dealForm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4">
+          <div className="bg-white w-full max-w-[480px] max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#E0E0E0] sticky top-0 bg-white">
+              <h2 className="font-serif text-lg text-black">Tambah Deal</h2>
+              <button onClick={() => setShowDealModal(false)} className="text-[#6B6B6B] hover:text-black cursor-pointer border-0 bg-transparent"><X size={18} /></button>
+            </div>
+            <form onSubmit={handleDealSubmit} className="px-6 py-5 flex flex-col gap-4">
+              <div>
+                <label className={labelClass}>Stage</label>
+                <select className={inputClass} value={dealForm.stage} onChange={(e) => setDealForm((f) => ({ ...f, stage: e.target.value }))}>
+                  {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelClass}>Nilai Potensial (Rp)</label>
+                <input type="number" className={inputClass} value={dealForm.nilai_potensial} onChange={(e) => setDealForm((f) => ({ ...f, nilai_potensial: e.target.value }))} />
+              </div>
+              <div>
+                <label className={labelClass}>PIC Internal</label>
+                <select className={inputClass} value={dealForm.pic_internal} onChange={(e) => setDealForm((f) => ({ ...f, pic_internal: e.target.value }))}>
+                  <option value="">-</option>
+                  {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.nama}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelClass}>Catatan</label>
+                <textarea className={inputClass} rows={2} value={dealForm.catatan} onChange={(e) => setDealForm((f) => ({ ...f, catatan: e.target.value }))} />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowDealModal(false)} className="px-4 py-2 text-sm text-[#6B6B6B] border border-[#E0E0E0] bg-white cursor-pointer">Batal</button>
+                <button type="submit" disabled={savingDeal} className="px-4 py-2 text-sm font-medium text-white bg-madael-red hover:bg-madael-dark cursor-pointer border-0 disabled:opacity-60">
+                  {savingDeal ? 'Menyimpan...' : 'Simpan Deal'}
                 </button>
               </div>
             </form>
