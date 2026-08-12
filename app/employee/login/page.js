@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase-browser';
+import { useLanguage } from '@/context/LanguageContext';
 
 export default function EmployeeLoginPage() {
   const router = useRouter();
@@ -12,6 +13,7 @@ export default function EmployeeLoginPage() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
+  const { lang } = useLanguage();
 
   useEffect(() => {
     const checkSession = async () => {
@@ -40,7 +42,7 @@ export default function EmployeeLoginPage() {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
-      setError('Email atau password salah.');
+      setError(lang === 'id' ? 'Email atau password salah.' : 'Invalid email or password.');
       setLoading(false);
       return;
     }
@@ -52,7 +54,9 @@ export default function EmployeeLoginPage() {
   if (checkingSession) {
     return (
       <section className="min-h-[calc(100vh-68px)] flex items-center justify-center bg-black">
-        <p className="text-sm text-white/60">Memuat...</p>
+        <p className="text-sm text-white/60">
+          {lang === 'id' ? 'Memuat...' : 'Loading...'}
+        </p>
       </section>
     );
   }
@@ -71,9 +75,14 @@ export default function EmployeeLoginPage() {
         </div>
 
         <h1 className="font-serif text-[24px] font-normal text-black tracking-[-0.02em] mb-1 text-center">
-          Employee Login
+          {lang === 'id' ? 'Masuk' : 'Login'}
         </h1>
-        <p className="text-sm text-[#6B6B6B] mb-6 text-center">Madael Consult</p>
+        <p className="text-sm text-[#6B6B6B] mb-1 text-center">Madael Consult</p>
+        <p className="text-xs text-[#8A8A8A] mb-6 text-center leading-relaxed">
+          {lang === 'id'
+            ? 'Portal masuk untuk karyawan, mitra, dan pihak lain yang berkepentingan dengan sistem internal Madael Consult.'
+            : 'Login portal for employees, partners, and other authorized parties of Madael Consult\u2019s internal system.'}
+        </p>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
@@ -107,7 +116,7 @@ export default function EmployeeLoginPage() {
             disabled={loading}
             className="w-full bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {loading ? 'Memproses...' : 'Login'}
+            {loading ? lang === 'id' ? 'Memproses...' : 'Processing...' : lang === 'id' ? 'Masuk' : 'Login'}
           </button>
         </form>
       </div>

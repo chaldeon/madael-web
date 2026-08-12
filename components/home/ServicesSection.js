@@ -65,7 +65,7 @@ export default function ServicesSection() {
     <section className="px-10 py-24 bg-white">
       <div className="flex items-end justify-between mb-14 border-b border-[#E0E0E0] pb-6">
         <div className="font-serif text-[32px] font-normal text-black tracking-[-0.02em] leading-[1.2] inline-block border-l-[3px] border-madael-red pl-4">
-          {lang === 'id' ? 'What We Do' : 'Our services'}
+          {lang === 'id' ? 'Layanan Kami' : 'Our services'}
         </div>
       </div>
 

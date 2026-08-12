@@ -83,12 +83,12 @@ export default function HeroSection() {
       <div className="relative max-w-[680px] z-[1]">
         <div className="text-[11px] tracking-[0.18em] uppercase text-madael-red font-semibold mb-6 flex items-center gap-3">
           <span className="block w-6 h-px bg-madael-red" />
-          HR & Legal Consulting — Indonesia
+          Human Resources Consulting — Indonesia
         </div>
         <h1 className="font-serif text-[clamp(36px,5vw,58px)] font-normal leading-[1.12] text-white tracking-[-0.02em] mb-6">
           Your Trusted
           <br />
-          HR & Legal <em className="text-madael-red italic">Partner</em>
+          Human Resources <em className="text-madael-red italic">Partner</em>
           <br />
           in Indonesia
         </h1>

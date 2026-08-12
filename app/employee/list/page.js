@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { MODULE_OPTIONS } from '@/lib/employeeModules';
+import { nextEmployeeId } from '@/lib/employeeId';
 
 const emptyForm = {
   nama: '',
@@ -12,6 +13,18 @@ const emptyForm = {
   client_id: '',
   status: 'Aktif',
   is_superadmin: false,
+};
+
+const TEMPLATE_URL = '/templates/template-bulk-employee.xlsx';
+
+// Kolom yang bisa disortir + cara ambil value-nya dari row employee.
+const SORT_COLUMNS = {
+  nama: { label: 'Nama', get: (e) => (e.nama || '').toLowerCase() },
+  employee_id: { label: 'Employee ID', get: (e) => e.employee_id || '' },
+  email: { label: 'Email', get: (e) => (e.email || '').toLowerCase() },
+  perusahaan: { label: 'Perusahaan', get: (e) => (e.companies?.nama_perusahaan || '').toLowerCase() },
+  status: { label: 'Status', get: (e) => e.status || '' },
+  is_superadmin: { label: 'Superadmin', get: (e) => (e.is_superadmin ? 1 : 0) },
 };
 
 // Dropdown perusahaan (companies) + opsi tambah baru inline — dipakai di
@@ -83,6 +96,24 @@ function CompanySelect({ value, onChange, companies, onAddCompany, inputClass, l
   );
 }
 
+// Header kolom tabel yang bisa diklik buat sortir.
+function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
+  const active = sortField === colKey;
+  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className="px-5 py-3 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(colKey)}
+        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
+      >
+        {label}
+        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />
+      </button>
+    </th>
+  );
+}
+
 export default function EmployeeListPage() {
   const supabase = createClient();
 
@@ -93,6 +124,9 @@ export default function EmployeeListPage() {
 
   const [filterClientId, setFilterClientId] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+
+  const [sortField, setSortField] = useState('nama');
+  const [sortDir, setSortDir] = useState('asc');
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -108,6 +142,15 @@ export default function EmployeeListPage() {
   const [editForm, setEditForm] = useState(emptyForm);
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState(null);
+
+  // ---- Bulk Import ----
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkFile, setBulkFile] = useState(null);
+  const [bulkRows, setBulkRows] = useState([]); // hasil parse, siap dikirim
+  const [bulkParseError, setBulkParseError] = useState(null);
+  const [bulkParsing, setBulkParsing] = useState(false);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null); // { successCount, errorCount, results }
 
   // Perusahaan tempat karyawan bekerja/ditempatkan (termasuk outsourcing) —
   // narik dari `companies`, satu sumber yang sama dipakai Payroll Manager,
@@ -141,11 +184,34 @@ export default function EmployeeListPage() {
     fetchCompanies();
   }, [fetchEmployees, fetchCompanies]);
 
-  const filtered = employees.filter((e) => {
-    const matchPerusahaan = !filterClientId || e.client_id === filterClientId;
-    const matchStatus = !filterStatus || e.status === filterStatus;
-    return matchPerusahaan && matchStatus;
-  });
+  const handleSort = (colKey) => {
+    if (sortField === colKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(colKey);
+      setSortDir('asc');
+    }
+  };
+
+  const filtered = useMemo(() => {
+    const rows = employees.filter((e) => {
+      const matchPerusahaan = !filterClientId || e.client_id === filterClientId;
+      const matchStatus = !filterStatus || e.status === filterStatus;
+      return matchPerusahaan && matchStatus;
+    });
+
+    const getValue = SORT_COLUMNS[sortField]?.get;
+    if (!getValue) return rows;
+
+    const sorted = [...rows].sort((a, b) => {
+      const va = getValue(a);
+      const vb = getValue(b);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return sortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [employees, filterClientId, filterStatus, sortField, sortDir]);
 
   // Tambah perusahaan baru langsung dari sini — nulis ke tabel `companies`
   // yang sama, jadi otomatis muncul juga di Payroll Manager/CRM/dll.
@@ -168,7 +234,10 @@ export default function EmployeeListPage() {
   // ---- Tambah Employee ----
 
   const openAddModal = () => {
-    setForm(emptyForm);
+    // Employee ID disarankan otomatis (format MDL0001, urut, 4 digit) dari ID
+    // tertinggi yang sudah ada — superadmin masih bisa timpa manual kalau perlu.
+    const suggestedId = nextEmployeeId(employees.map((e) => e.employee_id));
+    setForm({ ...emptyForm, employee_id: suggestedId });
     setFormError(null);
     setCreatedInfo(null);
     setShowAddModal(true);
@@ -250,7 +319,7 @@ export default function EmployeeListPage() {
     }
     setEditSubmitting(false);
   };
-  
+
   // ---- Kelola Akses ----
 
   const openAccessModal = async (employee) => {
@@ -294,6 +363,101 @@ export default function EmployeeListPage() {
     setAccessSavingKey(null);
   };
 
+  // ---- Bulk Import ----
+
+  const openBulkModal = () => {
+    setBulkFile(null);
+    setBulkRows([]);
+    setBulkParseError(null);
+    setBulkResult(null);
+    setShowBulkModal(true);
+  };
+
+  // Baca file .xlsx yang dipilih user, mapping ke bentuk row yang dipahami
+  // /api/employee/bulk-create. Pakai dynamic import supaya library 'xlsx'
+  // tidak membengkakkan bundle awal halaman.
+  const handleBulkFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBulkFile(file);
+    setBulkParseError(null);
+    setBulkResult(null);
+    setBulkParsing(true);
+
+    try {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+      const rows = raw
+        .map((r) => ({
+          nama: String(r['Nama'] ?? '').trim(),
+          employee_id: String(r['Employee ID (opsional)'] ?? r['Employee ID'] ?? '').trim(),
+          email: String(r['Email'] ?? '').trim(),
+          perusahaan: String(r['Perusahaan'] ?? '').trim(),
+          status: String(r['Status'] ?? '').trim(),
+          superadmin: String(r['Superadmin'] ?? '').trim(),
+        }))
+        .filter((r) => r.nama || r.email); // buang baris kosong total
+
+      if (rows.length === 0) {
+        setBulkParseError('Tidak ada baris data yang terbaca. Pastikan pakai template yang disediakan.');
+      } else {
+        setBulkRows(rows);
+      }
+    } catch (err) {
+      setBulkParseError('Gagal membaca file. Pastikan formatnya .xlsx sesuai template.');
+    }
+    setBulkParsing(false);
+  };
+
+  const handleBulkSubmit = async () => {
+    if (bulkRows.length === 0) return;
+    setBulkSubmitting(true);
+    setBulkParseError(null);
+
+    try {
+      const res = await fetch('/api/employee/bulk-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: bulkRows }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setBulkParseError(data.error || 'Gagal memproses file.');
+        setBulkSubmitting(false);
+        return;
+      }
+
+      setBulkResult(data);
+      fetchEmployees();
+    } catch (err) {
+      setBulkParseError('Terjadi kesalahan. Coba lagi.');
+    }
+    setBulkSubmitting(false);
+  };
+
+  // Download daftar password sementara hasil bulk import sebagai CSV, biar
+  // gampang dibagikan/diarsip — tidak perlu discroll & disalin manual satu-satu.
+  const downloadBulkPasswords = () => {
+    if (!bulkResult) return;
+    const success = bulkResult.results.filter((r) => r.status === 'success');
+    const header = 'Nama,Employee ID,Email,Password Sementara\n';
+    const body = success
+      .map((r) => `"${r.nama}","${r.employee_id}","${r.email}","${r.tempPassword}"`)
+      .join('\n');
+    const blob = new Blob([header + body], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'password-employee-baru.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const selectClass =
     'border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
   const inputClass =
@@ -309,12 +473,21 @@ export default function EmployeeListPage() {
           </h1>
           <p className="text-sm text-[#6B6B6B] mt-1">{employees.length} total employee</p>
         </div>
-        <button
-          onClick={openAddModal}
-          className="bg-madael-red text-white px-5 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
-        >
-          + Tambah Employee
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={openBulkModal}
+            className="flex items-center gap-2 border border-[#E0E0E0] text-black px-5 py-2.5 text-sm font-medium tracking-[0.04em] hover:border-madael-red hover:text-madael-red transition-colors"
+          >
+            <Upload size={16} />
+            Bulk Tambah
+          </button>
+          <button
+            onClick={openAddModal}
+            className="bg-madael-red text-white px-5 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
+          >
+            + Tambah Employee
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-3 mb-6">
@@ -343,12 +516,12 @@ export default function EmployeeListPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B] tracking-[0.04em]">
-                <th className="px-5 py-3 font-medium">Nama</th>
-                <th className="px-5 py-3 font-medium">Employee ID</th>
-                <th className="px-5 py-3 font-medium">Email</th>
-                <th className="px-5 py-3 font-medium">Perusahaan</th>
-                <th className="px-5 py-3 font-medium">Status</th>
-                <th className="px-5 py-3 font-medium">Superadmin</th>
+                <SortableHeader colKey="nama" label="Nama" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="employee_id" label="Employee ID" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="email" label="Email" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="perusahaan" label="Perusahaan" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="is_superadmin" label="Superadmin" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-5 py-3 font-medium">Aksi</th>
               </tr>
             </thead>
@@ -442,9 +615,10 @@ export default function EmployeeListPage() {
                   <input
                     value={form.employee_id}
                     onChange={(e) => handleFormChange('employee_id', e.target.value)}
-                    placeholder="MDL002"
+                    placeholder="MDL0001"
                     className={inputClass}
                   />
+                  <p className="text-xs text-[#9A9A9A] mt-1">Sudah disarankan otomatis, boleh diganti manual kalau perlu.</p>
                 </div>
                 <div>
                   <label className={labelClass}>Email</label>
@@ -525,7 +699,7 @@ export default function EmployeeListPage() {
                 <input
                   value={editForm.employee_id}
                   onChange={(e) => handleEditFormChange('employee_id', e.target.value)}
-                  placeholder="MDL002"
+                  placeholder="MDL0001"
                   className={inputClass}
                 />
               </div>
@@ -621,6 +795,120 @@ export default function EmployeeListPage() {
                     </label>
                   );
                 })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Bulk Tambah Employee */}
+      {showBulkModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6">
+          <div className="w-full max-w-[560px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="font-serif text-[20px] font-normal text-black">Bulk Tambah Employee</h2>
+              <button onClick={() => setShowBulkModal(false)} className="text-[#6B6B6B] hover:text-black">
+                <X size={20} />
+              </button>
+            </div>
+
+            {bulkResult ? (
+              <div>
+                <p className="text-sm text-black mb-4">
+                  Selesai diproses: <strong className="text-[#166534]">{bulkResult.successCount} berhasil</strong>
+                  {bulkResult.errorCount > 0 && (
+                    <> · <strong className="text-madael-red">{bulkResult.errorCount} gagal</strong></>
+                  )}
+                </p>
+
+                {bulkResult.successCount > 0 && (
+                  <button
+                    onClick={downloadBulkPasswords}
+                    className="flex items-center gap-2 border border-[#E0E0E0] text-black px-4 py-2.5 text-sm font-medium hover:border-madael-red hover:text-madael-red transition-colors mb-4"
+                  >
+                    <Download size={16} />
+                    Download Password Sementara (CSV)
+                  </button>
+                )}
+
+                <div className="border border-[#E0E0E0] max-h-[280px] overflow-y-auto mb-6">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-[#F4F4F4]">
+                      <tr className="text-left text-[#6B6B6B]">
+                        <th className="px-3 py-2 font-medium">Baris</th>
+                        <th className="px-3 py-2 font-medium">Email</th>
+                        <th className="px-3 py-2 font-medium">Status</th>
+                        <th className="px-3 py-2 font-medium">Keterangan</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkResult.results.map((r) => (
+                        <tr key={r.row} className="border-t border-[#F0F0F0]">
+                          <td className="px-3 py-2 text-[#6B6B6B]">{r.row}</td>
+                          <td className="px-3 py-2 text-black">{r.email}</td>
+                          <td className="px-3 py-2">
+                            <span className={r.status === 'success' ? 'text-[#166534]' : 'text-madael-red'}>
+                              {r.status === 'success' ? 'Berhasil' : 'Gagal'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-[#6B6B6B]">
+                            {r.status === 'success' ? r.employee_id : r.error}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <button
+                  onClick={() => setShowBulkModal(false)}
+                  className="w-full bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
+                >
+                  Selesai
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                <div>
+                  <p className="text-sm text-black mb-2">
+                    Upload file Excel berisi data employee baru. Setiap baris akan otomatis dibuatkan akun login (email + password sementara).
+                  </p>
+                  <a
+                    href={TEMPLATE_URL}
+                    download
+                    className="inline-flex items-center gap-2 text-sm text-madael-red hover:text-madael-dark font-medium"
+                  >
+                    <Download size={15} />
+                    Download Template Excel
+                  </a>
+                </div>
+
+                <div>
+                  <label className={labelClass}>File Excel (.xlsx)</label>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls"
+                    onChange={handleBulkFileChange}
+                    className="w-full text-sm text-black file:mr-3 file:px-4 file:py-2 file:border-0 file:bg-madael-red file:text-white file:text-sm file:font-medium hover:file:bg-madael-dark file:cursor-pointer cursor-pointer"
+                  />
+                </div>
+
+                {bulkParsing && <p className="text-sm text-[#6B6B6B]">Membaca file...</p>}
+                {bulkParseError && <p className="text-sm text-madael-red">{bulkParseError}</p>}
+                {bulkRows.length > 0 && !bulkParsing && (
+                  <p className="text-sm text-black bg-[#F4F4F4] border border-[#E0E0E0] px-4 py-3">
+                    {bulkRows.length} baris siap diproses dari <strong>{bulkFile?.name}</strong>.
+                  </p>
+                )}
+
+                <button
+                  type="button"
+                  disabled={bulkRows.length === 0 || bulkSubmitting}
+                  onClick={handleBulkSubmit}
+                  className="w-full bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {bulkSubmitting ? 'Memproses...' : `Proses ${bulkRows.length || ''} Employee`}
+                </button>
               </div>
             )}
           </div>
