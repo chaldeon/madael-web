@@ -79,7 +79,7 @@ export default function KoreksiAbsensiPage() {
     const [empRes, attRes] = await Promise.all([
       supabase
         .from('employees')
-        .select('id, nama, employee_id, perusahaan, status')
+        .select('id, nama, employee_id, status')
         .eq('status', 'Aktif')
         .order('nama'),
       supabase

@@ -443,7 +443,7 @@ export default function NewDocumentPage() {
     setLoadingClients(true);
     setClientsError(null);
     const { data, error } = await supabase
-      .from('clients')
+      .from('companies')
       .select('id, nama_perusahaan, pic_nama')
       .eq('is_active', true)
       .order('nama_perusahaan', { ascending: true });

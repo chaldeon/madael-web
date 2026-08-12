@@ -48,7 +48,7 @@ function downloadRekapCsv(rows, monthValue) {
   rows.forEach(({ emp, totalHadir, totalTelat, totalTidakHadir }) => {
     lines.push([
       emp.nama,
-      emp.perusahaan || '',
+      emp.companies?.nama_perusahaan || '',
       totalHadir,
       totalTelat,
       totalTidakHadir === null ? '' : totalTidakHadir,
@@ -92,7 +92,7 @@ export default function RekapAbsensiPage() {
     const [empRes, schedRes, attRes] = await Promise.all([
       supabase
         .from('employees')
-        .select('id, nama, employee_id, perusahaan, status')
+        .select('id, nama, employee_id, status, companies:client_id ( nama_perusahaan )')
         .eq('status', 'Aktif')
         .order('nama'),
       supabase.from('work_schedule').select('*'),
@@ -250,7 +250,7 @@ export default function RekapAbsensiPage() {
                 rows.map(({ emp, totalHadir, totalTelat, totalTidakHadir }) => (
                   <tr key={emp.id} className="border-b border-[#E0E0E0] last:border-0">
                     <td className="px-4 py-3 text-black">{emp.nama}</td>
-                    <td className="px-4 py-3 text-[#6B6B6B]">{emp.perusahaan || '—'}</td>
+                    <td className="px-4 py-3 text-[#6B6B6B]">{emp.companies?.nama_perusahaan || '—'}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">{totalHadir}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">{totalTelat}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">

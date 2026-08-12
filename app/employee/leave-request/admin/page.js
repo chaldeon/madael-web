@@ -56,7 +56,7 @@ export default function LeaveRequestAdminPage() {
     setLoadError(null);
 
     const [empRes, reqRes, schedRes, masterRes] = await Promise.all([
-      supabase.from('employees').select('id, nama, perusahaan').order('nama'),
+      supabase.from('employees').select('id, nama').order('nama'),
       supabase.from('leave_requests').select('*').order('created_at', { ascending: false }),
       supabase.from('work_schedule').select('employee_id, hari_kerja'),
       supabase.from('employees_master').select('id, linked_employee_id, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun'),

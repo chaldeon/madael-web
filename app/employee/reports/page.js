@@ -152,7 +152,7 @@ export default function ReportsDashboardPage() {
 
     const { data, error } = await supabase
       .from('payroll_runs')
-      .select('status, payroll_clients ( nama_klien )')
+      .select('status, companies ( nama_perusahaan )')
       .eq('periode', periode);
 
     if (error) {
@@ -182,7 +182,7 @@ export default function ReportsDashboardPage() {
   const payrollByClient = useMemo(() => {
     const map = {};
     payrollRuns.forEach((run) => {
-      const klien = run.payroll_clients?.nama_klien || 'Tanpa Klien';
+      const klien = run.companies?.nama_perusahaan || 'Tanpa Klien';
       if (!map[klien]) map[klien] = { klien, Draft: 0, Review: 0, Approved: 0 };
       if (run.status in map[klien]) map[klien][run.status] += 1;
     });

@@ -426,7 +426,7 @@ export default function EditDocumentPage() {
 
   const loadClients = useCallback(async () => {
     const { data } = await supabase
-      .from('clients')
+      .from('companies')
       .select('id, nama_perusahaan, pic_nama')
       .eq('is_active', true)
       .order('nama_perusahaan', { ascending: true });

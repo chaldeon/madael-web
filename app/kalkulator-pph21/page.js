@@ -4,16 +4,17 @@ import { useState } from 'react';
 import { useLanguage } from '@/context/LanguageContext';
 import CalculatorDevWarning from '@/components/CalculatorDevWarning';
 
-// ============ DATA PTKP & KATEGORI TER ============
+// Kategori TER resmi (PMK 168/2023): bukan berdasarkan TK/K, tapi berdasarkan
+// besaran PTKP — TK/0,TK/1,K/0 -> A; TK/2,TK/3,K/1,K/2 -> B; K/3 -> C.
 const PTKP_DATA = {
   TK0: { labelId: 'TK/0 — Belum Menikah', labelEn: 'TK/0 — Single, No Dependents', amount: 54000000, category: 'A' },
   TK1: { labelId: 'TK/1 — Belum Menikah, 1 Tanggungan', labelEn: 'TK/1 — Single, 1 Dependent', amount: 58500000, category: 'A' },
-  TK2: { labelId: 'TK/2 — Belum Menikah, 2 Tanggungan', labelEn: 'TK/2 — Single, 2 Dependents', amount: 63000000, category: 'A' },
-  TK3: { labelId: 'TK/3 — Belum Menikah, 3 Tanggungan', labelEn: 'TK/3 — Single, 3 Dependents', amount: 67500000, category: 'A' },
-  K0: { labelId: 'K/0 — Menikah', labelEn: 'K/0 — Married, No Dependents', amount: 58500000, category: 'B' },
+  TK2: { labelId: 'TK/2 — Belum Menikah, 2 Tanggungan', labelEn: 'TK/2 — Single, 2 Dependents', amount: 63000000, category: 'B' },
+  TK3: { labelId: 'TK/3 — Belum Menikah, 3 Tanggungan', labelEn: 'TK/3 — Single, 3 Dependents', amount: 67500000, category: 'B' },
+  K0: { labelId: 'K/0 — Menikah', labelEn: 'K/0 — Married, No Dependents', amount: 58500000, category: 'A' },
   K1: { labelId: 'K/1 — Menikah, 1 Tanggungan', labelEn: 'K/1 — Married, 1 Dependent', amount: 63000000, category: 'B' },
   K2: { labelId: 'K/2 — Menikah, 2 Tanggungan', labelEn: 'K/2 — Married, 2 Dependents', amount: 67500000, category: 'B' },
-  K3: { labelId: 'K/3 — Menikah, 3 Tanggungan', labelEn: 'K/3 — Married, 3 Dependents', amount: 72000000, category: 'B' },
+  K3: { labelId: 'K/3 — Menikah, 3 Tanggungan', labelEn: 'K/3 — Married, 3 Dependents', amount: 72000000, category: 'C' },
 };
 
 // ============ TABEL TER (resmi, PMK 168/2023 — Lampiran DJP) ============
@@ -40,8 +41,22 @@ const TER_B = [
   [555000000, 30], [704000000, 31], [957000000, 32], [1405000000, 33],
 ];
 
+// TER Kategori C — sebelumnya tidak ada sama sekali di kalkulator ini, jadi
+// status K/3 keliru ikut tabel B. Sumber: Ortax, Daftar Tarif PPh Pasal 21
+// (Feb 2024), sesuai Lampiran PMK 168/2023.
+const TER_C = [
+  [6600000, 0], [6950000, 0.25], [7350000, 0.5], [7800000, 0.75], [8850000, 1],
+  [9800000, 1.25], [10950000, 1.5], [11200000, 1.75], [12050000, 2], [12950000, 3],
+  [14150000, 4], [15550000, 5], [17050000, 6], [19500000, 7], [22700000, 8],
+  [26600000, 9], [28100000, 10], [30100000, 11], [32600000, 12], [35400000, 13],
+  [38900000, 14], [43000000, 15], [47400000, 16], [51200000, 17], [55800000, 18],
+  [60400000, 19], [66700000, 20], [74500000, 21], [83200000, 22], [95600000, 23],
+  [110000000, 24], [134000000, 25], [169000000, 26], [221000000, 27], [390000000, 28],
+  [463000000, 29], [561000000, 30], [709000000, 31], [965000000, 32], [1419000000, 33],
+];
+
 function getTerRate(category, bruto) {
-  const table = category === 'A' ? TER_A : TER_B;
+  const table = category === 'A' ? TER_A : category === 'C' ? TER_C : TER_B;
   for (const [max, rate] of table) {
     if (bruto <= max) return rate;
   }

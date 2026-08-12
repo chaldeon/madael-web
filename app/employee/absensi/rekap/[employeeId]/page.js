@@ -92,7 +92,7 @@ export default function RekapDetailPage() {
     const lastDay = `${monthValue}-${String(lastDayNum).padStart(2, '0')}`;
 
     const [empRes, attRes] = await Promise.all([
-      supabase.from('employees').select('id, nama, perusahaan').eq('id', employeeId).maybeSingle(),
+      supabase.from('employees').select('id, nama, companies:client_id ( nama_perusahaan )').eq('id', employeeId).maybeSingle(),
       supabase
         .from('attendance')
         .select('*')
@@ -185,7 +185,7 @@ export default function RekapDetailPage() {
           {loading ? 'Memuat...' : (emp?.nama || 'Karyawan tidak ditemukan')}
         </h1>
         <p className="text-sm text-[#6B6B6B] mt-1">
-          {emp?.perusahaan ? `${emp.perusahaan} — ` : ''}Log kehadiran bulan {monthValue}.
+          {emp?.companies?.nama_perusahaan ? `${emp.companies.nama_perusahaan} — ` : ''}Log kehadiran bulan {monthValue}.
         </p>
       </div>
 

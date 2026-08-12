@@ -67,9 +67,10 @@ function roundDistributed(values) {
 
 const PENDAPATAN_FIELDS = [
   { key: 'gaji_pokok', label: 'Gaji Pokok' },
-  { key: 'lembur', label: 'Lembur' },
-  { key: 'tunjangan_transport', label: 'Tunjangan Transport' },
-  { key: 'tunjangan_lain', label: 'Tunjangan Lain' },
+  { key: 'lembur', label: 'Overtime (Lembur)' },
+  { key: 'insentif', label: 'Incentive' },
+  { key: 'kompensasi', label: 'Compensation Fund / Festive Allowance' },
+  { key: 'tunjangan_lain', label: 'Allowance (Transport/Travel/Communication)' },
 ];
 
 const BPJS_PERUSAHAAN_FIELDS = [
@@ -99,7 +100,7 @@ const EMPTY_FORM = {
   periode: '',
   periode_label: '',
   nomor_dokumen: '',
-  gaji_pokok: 0, lembur: 0, tunjangan_transport: 0, tunjangan_lain: 0,
+  gaji_pokok: 0, lembur: 0, insentif: 0, kompensasi: 0, tunjangan_lain: 0,
   bpjs_k_perusahaan: 0,
   jkk_perusahaan: 0, jkm_perusahaan: 0, jht_perusahaan: 0, jp_perusahaan: 0,
   jht_karyawan: 0, jp_karyawan: 0, bpjs_k_karyawan: 0, pph21: 0, penalty: 0,
@@ -163,6 +164,23 @@ function TextField({ label, value, onChange, type = 'text' }) {
   );
 }
 
+// Task 25 — standing data (rekening, NPWP, PTKP, no. BPJS) sekarang cuma bisa
+// dibaca di sini, bukan diinput ulang. Sumbernya employees_master; kalau mau
+// ubah, ubah di Payroll Manager, bukan di slip gaji per periode.
+function ReadOnlyField({ label, value }) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs text-[#6B6B6B]">{label}</span>
+      <input
+        type="text"
+        value={value || '— Belum diisi di Payroll Manager —'}
+        readOnly
+        className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-[#F4F4F4] cursor-not-allowed"
+      />
+    </label>
+  );
+}
+
 function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmit, saving, isEdit, saveError }) {
   const [loadingDefaults, setLoadingDefaults] = useState(false);
   const [loadingPenalty, setLoadingPenalty] = useState(false);
@@ -171,23 +189,28 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
   const bpjsTkPerusahaan =
     (form.jkk_perusahaan || 0) + (form.jkm_perusahaan || 0) + (form.jht_perusahaan || 0) + (form.jp_perusahaan || 0);
   const totalPendapatan =
-    (form.gaji_pokok || 0) + (form.lembur || 0) + (form.tunjangan_transport || 0) + (form.tunjangan_lain || 0) +
+    (form.gaji_pokok || 0) + (form.lembur || 0) + (form.insentif || 0) + (form.kompensasi || 0) + (form.tunjangan_lain || 0) +
     bpjsTkPerusahaan + (form.bpjs_k_perusahaan || 0);
   // Total Potongan = Penalty + BPJS ditanggung karyawan (JHT 2% + JP 1% + Kesehatan 1%) + PPh21
   const totalPotongan =
     (form.penalty || 0) + (form.jht_karyawan || 0) + (form.jp_karyawan || 0) + (form.bpjs_k_karyawan || 0) + (form.pph21 || 0);
-  // Take Home Pay = Gaji Pokok + Allowance (Tunjangan) + Compensation (Lembur) − Total Potongan
+  // Take Home Pay = Gaji Pokok + Overtime + Incentive + Compensation Fund + Allowance − Total Potongan
   const takeHomePay =
-    (form.gaji_pokok || 0) + (form.lembur || 0) + (form.tunjangan_transport || 0) + (form.tunjangan_lain || 0) - totalPotongan;
+    (form.gaji_pokok || 0) + (form.lembur || 0) + (form.insentif || 0) + (form.kompensasi || 0) + (form.tunjangan_lain || 0) - totalPotongan;
 
   // Hitung ulang BPJS (+ PPh21 kalau PTKP sudah dipilih) pakai rumus yang
   // SAMA PERSIS dengan employee/payroll (lib/payroll/calculations.js), basis
-  // BPJS = Gaji Pokok saja, bruto PPh21 = Gaji Pokok + Tunjangan + kenikmatan
-  // BPJS (kesehatan+JKK+JKM) yang ditanggung perusahaan − Penalty.
+  // BPJS = Gaji Pokok saja, bruto PPh21 = Gaji Pokok + Allowance (Transport/
+  // Travel/Communication + Overtime + Incentive + Compensation Fund) +
+  // kenikmatan BPJS (kesehatan+JKK+JKM) yang ditanggung perusahaan − Penalty.
   const recalcFromPendapatan = (overrides = {}, rateOverride) => {
     const merged = { ...form, ...overrides };
     const gajiPokok = Number(merged.gaji_pokok) || 0;
-    const allowance = (Number(merged.tunjangan_transport) || 0) + (Number(merged.tunjangan_lain) || 0);
+    const allowance =
+      (Number(merged.tunjangan_lain) || 0) +
+      (Number(merged.lembur) || 0) +
+      (Number(merged.insentif) || 0) +
+      (Number(merged.kompensasi) || 0);
     const penalty = Number(merged.penalty) || 0;
     const rate = rateOverride !== undefined ? rateOverride : jkkRate;
 
@@ -291,60 +314,43 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
     updatePeriode(periodeTahun, val);
   };
 
-  const DEFAULT_KEYS = [
-    'rekening', 'metode_pembayaran', 'npwp', 'ptkp', 'no_bpjs_k', 'no_bpjs_tk',
-    'gaji_pokok', 'tunjangan_transport', 'tunjangan_lain',
-    'bpjs_k_perusahaan', 'jkk_perusahaan', 'jkm_perusahaan', 'jht_perusahaan', 'jp_perusahaan',
-    'jht_karyawan', 'jp_karyawan', 'bpjs_k_karyawan', 'pph21',
-  ];
-
   const handleEmployeeChange = async (employeeId) => {
     setForm((prev) => ({ ...prev, employee_id: employeeId }));
     if (isEdit || !employeeId || !supabase) return;
 
     setLoadingDefaults(true);
     try {
-      // 1. Utamakan data dari slip gaji terakhir milik karyawan ini
-      const { data: lastSlip } = await supabase
-        .from('payslips')
-        .select(DEFAULT_KEYS.join(', '))
-        .eq('employee_id', employeeId)
-        .order('periode', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (lastSlip) {
-        // Saring null (kolom yang di database kosong) supaya tidak jadi controlled input value={null}
-        const sanitized = {};
-        Object.keys(lastSlip).forEach((key) => {
-          if (lastSlip[key] !== null && lastSlip[key] !== undefined) sanitized[key] = lastSlip[key];
-        });
-        // Rekening/NPWP/no. BPJS dll cukup di-carry apa adanya, tapi BPJS & PPh21
-        // dihitung ULANG (bukan sekadar di-copy dari bulan lalu) supaya selalu
-        // sinkron dengan Gaji Pokok + PTKP + Kategori JKK saat ini.
-        setForm((prev) => ({ ...prev, ...sanitized }));
-        recalcFromPendapatan({
-          gaji_pokok: sanitized.gaji_pokok ?? 0,
-          tunjangan_transport: sanitized.tunjangan_transport ?? 0,
-          tunjangan_lain: sanitized.tunjangan_lain ?? 0,
-          ptkp: sanitized.ptkp ?? '',
-        });
-        return;
-      }
-
-      // 2. Belum pernah ada slip -> coba ambil dari data master karyawan (payroll)
+      // Task 25 — employees_master adalah SATU-SATUNYA sumber untuk data
+      // standing (rekening, NPWP, PTKP, no. BPJS, gaji pokok, tunjangan).
+      // TIDAK lagi copy-forward dari slip gaji bulan lalu — supaya kalau ada
+      // perubahan (mis. NPWP baru diurus, pindah rekening), cukup diupdate
+      // sekali di Payroll Manager dan otomatis kepakai di slip berikutnya.
       const { data: master } = await supabase
         .from('employees_master')
-        .select('gaji_pokok, tunjangan, status_ptkp')
+        .select('gaji_pokok, tunjangan, status_ptkp, npwp, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan, no_rekening, jkk_rate')
         .eq('linked_employee_id', employeeId)
         .maybeSingle();
 
       if (master) {
+        setForm((prev) => ({
+          ...prev,
+          rekening: master.no_rekening || '',
+          npwp: master.npwp || '',
+          ptkp: master.status_ptkp || '',
+          no_bpjs_k: master.no_bpjs_kesehatan || '',
+          no_bpjs_tk: master.no_bpjs_ketenagakerjaan || '',
+        }));
+        const rate = master.jkk_rate != null ? master.jkk_rate : JKK_OPTIONS[0].value;
+        setJkkRate(rate);
         recalcFromPendapatan({
           gaji_pokok: master.gaji_pokok || 0,
           tunjangan_lain: master.tunjangan || 0,
+          // Overtime/Incentive/Compensation Fund SENGAJA tidak di-reset di
+          // sini — itu input manual per periode, beda dari standing data.
           ptkp: master.status_ptkp || '',
-        });
+        }, rate);
+      } else {
+        setForm((prev) => ({ ...prev, rekening: '', npwp: '', ptkp: '', no_bpjs_k: '', no_bpjs_tk: '' }));
       }
     } finally {
       setLoadingDefaults(false);
@@ -432,31 +438,20 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
                 </span>
               )}
             </label>
-            <TextField label="Rekening" value={form.rekening} onChange={set('rekening')} />
+            <ReadOnlyField label="Rekening" value={form.rekening} />
           </div>
 
-          {/* Data pajak & BPJS */}
+          {/* Data pajak & BPJS — Task 25: SEMUA ini standing data dari employees_master,
+              tidak lagi diinput manual di sini. Kalau kosong/salah, update di Payroll Manager. */}
           <div>
             <p className="text-xs font-medium tracking-[0.04em] text-black border-b border-[#E0E0E0] pb-2 mb-3">
               DATA PAJAK &amp; BPJS
             </p>
             <div className="grid grid-cols-2 gap-4">
-              <TextField label="NPWP" value={form.npwp} onChange={set('npwp')} />
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-[#6B6B6B]">PTKP</span>
-                <select
-                  value={form.ptkp}
-                  onChange={(e) => recalcFromPendapatan({ ptkp: e.target.value })}
-                  className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
-                >
-                  <option value="">Pilih PTKP...</option>
-                  {Object.entries(PTKP_DATA).map(([key, v]) => (
-                    <option key={key} value={key}>{v.label}</option>
-                  ))}
-                </select>
-              </label>
-              <TextField label="Nomor BPJS Kesehatan" value={form.no_bpjs_k} onChange={set('no_bpjs_k')} />
-              <TextField label="Nomor BPJS Ketenagakerjaan" value={form.no_bpjs_tk} onChange={set('no_bpjs_tk')} />
+              <ReadOnlyField label="NPWP" value={form.npwp} />
+              <ReadOnlyField label="PTKP" value={PTKP_DATA[form.ptkp]?.label} />
+              <ReadOnlyField label="Nomor BPJS Kesehatan" value={form.no_bpjs_k} />
+              <ReadOnlyField label="Nomor BPJS Ketenagakerjaan" value={form.no_bpjs_tk} />
             </div>
           </div>
 
@@ -471,14 +466,23 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
                 value={form.gaji_pokok}
                 onChange={(val) => recalcFromPendapatan({ gaji_pokok: val })}
               />
-              <NumberField label="Lembur" value={form.lembur} onChange={set('lembur')} />
               <NumberField
-                label="Tunjangan Transport"
-                value={form.tunjangan_transport}
-                onChange={(val) => recalcFromPendapatan({ tunjangan_transport: val })}
+                label="Overtime (Lembur)"
+                value={form.lembur}
+                onChange={(val) => recalcFromPendapatan({ lembur: val })}
               />
               <NumberField
-                label="Tunjangan Lain"
+                label="Incentive"
+                value={form.insentif}
+                onChange={(val) => recalcFromPendapatan({ insentif: val })}
+              />
+              <NumberField
+                label="Compensation Fund / Festive Allowance"
+                value={form.kompensasi}
+                onChange={(val) => recalcFromPendapatan({ kompensasi: val })}
+              />
+              <NumberField
+                label="Allowance (Transport/Travel/Communication)"
                 value={form.tunjangan_lain}
                 onChange={(val) => recalcFromPendapatan({ tunjangan_lain: val })}
               />
@@ -519,6 +523,11 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
             <p className="text-[11px] text-[#9A9A9A] mb-2">
               BPJS Karyawan & PPh21 (TER) otomatis dihitung dari Gaji Pokok + PTKP. Penalty keterlambatan otomatis dihitung dari data absensi periode ini — semua tetap bisa diedit manual.
             </p>
+            {!form.ptkp && (
+              <p className="text-[11px] text-madael-red mb-2">
+                PPh21 belum bisa dihitung — Status PTKP karyawan ini belum diisi di Payroll Manager. Isi dulu di sana, lalu buat ulang slip ini.
+              </p>
+            )}
             {loadingPenalty && <p className="text-[11px] text-[#9A9A9A] mb-2">Menghitung penalty keterlambatan...</p>}
             {!loadingPenalty && penaltyNote && <p className="text-[11px] text-amber-600 mb-2">{penaltyNote}</p>}
             <div className="grid grid-cols-2 gap-4">
@@ -731,7 +740,7 @@ export default function PayslipAdminPage() {
 
   const calcTHP = (p) => {
     const totalPotongan = (p.penalty || 0) + (p.jht_karyawan || 0) + (p.jp_karyawan || 0) + (p.bpjs_k_karyawan || 0) + (p.pph21 || 0);
-    return (p.gaji_pokok || 0) + (p.lembur || 0) + (p.tunjangan_transport || 0) + (p.tunjangan_lain || 0) - totalPotongan;
+    return (p.gaji_pokok || 0) + (p.lembur || 0) + (p.insentif || 0) + (p.kompensasi || 0) + (p.tunjangan_lain || 0) - totalPotongan;
   };
 
   const selectClass =

@@ -42,7 +42,7 @@ export default function PayrollRunListPage() {
     setCreateError(null);
 
     const [clRes, runRes, empRes] = await Promise.all([
-      supabase.from('payroll_clients').select('id, nama_klien').order('nama_klien'),
+      supabase.from('companies').select('id, nama_perusahaan').order('nama_perusahaan'),
       supabase.from('payroll_runs').select('*').eq('periode', periode),
       supabase.from('employees_master').select('id, client_id'),
     ]);
@@ -83,13 +83,13 @@ export default function PayrollRunListPage() {
 
     if (empError) {
       setCreatingClientId(null);
-      setCreateError(`Gagal memuat employee klien "${client.nama_klien}": ${empError.message}`);
+      setCreateError(`Gagal memuat employee klien "${client.nama_perusahaan}": ${empError.message}`);
       return;
     }
 
     if (!emps || emps.length === 0) {
       setCreatingClientId(null);
-      setCreateError(`Klien "${client.nama_klien}" belum punya employee di Payroll Manager.`);
+      setCreateError(`Klien "${client.nama_perusahaan}" belum punya employee di Payroll Manager.`);
       return;
     }
 
@@ -177,7 +177,7 @@ export default function PayrollRunListPage() {
                 const count = employeeCounts[client.id] || 0;
                 return (
                   <tr key={client.id} className="border-b border-[#E0E0E0] last:border-0">
-                    <td className="px-4 py-3 text-black">{client.nama_klien}</td>
+                    <td className="px-4 py-3 text-black">{client.nama_perusahaan}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">{count}</td>
                     <td className="px-4 py-3">
                       {run ? (

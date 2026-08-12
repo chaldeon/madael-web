@@ -195,7 +195,10 @@ export default function LeaveRequestPage() {
         {balanceLoading ? (
           <p className="text-xs text-[#9A9A9A]">Memuat sisa kuota cuti...</p>
         ) : !balance || !balance.linked ? (
-          <p className="text-xs text-[#9A9A9A]">Sisa kuota cuti belum tersedia — akunmu belum terhubung ke data master karyawan. Hubungi superadmin.</p>
+          <p className="text-xs text-[#9A9A9A]">
+            Sisa kuota cuti belum tersedia — akunmu belum di-link ke data master karyawan di Payroll Manager
+            (ini bukan soal jadwal kerja). Minta superadmin buka <span className="font-medium">Payroll Manager → Edit → Akun Absensi</span> lalu pilih namamu.
+          </p>
         ) : (
           <div className="flex items-center justify-between">
             <div>

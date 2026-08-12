@@ -30,7 +30,7 @@ export default function EmployeeDashboardPage() {
 
     const { data: emp, error: empError } = await supabase
       .from('employees')
-      .select('id, nama, email, perusahaan, status, is_superadmin')
+      .select('id, nama, email, status, is_superadmin, client_id')
       .eq('email', user.email)
       .maybeSingle();
 
@@ -46,7 +46,20 @@ export default function EmployeeDashboardPage() {
       return;
     }
 
-    setEmployee(emp);
+    // Nama perusahaan cuma buat ditampilkan di header — diambil terpisah dan
+    // best-effort, supaya kalau relasi companies belum siap/gagal, itu TIDAK
+    // sampai memblokir login (beda dari cek di atas yang memang wajib).
+    let companyName = null;
+    if (emp.client_id) {
+      const { data: company } = await supabase
+        .from('companies')
+        .select('nama_perusahaan')
+        .eq('id', emp.client_id)
+        .maybeSingle();
+      companyName = company?.nama_perusahaan || null;
+    }
+
+    setEmployee({ ...emp, companyName });
 
     if (!emp.is_superadmin) {
       const { data: mods } = await supabase
@@ -104,7 +117,7 @@ export default function EmployeeDashboardPage() {
           <div>
             <p className="text-sm font-semibold text-black">{employee.nama}</p>
             <p className="text-xs text-[#6B6B6B]">
-              {employee.perusahaan} {employee.is_superadmin && '· Superadmin'}
+              {employee.companyName} {employee.is_superadmin && '· Superadmin'}
             </p>
           </div>
         }
