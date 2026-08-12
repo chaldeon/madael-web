@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import EmployeeHeader from '@/components/EmployeeHeader';
 
 export default function CrmLayout({ children }) {
+  const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
   const { status } = useModuleAccess('crm');
@@ -41,15 +42,31 @@ export default function CrmLayout({ children }) {
     );
   }
 
+  const isDeals = pathname.startsWith('/employee/crm/deals');
+  const tabClass = (active) =>
+    `text-sm tracking-[0.02em] transition-colors ${
+      active ? 'text-black font-medium' : 'text-[#6B6B6B] hover:text-black'
+    }`;
+
   return (
     <section className="min-h-screen bg-[#F4F4F4]">
       <EmployeeHeader
         printHidden
         onLogout={handleLogout}
         left={
-          <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
-            ← Dashboard
-          </Link>
+          <>
+            <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
+              ← Dashboard
+            </Link>
+            <div className="flex items-center gap-6">
+              <Link href="/employee/crm" className={tabClass(!isDeals)}>
+                Perusahaan
+              </Link>
+              <Link href="/employee/crm/deals" className={tabClass(isDeals)}>
+                Pipeline Deal
+              </Link>
+            </div>
+          </>
         }
       />
 
