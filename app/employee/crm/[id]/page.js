@@ -18,6 +18,29 @@ const STAGES = [
   'On Hold',
 ];
 
+const TIPE_OPTIONS = ['client', 'vendor', 'partner', 'prospect'];
+const TIPE_LABELS = { client: 'Client', vendor: 'Vendor', partner: 'Partner', prospect: 'Prospect' };
+const TIPE_STYLES = {
+  client: 'bg-[#DCFCE7] text-[#166534]',
+  vendor: 'bg-[#E8F0FE] text-[#1A56DB]',
+  partner: 'bg-[#EDE9FE] text-[#6D28D9]',
+  prospect: 'bg-[#FEF3C7] text-[#92700C]',
+};
+const FEE_STRUCTURE_TIPE_OPTIONS = ['Flat', 'Tiered', 'Split', 'Lainnya'];
+
+function TipeBadges({ tipe }) {
+  if (!tipe || tipe.length === 0) return null;
+  return (
+    <span className="inline-flex gap-1 flex-wrap">
+      {tipe.map((t) => (
+        <span key={t} className={`inline-block px-1.5 py-0.5 text-[10px] font-medium rounded ${TIPE_STYLES[t] || 'bg-[#F3F4F6] text-[#4B5563]'}`}>
+          {TIPE_LABELS[t] || t}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 const STAGE_STYLES = {
   Prospek: 'bg-[#E8F0FE] text-[#1A56DB]',
   Dikontrak: 'bg-[#FEF3C7] text-[#92700C]',
@@ -148,15 +171,31 @@ export default function ClientDetailPage() {
       pic_telepon: client.pic_telepon || '',
       assigned_to: client.assigned_to || '',
       catatan: client.catatan || '',
+      tipe: client.tipe && client.tipe.length > 0 ? client.tipe : ['client'],
+      fee_structure_tipe: client.fee_structure?.tipe || '',
+      fee_structure_detail: client.fee_structure?.detail || '',
     });
     setShowEditModal(true);
   };
 
+  const toggleEditTipe = (t) => {
+    setEditForm((prev) => {
+      const has = prev.tipe.includes(t);
+      const next = has ? prev.tipe.filter((x) => x !== t) : [...prev.tipe, t];
+      return { ...prev, tipe: next };
+    });
+  };
+
   const handleEditSubmit = async (e) => {
     e.preventDefault();
+    if (editForm.tipe.length === 0) {
+      alert('Pilih minimal satu tipe perusahaan (client/vendor/partner/prospect).');
+      return;
+    }
     setSavingEdit(true);
+    const { fee_structure_tipe, fee_structure_detail, ...rest } = editForm;
     const payload = {
-      ...editForm,
+      ...rest,
       industri: editForm.industri || null,
       ukuran: editForm.ukuran || null,
       website: editForm.website || null,
@@ -168,6 +207,8 @@ export default function ClientDetailPage() {
       pic_telepon: editForm.pic_telepon || null,
       assigned_to: editForm.assigned_to || null,
       catatan: editForm.catatan || null,
+      tipe: editForm.tipe,
+      fee_structure: fee_structure_tipe ? { tipe: fee_structure_tipe, detail: fee_structure_detail || '' } : null,
     };
     const { error } = await supabase.from('companies').update(payload).eq('id', clientId);
     setSavingEdit(false);
@@ -327,6 +368,7 @@ export default function ClientDetailPage() {
           <div className="flex items-center gap-3 mb-2">
             <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">{client.nama_perusahaan}</h1>
             <StageBadge stage={client.stage} />
+            <TipeBadges tipe={client.tipe} />
           </div>
           <p className="text-sm text-[#6B6B6B]">
             {client.industri || '-'} {client.kota ? `· ${client.kota}` : ''} {client.employees?.nama ? `· BD: ${client.employees.nama}` : ''}
@@ -352,6 +394,12 @@ export default function ClientDetailPage() {
             <div><span className="text-[#6B6B6B] text-xs block">Website</span>{client.website || '-'}</div>
             <div><span className="text-[#6B6B6B] text-xs block">Alamat</span>{client.alamat || '-'}</div>
             <div><span className="text-[#6B6B6B] text-xs block">Kota / Negara</span>{[client.kota, client.negara].filter(Boolean).join(', ') || '-'}</div>
+            <div>
+              <span className="text-[#6B6B6B] text-xs block">Fee Structure</span>
+              {client.fee_structure?.tipe
+                ? `${client.fee_structure.tipe}${client.fee_structure.detail ? ' — ' + client.fee_structure.detail : ''}`
+                : '-'}
+            </div>
           </div>
 
           <p className="text-xs font-semibold text-black tracking-[0.02em] mt-6 mb-4">PIC Klien</p>
@@ -540,6 +588,17 @@ export default function ClientDetailPage() {
                 <label className={labelClass}>Nama Perusahaan *</label>
                 <input className={inputClass} value={editForm.nama_perusahaan} onChange={(e) => setEditForm((f) => ({ ...f, nama_perusahaan: e.target.value }))} required />
               </div>
+              <div>
+                <label className={labelClass}>Tipe Perusahaan * (bisa lebih dari satu)</label>
+                <div className="flex flex-wrap gap-3">
+                  {TIPE_OPTIONS.map((t) => (
+                    <label key={t} className="flex items-center gap-1.5 text-sm text-black cursor-pointer">
+                      <input type="checkbox" checked={editForm.tipe.includes(t)} onChange={() => toggleEditTipe(t)} />
+                      {TIPE_LABELS[t]}
+                    </label>
+                  ))}
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelClass}>Industri</label>
@@ -585,6 +644,22 @@ export default function ClientDetailPage() {
                   <div>
                     <label className={labelClass}>Telepon PIC</label>
                     <input className={inputClass} value={editForm.pic_telepon} onChange={(e) => setEditForm((f) => ({ ...f, pic_telepon: e.target.value }))} />
+                  </div>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-[#F0F0F0]">
+                <p className="text-xs font-semibold text-black mb-3 tracking-[0.02em]">Fee Structure (referensi)</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelClass}>Tipe Fee</label>
+                    <select className={inputClass} value={editForm.fee_structure_tipe} onChange={(e) => setEditForm((f) => ({ ...f, fee_structure_tipe: e.target.value }))}>
+                      <option value="">-</option>
+                      {FEE_STRUCTURE_TIPE_OPTIONS.map((ft) => <option key={ft} value={ft}>{ft}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Detail</label>
+                    <input className={inputClass} value={editForm.fee_structure_detail} onChange={(e) => setEditForm((f) => ({ ...f, fee_structure_detail: e.target.value }))} placeholder="Misal: 10% flat" />
                   </div>
                 </div>
               </div>

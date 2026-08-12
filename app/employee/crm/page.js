@@ -29,6 +29,19 @@ const STAGE_STYLES = {
 
 const UKURAN_OPTIONS = ['Startup', 'SME', 'Enterprise', 'MNC'];
 
+// Satu company bisa punya lebih dari satu peran sekaligus — misal Youlife
+// jadi partner sekaligus sumber client lain.
+const TIPE_OPTIONS = ['client', 'vendor', 'partner', 'prospect'];
+const TIPE_LABELS = { client: 'Client', vendor: 'Vendor', partner: 'Partner', prospect: 'Prospect' };
+const TIPE_STYLES = {
+  client: 'bg-[#DCFCE7] text-[#166534]',
+  vendor: 'bg-[#E8F0FE] text-[#1A56DB]',
+  partner: 'bg-[#EDE9FE] text-[#6D28D9]',
+  prospect: 'bg-[#FEF3C7] text-[#92700C]',
+};
+
+const FEE_STRUCTURE_TIPE_OPTIONS = ['Flat', 'Tiered', 'Split', 'Lainnya'];
+
 const emptyForm = {
   nama_perusahaan: '',
   industri: '',
@@ -43,7 +56,23 @@ const emptyForm = {
   stage: 'Prospek',
   assigned_to: '',
   catatan: '',
+  tipe: ['client'],
+  fee_structure_tipe: '',
+  fee_structure_detail: '',
 };
+
+function TipeBadges({ tipe }) {
+  if (!tipe || tipe.length === 0) return null;
+  return (
+    <span className="inline-flex gap-1 flex-wrap">
+      {tipe.map((t) => (
+        <span key={t} className={`inline-block px-1.5 py-0.5 text-[10px] font-medium rounded ${TIPE_STYLES[t] || 'bg-[#F3F4F6] text-[#4B5563]'}`}>
+          {TIPE_LABELS[t] || t}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 function StageBadge({ stage }) {
   return (
@@ -85,7 +114,7 @@ export default function CrmClientListPage() {
     setError(null);
     const { data, error } = await supabase
       .from('companies')
-      .select('id, created_at, nama_perusahaan, industri, ukuran, website, alamat, kota, pic_nama, pic_jabatan, pic_email, pic_telepon, stage, assigned_to, catatan, is_active, employees:assigned_to ( id, nama )')
+      .select('id, created_at, nama_perusahaan, industri, ukuran, website, alamat, kota, pic_nama, pic_jabatan, pic_email, pic_telepon, stage, assigned_to, catatan, is_active, tipe, fee_structure, employees:assigned_to ( id, nama )')
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
@@ -177,10 +206,22 @@ export default function CrmClientListPage() {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const toggleTipe = (t) => {
+    setForm((prev) => {
+      const has = prev.tipe.includes(t);
+      const next = has ? prev.tipe.filter((x) => x !== t) : [...prev.tipe, t];
+      return { ...prev, tipe: next };
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.nama_perusahaan.trim()) {
       setFormError('Nama perusahaan wajib diisi.');
+      return;
+    }
+    if (form.tipe.length === 0) {
+      setFormError('Pilih minimal satu tipe perusahaan (client/vendor/partner/prospect).');
       return;
     }
     setSubmitting(true);
@@ -200,6 +241,10 @@ export default function CrmClientListPage() {
       stage: form.stage || 'Prospek',
       assigned_to: form.assigned_to || null,
       catatan: form.catatan || null,
+      tipe: form.tipe,
+      fee_structure: form.fee_structure_tipe
+        ? { tipe: form.fee_structure_tipe, detail: form.fee_structure_detail || '' }
+        : null,
     };
 
     const { error } = await supabase.from('companies').insert(payload);
@@ -323,6 +368,7 @@ export default function CrmClientListPage() {
                       <Link href={`/employee/crm/${c.id}`} className="text-sm font-medium text-black hover:text-madael-red block mb-1">
                         {c.nama_perusahaan}
                       </Link>
+                      <div className="mb-1"><TipeBadges tipe={c.tipe} /></div>
                       {c.industri && <p className="text-[11px] text-[#6B6B6B] mb-1">{c.industri}</p>}
                       {c.pic_nama && <p className="text-[11px] text-[#6B6B6B]">PIC: {c.pic_nama}</p>}
                       {c.employees?.nama && (
@@ -346,6 +392,7 @@ export default function CrmClientListPage() {
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-[11px] text-[#6B6B6B] tracking-[0.04em]">
                 <th className="px-4 py-3 font-medium">Perusahaan</th>
+                <th className="px-4 py-3 font-medium">Tipe</th>
                 <th className="px-4 py-3 font-medium">Industri</th>
                 <th className="px-4 py-3 font-medium">PIC</th>
                 <th className="px-4 py-3 font-medium">Stage</th>
@@ -361,6 +408,7 @@ export default function CrmClientListPage() {
                       {c.nama_perusahaan}
                     </Link>
                   </td>
+                  <td className="px-4 py-3"><TipeBadges tipe={c.tipe} /></td>
                   <td className="px-4 py-3 text-[#4B4B4B]">{c.industri || '-'}</td>
                   <td className="px-4 py-3 text-[#4B4B4B]">{c.pic_nama || '-'}</td>
                   <td className="px-4 py-3"><StageBadge stage={c.stage} /></td>
@@ -370,7 +418,7 @@ export default function CrmClientListPage() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-[#B0B0B0] text-sm">
+                  <td colSpan={7} className="px-4 py-8 text-center text-[#B0B0B0] text-sm">
                     Belum ada klien yang cocok dengan filter.
                   </td>
                 </tr>
@@ -397,6 +445,18 @@ export default function CrmClientListPage() {
               <div>
                 <label className={labelClass}>Nama Perusahaan *</label>
                 <input className={inputClass} value={form.nama_perusahaan} onChange={(e) => handleFormChange('nama_perusahaan', e.target.value)} required />
+              </div>
+
+              <div>
+                <label className={labelClass}>Tipe Perusahaan * (bisa lebih dari satu)</label>
+                <div className="flex flex-wrap gap-3">
+                  {TIPE_OPTIONS.map((t) => (
+                    <label key={t} className="flex items-center gap-1.5 text-sm text-black cursor-pointer">
+                      <input type="checkbox" checked={form.tipe.includes(t)} onChange={() => toggleTipe(t)} />
+                      {TIPE_LABELS[t]}
+                    </label>
+                  ))}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -447,6 +507,23 @@ export default function CrmClientListPage() {
                   <div>
                     <label className={labelClass}>Telepon PIC</label>
                     <input className={inputClass} value={form.pic_telepon} onChange={(e) => handleFormChange('pic_telepon', e.target.value)} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-[#F0F0F0]">
+                <p className="text-xs font-semibold text-black mb-3 tracking-[0.02em]">Fee Structure (referensi)</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelClass}>Tipe Fee</label>
+                    <select className={inputClass} value={form.fee_structure_tipe} onChange={(e) => handleFormChange('fee_structure_tipe', e.target.value)}>
+                      <option value="">-</option>
+                      {FEE_STRUCTURE_TIPE_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Detail</label>
+                    <input className={inputClass} value={form.fee_structure_detail} onChange={(e) => handleFormChange('fee_structure_detail', e.target.value)} placeholder="Misal: 10% flat, atau 13/11/9/7% tiered" />
                   </div>
                 </div>
               </div>

@@ -11,8 +11,8 @@ export default function Navbar() {
   const { lang, toggleLang } = useLanguage();
   const isHome = pathname === '/';
   const isAbout = pathname === '/about';
-  const SHOW_KARIR = false;
-  const SHOW_EMPLOYEE = false;
+  const SHOW_KARIR = true;
+  const SHOW_EMPLOYEE = true;
   const toolLinks = [
     { href: '/kalkulator-pph21', label: 'Kalkulator PPh 21' },
     { href: '/kalkulator-bpjs', label: 'Kalkulator BPJS' },
@@ -140,7 +140,6 @@ export default function Navbar() {
             EN
           </button>
         </li>
-        <li className="w-0.5 h-5 bg-[#E0E0E0] mr-1" aria-hidden="true" />
 
         {SHOW_EMPLOYEE && (
           <>
@@ -148,11 +147,13 @@ export default function Navbar() {
             <li>
               <Link
                 href="/employee/login"
-                className={`text-sm tracking-[0.02em] no-underline transition-colors ${
-                  pathname.startsWith('/employee') ? 'text-black' : 'text-[#6B6B6B] hover:text-black'
+                className={`border px-5 py-2 text-[13px] font-medium tracking-[0.04em] no-underline transition-colors ${
+                  pathname.startsWith('/employee')
+                    ? 'border-madael-red text-madael-red'
+                    : 'border-[#E0E0E0] text-black hover:border-madael-red hover:text-madael-red'
                 }`}
               >
-                Employee
+                {lang === 'id' ? 'Masuk' : 'Login'}
               </Link>
             </li>
           </>
