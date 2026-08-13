@@ -17,10 +17,22 @@ export async function POST(request) {
     // Diisi hanya untuk lamaran umum (bukan apply ke lowongan spesifik):
     // teks bebas posisi yang diminati kandidat, disimpan di kolom `catatan`.
     const posisiMinat = (formData.get('posisi_minat') || '').toString().trim();
+    const answersRaw = (formData.get('answers') || '').toString().trim();
     const file = formData.get('cv');
 
     // Lamaran umum = tidak ada job_id (form "Tidak menemukan posisi yang sesuai?")
     const isGeneral = !jobId;
+
+    // Jawaban pertanyaan custom per posisi (opsional) — dikirim sebagai JSON string.
+    let answers = null;
+    if (!isGeneral && answersRaw) {
+      try {
+        const parsed = JSON.parse(answersRaw);
+        if (Array.isArray(parsed)) answers = parsed;
+      } catch {
+        answers = null;
+      }
+    }
 
     // Validasi dasar
     if (!nama || !email || !file) {
@@ -89,6 +101,7 @@ export async function POST(request) {
         cv_filename: fileName,
         status: 'Baru',
         catatan: isGeneral ? posisiMinat : null,
+        answers,
       },
     ]);
 

@@ -42,7 +42,7 @@ export default function JobPortalLayout({ children }) {
     );
   }
 
-  const isLowongan = pathname.startsWith('/employee/job-portal/lowongan');
+  const isPelamar = pathname.startsWith('/employee/job-portal/pelamar');
   const tabClass = (active) =>
     `text-sm tracking-[0.02em] transition-colors ${
       active ? 'text-black font-medium' : 'text-[#6B6B6B] hover:text-black'
@@ -58,11 +58,11 @@ export default function JobPortalLayout({ children }) {
               ← Dashboard
             </Link>
             <div className="flex items-center gap-6">
-              <Link href="/employee/job-portal" className={tabClass(!isLowongan)}>
-                Kandidat
-              </Link>
-              <Link href="/employee/job-portal/lowongan" className={tabClass(isLowongan)}>
+              <Link href="/employee/job-portal" className={tabClass(!isPelamar)}>
                 Lowongan
+              </Link>
+              <Link href="/employee/job-portal/pelamar" className={tabClass(isPelamar)}>
+                Semua Pelamar
               </Link>
             </div>
           </>

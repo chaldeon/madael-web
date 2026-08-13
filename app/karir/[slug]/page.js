@@ -182,7 +182,7 @@ export default function KarirDetailPage() {
           )}
 
           {/* ============ APPLY FORM (shared component) ============ */}
-          <JobApplyForm mode="job" jobId={job.id} jobTitle={job.title} anchorId="apply" />
+          <JobApplyForm mode="job" jobId={job.id} jobTitle={job.title} questions={job.questions || []} anchorId="apply" />
         </div>
       </section>
     </>
