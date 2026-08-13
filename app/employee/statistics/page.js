@@ -13,12 +13,20 @@ import {
 import { createClient } from '@/lib/supabase-browser';
 
 const PERIODS = [
-  { value: '7', label: '7 Hari' },
-  { value: '30', label: '30 Hari' },
-  { value: '90', label: '90 Hari' },
+  { value: 'weekly', label: 'Mingguan' },
+  { value: 'monthly', label: 'Bulanan' },
+  { value: 'annually', label: 'Tahunan' },
+  { value: 'all', label: 'Semua Waktu' },
 ];
 
 const MADAEL_RED = '#C1272D';
+
+const PERIOD_LABELS = {
+  weekly: 'Minggu Ini',
+  monthly: 'Bulan Ini',
+  annually: 'Tahun Ini',
+  all: 'Semua Waktu',
+};
 
 function SummaryCard({ icon: Icon, label, value }) {
   return (
@@ -42,7 +50,7 @@ function DeviceIcon({ device }) {
 export default function StatisticsPage() {
   const supabase = createClient();
 
-  const [period, setPeriod] = useState('30');
+  const [period, setPeriod] = useState('monthly');
   const [gaData, setGaData] = useState(null);
   const [gaLoading, setGaLoading] = useState(true);
   const [gaError, setGaError] = useState(null);
@@ -56,7 +64,7 @@ export default function StatisticsPage() {
     setGaLoading(true);
     setGaError(null);
     try {
-      const res = await fetch(`/api/analytics?days=${selectedPeriod}`);
+      const res = await fetch(`/api/analytics?period=${selectedPeriod}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Gagal memuat data analytics');
       setGaData(json);
@@ -153,7 +161,7 @@ export default function StatisticsPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <SummaryCard
           icon={Users}
-          label={`Total Visitor (${period} hari)`}
+          label={`Total Visitor (${PERIOD_LABELS[period]})`}
           value={gaLoading ? '—' : (gaData?.totalUsers ?? 0).toLocaleString('id-ID')}
         />
         <SummaryCard
@@ -175,7 +183,9 @@ export default function StatisticsPage() {
 
       {/* Section 2 — Chart visitor per hari */}
       <div className="bg-white border border-[#E0E0E0] p-5 mb-6">
-        <p className="text-sm font-medium text-black mb-4">Sessions per Hari</p>
+        <p className="text-sm font-medium text-black mb-4">
+          Sessions {period === 'annually' || period === 'all' ? 'per Bulan' : 'per Hari'}
+        </p>
         {gaLoading ? (
           <p className="text-xs text-[#6B6B6B]">Memuat chart...</p>
         ) : (
