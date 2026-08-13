@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { LayoutGrid, Table2, Plus, X } from 'lucide-react';
+import { Plus, X, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 
 const STAGES = [
@@ -87,6 +87,35 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// Kolom yang bisa disortir + cara ambil value-nya dari row client.
+const SORT_COLUMNS = {
+  nama_perusahaan: { label: 'Perusahaan', get: (c) => (c.nama_perusahaan || '').toLowerCase() },
+  tipe: { label: 'Tipe', get: (c) => (c.tipe?.[0] || '').toLowerCase() },
+  industri: { label: 'Industri', get: (c) => (c.industri || '').toLowerCase() },
+  pic_nama: { label: 'PIC', get: (c) => (c.pic_nama || '').toLowerCase() },
+  stage: { label: 'Stage', get: (c) => (c.stage || '').toLowerCase() },
+  bd: { label: 'BD', get: (c) => (c.employees?.nama || '').toLowerCase() },
+  created_at: { label: 'Dibuat', get: (c) => (c.created_at ? new Date(c.created_at).getTime() : 0) },
+};
+
+// Header kolom tabel yang bisa diklik buat sortir.
+function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
+  const active = sortField === colKey;
+  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className="px-4 py-3 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(colKey)}
+        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
+      >
+        {label}
+        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />
+      </button>
+    </th>
+  );
+}
+
 export default function CrmClientListPage() {
   const supabase = createClient();
 
@@ -95,19 +124,17 @@ export default function CrmClientListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [view, setView] = useState('kanban'); // 'kanban' | 'table'
-
   const [filterStage, setFilterStage] = useState('');
   const [filterAssigned, setFilterAssigned] = useState('');
   const [filterIndustri, setFilterIndustri] = useState('');
+
+  const [sortField, setSortField] = useState('created_at');
+  const [sortDir, setSortDir] = useState('desc');
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
-
-  const [draggedId, setDraggedId] = useState(null);
-  const [dragOverStage, setDragOverStage] = useState(null);
 
   const fetchClients = useCallback(async () => {
     setLoading(true);
@@ -145,55 +172,35 @@ export default function CrmClientListPage() {
     [clients]
   );
 
+  const handleSort = (colKey) => {
+    if (sortField === colKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(colKey);
+      setSortDir('asc');
+    }
+  };
+
   const filtered = useMemo(() => {
-    return clients.filter((c) => {
+    const rows = clients.filter((c) => {
       const matchStage = !filterStage || c.stage === filterStage;
       const matchAssigned = !filterAssigned || c.assigned_to === filterAssigned;
       const matchIndustri = !filterIndustri || c.industri === filterIndustri;
       return matchStage && matchAssigned && matchIndustri;
     });
-  }, [clients, filterStage, filterAssigned, filterIndustri]);
 
-  // ---- Update stage (dipakai drag & drop kanban) ----
-  const updateStage = async (clientId, newStage) => {
-    const prev = clients;
-    setClients((cur) => cur.map((c) => (c.id === clientId ? { ...c, stage: newStage } : c)));
+    const getValue = SORT_COLUMNS[sortField]?.get;
+    if (!getValue) return rows;
 
-    const { error } = await supabase.from('companies').update({ stage: newStage }).eq('id', clientId);
-    if (error) {
-      setClients(prev); // rollback kalau gagal
-      alert('Gagal update stage: ' + error.message);
-    }
-  };
-
-  const handleDragStart = (clientId) => (e) => {
-    setDraggedId(clientId);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', clientId);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedId(null);
-    setDragOverStage(null);
-  };
-
-  const handleColumnDragOver = (stage) => (e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDragOverStage(stage);
-  };
-
-  const handleColumnDrop = (stage) => (e) => {
-    e.preventDefault();
-    const id = e.dataTransfer.getData('text/plain') || draggedId;
-    setDragOverStage(null);
-    setDraggedId(null);
-    if (!id) return;
-    const client = clients.find((c) => c.id === id);
-    if (client && client.stage !== stage) {
-      updateStage(id, stage);
-    }
-  };
+    const sorted = [...rows].sort((a, b) => {
+      const va = getValue(a);
+      const vb = getValue(b);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return sortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [clients, filterStage, filterAssigned, filterIndustri, sortField, sortDir]);
 
   // ---- Tambah klien ----
   const openAddModal = () => {
@@ -277,27 +284,8 @@ export default function CrmClientListPage() {
       </div>
       <p className="text-sm text-[#6B6B6B] mb-6">Pipeline BD — prospek sampai closed.</p>
 
-      {/* Toolbar: view toggle + filters */}
+      {/* Toolbar: filters */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        <div className="flex border border-[#E0E0E0] bg-white">
-          <button
-            onClick={() => setView('kanban')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium cursor-pointer border-0 ${
-              view === 'kanban' ? 'bg-madael-red text-white' : 'bg-white text-[#6B6B6B] hover:text-black'
-            }`}
-          >
-            <LayoutGrid size={14} /> Kanban
-          </button>
-          <button
-            onClick={() => setView('table')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium cursor-pointer border-0 border-l border-[#E0E0E0] ${
-              view === 'table' ? 'bg-madael-red text-white' : 'bg-white text-[#6B6B6B] hover:text-black'
-            }`}
-          >
-            <Table2 size={14} /> Table
-          </button>
-        </div>
-
         <select
           value={filterStage}
           onChange={(e) => setFilterStage(e.target.value)}
@@ -337,67 +325,18 @@ export default function CrmClientListPage() {
       {loading && <p className="text-sm text-[#6B6B6B]">Memuat data klien...</p>}
       {error && <p className="text-sm text-red-600">Error: {error}</p>}
 
-      {!loading && !error && view === 'kanban' && (
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {STAGES.map((stage) => {
-            const stageClients = filtered.filter((c) => c.stage === stage);
-            return (
-              <div
-                key={stage}
-                onDragOver={handleColumnDragOver(stage)}
-                onDrop={handleColumnDrop(stage)}
-                className={`flex-shrink-0 w-[260px] bg-[#EFEFEF] border ${
-                  dragOverStage === stage ? 'border-madael-red' : 'border-[#E0E0E0]'
-                } transition-colors`}
-              >
-                <div className="px-3 py-2.5 border-b border-[#E0E0E0] flex items-center justify-between">
-                  <span className="text-xs font-semibold text-black tracking-[0.02em]">{stage}</span>
-                  <span className="text-[11px] text-[#6B6B6B]">{stageClients.length}</span>
-                </div>
-                <div className="p-2 flex flex-col gap-2 min-h-[80px]">
-                  {stageClients.map((c) => (
-                    <div
-                      key={c.id}
-                      draggable
-                      onDragStart={handleDragStart(c.id)}
-                      onDragEnd={handleDragEnd}
-                      className={`bg-white border border-[#E0E0E0] p-3 cursor-grab active:cursor-grabbing hover:border-madael-red transition-colors ${
-                        draggedId === c.id ? 'opacity-40' : ''
-                      }`}
-                    >
-                      <Link href={`/employee/crm/${c.id}`} className="text-sm font-medium text-black hover:text-madael-red block mb-1">
-                        {c.nama_perusahaan}
-                      </Link>
-                      <div className="mb-1"><TipeBadges tipe={c.tipe} /></div>
-                      {c.industri && <p className="text-[11px] text-[#6B6B6B] mb-1">{c.industri}</p>}
-                      {c.pic_nama && <p className="text-[11px] text-[#6B6B6B]">PIC: {c.pic_nama}</p>}
-                      {c.employees?.nama && (
-                        <p className="text-[11px] text-madael-red mt-1.5 font-medium">{c.employees.nama}</p>
-                      )}
-                    </div>
-                  ))}
-                  {stageClients.length === 0 && (
-                    <p className="text-[11px] text-[#B0B0B0] text-center py-4">Kosong</p>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {!loading && !error && view === 'table' && (
+      {!loading && !error && (
         <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-[11px] text-[#6B6B6B] tracking-[0.04em]">
-                <th className="px-4 py-3 font-medium">Perusahaan</th>
-                <th className="px-4 py-3 font-medium">Tipe</th>
-                <th className="px-4 py-3 font-medium">Industri</th>
-                <th className="px-4 py-3 font-medium">PIC</th>
-                <th className="px-4 py-3 font-medium">Stage</th>
-                <th className="px-4 py-3 font-medium">BD</th>
-                <th className="px-4 py-3 font-medium">Dibuat</th>
+                <SortableHeader colKey="nama_perusahaan" label="Perusahaan" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="tipe" label="Tipe" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="industri" label="Industri" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="pic_nama" label="PIC" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="stage" label="Stage" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="bd" label="BD" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="created_at" label="Dibuat" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
               </tr>
             </thead>
             <tbody>
