@@ -26,7 +26,11 @@ const translations = {
     errFileSize: 'Ukuran file maksimal 5MB.',
     errRequiredJob: 'Nama, email, dan CV wajib diisi.',
     errRequiredGeneral: 'Nama, email, posisi yang diminati, dan CV wajib diisi.',
+    errRequiredQuestions: 'Mohon jawab semua pertanyaan yang wajib diisi.',
     errGeneric: 'Terjadi kesalahan. Silakan coba lagi.',
+    selectPlaceholder: 'Pilih...',
+    yesLabel: 'Ya',
+    noLabel: 'Tidak',
   },
   en: {
     applyTitleJob: 'Apply for This Position',
@@ -50,7 +54,11 @@ const translations = {
     errFileSize: 'File size must be under 5MB.',
     errRequiredJob: 'Name, email, and CV are required.',
     errRequiredGeneral: 'Name, email, position of interest, and CV are required.',
+    errRequiredQuestions: 'Please answer all required questions.',
     errGeneric: 'Something went wrong. Please try again.',
+    selectPlaceholder: 'Select...',
+    yesLabel: 'Yes',
+    noLabel: 'No',
   },
 };
 
@@ -65,6 +73,7 @@ export default function JobApplyForm({
   mode = 'job',
   jobId,
   jobTitle,
+  questions = [],
   anchorId = 'apply',
   showHeading = true,
 }) {
@@ -74,9 +83,14 @@ export default function JobApplyForm({
 
   const [form, setForm] = useState({ nama: '', email: '', telepon: '', posisi_minat: '' });
   const [cvFile, setCvFile] = useState(null);
+  const [answers, setAnswers] = useState({});
   const [formError, setFormError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+
+  const handleAnswerChange = (index, value) => {
+    setAnswers((prev) => ({ ...prev, [index]: value }));
+  };
 
   const handleFieldChange = (e) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -108,8 +122,16 @@ export default function JobApplyForm({
     e.preventDefault();
     setFormError(null);
 
+    const missingRequiredAnswer =
+      !isGeneral && questions.some((q, i) => q.required && !String(answers[i] ?? '').trim());
+
     if (!form.nama || !form.email || !cvFile || (isGeneral && !form.posisi_minat)) {
       setFormError(isGeneral ? t.errRequiredGeneral : t.errRequiredJob);
+      return;
+    }
+
+    if (missingRequiredAnswer) {
+      setFormError(t.errRequiredQuestions);
       return;
     }
 
@@ -127,6 +149,15 @@ export default function JobApplyForm({
       } else {
         payload.append('job_id', jobId);
         payload.append('posisi', jobTitle);
+
+        if (questions.length > 0) {
+          const answersPayload = questions.map((q, i) => ({
+            question: q.text,
+            type: q.type,
+            answer: answers[i] ?? '',
+          }));
+          payload.append('answers', JSON.stringify(answersPayload));
+        }
       }
       payload.append('cv', cvFile);
 
@@ -143,6 +174,7 @@ export default function JobApplyForm({
         setSubmitted(true);
         setForm({ nama: '', email: '', telepon: '', posisi_minat: '' });
         setCvFile(null);
+        setAnswers({});
       }
     } catch (err) {
       console.error('Submit error:', err);
@@ -239,6 +271,63 @@ export default function JobApplyForm({
                   onChange={handleFieldChange}
                   className={inputClass}
                 />
+              </div>
+            )}
+
+            {!isGeneral && questions.length > 0 && (
+              <div className="space-y-5 border-t border-[#E0E0E0] pt-5">
+                {questions.map((q, i) => (
+                  <div key={i}>
+                    <label htmlFor={`${anchorId}-q${i}`} className={labelClass}>
+                      {q.text}
+                      {q.required && <span className="text-madael-red"> *</span>}
+                    </label>
+                    {q.type === 'yesno' ? (
+                      <select
+                        id={`${anchorId}-q${i}`}
+                        required={q.required}
+                        value={answers[i] ?? ''}
+                        onChange={(e) => handleAnswerChange(i, e.target.value)}
+                        className={inputClass}
+                      >
+                        <option value="">{t.selectPlaceholder}</option>
+                        <option value={t.yesLabel}>{t.yesLabel}</option>
+                        <option value={t.noLabel}>{t.noLabel}</option>
+                      </select>
+                    ) : q.type === 'scale' ? (
+                      <select
+                        id={`${anchorId}-q${i}`}
+                        required={q.required}
+                        value={answers[i] ?? ''}
+                        onChange={(e) => handleAnswerChange(i, e.target.value)}
+                        className={inputClass}
+                      >
+                        <option value="">{t.selectPlaceholder}</option>
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <option key={n} value={n}>{n}</option>
+                        ))}
+                      </select>
+                    ) : q.type === 'number' ? (
+                      <input
+                        id={`${anchorId}-q${i}`}
+                        type="number"
+                        required={q.required}
+                        value={answers[i] ?? ''}
+                        onChange={(e) => handleAnswerChange(i, e.target.value)}
+                        className={inputClass}
+                      />
+                    ) : (
+                      <input
+                        id={`${anchorId}-q${i}`}
+                        type="text"
+                        required={q.required}
+                        value={answers[i] ?? ''}
+                        onChange={(e) => handleAnswerChange(i, e.target.value)}
+                        className={inputClass}
+                      />
+                    )}
+                  </div>
+                ))}
               </div>
             )}
 
