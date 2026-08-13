@@ -100,8 +100,8 @@ export default function AboutStory() {
             </div>
             <div className="text-sm text-[#6B6B6B] leading-[1.75] border-t border-[#E0E0E0] pt-5">
               {lang === 'id'
-                ? 'Dengan pengalaman lebih dari satu dekade di bidang HR, Mangara Sidabutar memiliki keahlian mendalam dalam Industrial Relations, HR Strategy, dan Corporate Legal Compliance. Beliau telah membantu puluhan perusahaan lokal dan multinasional beroperasi sesuai regulasi ketenagakerjaan Indonesia.'
-                : 'With over a decade of experience in HR, Mangara Sidabutar has deep expertise in Industrial Relations, HR Strategy, and Corporate Legal Compliance. He has helped dozens of local and multinational companies operate in compliance with Indonesian labor regulations.'}
+                ? 'Dengan pengalaman lebih dari 30 tahun di bidang HR, Mangara Sidabutar memiliki keahlian mendalam dalam Industrial Relations, HR Strategy, dan Corporate Legal Compliance. Beliau telah membantu puluhan perusahaan lokal dan multinasional beroperasi sesuai regulasi ketenagakerjaan Indonesia.'
+                : 'With over 30 years of experience in HR, Mangara Sidabutar has deep expertise in Industrial Relations, HR Strategy, and Corporate Legal Compliance. He has helped dozens of local and multinational companies operate in compliance with Indonesian labor regulations.'}
             </div>
           </div>
         </div>

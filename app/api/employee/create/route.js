@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { DEFAULT_MODULE_ACCESS } from '@/lib/employeeModules';
+import { nextEmployeeId } from '@/lib/employeeId';
 
 export async function POST(request) {
   try {
@@ -42,13 +43,22 @@ export async function POST(request) {
     }
 
     const body = await request.json();
-    const { nama, employee_id, email, client_id, status, is_superadmin } = body;
+    const { nama, email, client_id, status, is_superadmin } = body;
+    let { employee_id } = body;
 
     if (!nama || !email) {
       return NextResponse.json({ error: 'Nama dan email wajib diisi.' }, { status: 400 });
     }
 
     const admin = createAdminClient();
+
+    // Employee ID kosong -> auto-generate format MDL0001 (4 digit, muat
+    // sampai ribuan) berdasarkan employee_id tertinggi yang sudah ada.
+    employee_id = employee_id?.trim();
+    if (!employee_id) {
+      const { data: existing } = await admin.from('employees').select('employee_id');
+      employee_id = nextEmployeeId((existing || []).map((e) => e.employee_id));
+    }
 
     // Password sementara — belum ada flow reset password di sprint ini,
     // jadi password ini perlu disampaikan manual ke employee baru.
@@ -72,7 +82,7 @@ export async function POST(request) {
       .insert([
         {
           nama,
-          employee_id: employee_id || null,
+          employee_id,
           email,
           client_id: client_id || null,
           status: status || 'Aktif',

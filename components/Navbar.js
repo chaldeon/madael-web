@@ -46,7 +46,7 @@ export default function Navbar() {
               isHome ? 'text-black' : 'text-[#6B6B6B] hover:text-black'
             }`}
           >
-            Home
+            {lang === 'id' ? 'Beranda' : 'Home'}
           </Link>
         </li>
         <li>
@@ -56,7 +56,7 @@ export default function Navbar() {
               isAbout ? 'text-black' : 'text-[#6B6B6B] hover:text-black'
             }`}
           >
-            About
+            {lang === 'id' ? 'Tentang Kami ' : 'About Us'}
           </Link>
         </li>
 
