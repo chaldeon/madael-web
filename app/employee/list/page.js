@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download } from 'lucide-react';
+import Link from 'next/link';
+import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download, ShieldCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { MODULE_OPTIONS } from '@/lib/employeeModules';
 import { nextEmployeeId } from '@/lib/employeeId';
@@ -138,10 +139,6 @@ export default function EmployeeListPage() {
   const [accessModules, setAccessModules] = useState([]); // array module_name yang dicentang
   const [accessLoading, setAccessLoading] = useState(false);
   const [accessSavingKey, setAccessSavingKey] = useState(null);
-  const [editEmployee, setEditEmployee] = useState(null); // employee row lagi diedit
-  const [editForm, setEditForm] = useState(emptyForm);
-  const [editSubmitting, setEditSubmitting] = useState(false);
-  const [editError, setEditError] = useState(null);
 
   // ---- Bulk Import ----
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -272,52 +269,6 @@ export default function EmployeeListPage() {
       setFormError('Terjadi kesalahan. Coba lagi.');
     }
     setSubmitting(false);
-  };
-
-  // ---- Edit Employee ----
-
-  const openEditModal = (employee) => {
-    setEditForm({
-      nama: employee.nama || '',
-      employee_id: employee.employee_id || '',
-      email: employee.email || '',
-      client_id: employee.client_id || '',
-      status: employee.status || 'Aktif',
-      is_superadmin: !!employee.is_superadmin,
-    });
-    setEditError(null);
-    setEditEmployee(employee);
-  };
-
-  const handleEditFormChange = (field, value) => {
-    setEditForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const handleSubmitEdit = async (e) => {
-    e.preventDefault();
-    setEditSubmitting(true);
-    setEditError(null);
-
-    try {
-      const res = await fetch(`/api/employee/${editEmployee.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editForm),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        setEditError(data.error || 'Gagal mengubah data employee.');
-        setEditSubmitting(false);
-        return;
-      }
-
-      setEditEmployee(null);
-      fetchEmployees();
-    } catch (err) {
-      setEditError('Terjadi kesalahan. Coba lagi.');
-    }
-    setEditSubmitting(false);
   };
 
   // ---- Kelola Akses ----
@@ -522,13 +473,17 @@ export default function EmployeeListPage() {
                 <SortableHeader colKey="perusahaan" label="Perusahaan" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="is_superadmin" label="Superadmin" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
-                <th className="px-5 py-3 font-medium">Aksi</th>
+                <th className="px-5 py-3 font-medium text-right">Akses</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((emp) => (
                 <tr key={emp.id} className="border-b border-[#F0F0F0] last:border-0">
-                  <td className="px-5 py-3.5 text-black">{emp.nama}</td>
+                  <td className="px-5 py-3.5 text-black">
+                    <Link href={`/employee/list/${emp.id}`} className="hover:text-madael-red hover:underline underline-offset-2">
+                      {emp.nama}
+                    </Link>
+                  </td>
                   <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.employee_id || '—'}</td>
                   <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.email}</td>
                   <td className="px-5 py-3.5 text-[#6B6B6B]">{emp.companies?.nama_perusahaan || '—'}</td>
@@ -550,21 +505,14 @@ export default function EmployeeListPage() {
                       {emp.is_superadmin ? 'Ya' : 'Tidak'}
                     </span>
                   </td>
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => openEditModal(emp)}
-                        className="text-[#3D3D3D] hover:text-black text-xs font-medium"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => openAccessModal(emp)}
-                        className="text-madael-red hover:text-madael-dark text-xs font-medium"
-                      >
-                        Kelola Akses
-                      </button>
-                    </div>
+                  <td className="px-5 py-3.5 text-right">
+                    <button
+                      onClick={() => openAccessModal(emp)}
+                      title="Kelola Akses"
+                      className="inline-flex text-[#6B6B6B] hover:text-madael-red transition-colors"
+                    >
+                      <ShieldCheck size={16} />
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -669,89 +617,6 @@ export default function EmployeeListPage() {
                 </button>
               </form>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* Modal Edit Employee */}
-      {editEmployee && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6">
-          <div className="w-full max-w-[440px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="font-serif text-[20px] font-normal text-black">Edit Employee</h2>
-              <button onClick={() => setEditEmployee(null)} className="text-[#6B6B6B] hover:text-black">
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitEdit} className="space-y-4">
-              <div>
-                <label className={labelClass}>Nama</label>
-                <input
-                  required
-                  value={editForm.nama}
-                  onChange={(e) => handleEditFormChange('nama', e.target.value)}
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Employee ID</label>
-                <input
-                  value={editForm.employee_id}
-                  onChange={(e) => handleEditFormChange('employee_id', e.target.value)}
-                  placeholder="MDL0001"
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Email</label>
-                <input
-                  disabled
-                  value={editForm.email}
-                  className={`${inputClass} bg-[#F4F4F4] text-[#9A9A9A] cursor-not-allowed`}
-                />
-                <p className="text-xs text-[#9A9A9A] mt-1">
-                  Email tidak bisa diubah di sini karena terhubung ke akun login.
-                </p>
-              </div>
-              <CompanySelect
-                value={editForm.client_id}
-                onChange={(id) => handleEditFormChange('client_id', id)}
-                companies={companies}
-                onAddCompany={addCompanyInline}
-                inputClass={inputClass}
-                labelClass={labelClass}
-              />
-              <div>
-                <label className={labelClass}>Status</label>
-                <select
-                  value={editForm.status}
-                  onChange={(e) => handleEditFormChange('status', e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="Aktif">Aktif</option>
-                  <option value="Nonaktif">Nonaktif</option>
-                </select>
-              </div>
-              <label className="flex items-center gap-2 text-sm text-black">
-                <input
-                  type="checkbox"
-                  checked={editForm.is_superadmin}
-                  onChange={(e) => handleEditFormChange('is_superadmin', e.target.checked)}
-                />
-                Superadmin
-              </label>
-
-              {editError && <p className="text-sm text-madael-red">{editError}</p>}
-
-              <button
-                type="submit"
-                disabled={editSubmitting}
-                className="w-full bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {editSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}
-              </button>
-            </form>
           </div>
         </div>
       )}
