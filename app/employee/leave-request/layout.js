@@ -11,7 +11,7 @@ export default function LeaveRequestLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
-  const { status, employee } = useModuleAccess('leave_request');
+  const { status, hasModule } = useModuleAccess(['leave_request', 'leave_request_admin']);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -59,10 +59,12 @@ export default function LeaveRequestLayout({ children }) {
               ← Dashboard
             </Link>
             <div className="flex items-center gap-6">
-              <Link href="/employee/leave-request" className={tabClass(!isAdmin)}>
-                Ajukan Cuti
-              </Link>
-              {employee?.is_superadmin && (
+              {hasModule('leave_request') && (
+                <Link href="/employee/leave-request" className={tabClass(!isAdmin)}>
+                  Ajukan Cuti
+                </Link>
+              )}
+              {hasModule('leave_request_admin') && (
                 <Link href="/employee/leave-request/admin" className={tabClass(isAdmin)}>
                   Kelola Pengajuan
                 </Link>

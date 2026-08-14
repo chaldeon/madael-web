@@ -125,62 +125,114 @@ export default function EmployeeDashboardPage() {
       />
 
       <div className="max-w-[1100px] mx-auto px-6 py-10">
-        <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
-          Dashboard
-        </h1>
-        <p className="text-sm text-[#6B6B6B] mb-8">Pilih modul yang ingin kamu akses.</p>
+        {employee?.is_superadmin ? (
+          <>
+            <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
+              Dashboard
+            </h1>
+            <p className="text-sm text-[#6B6B6B] mb-8">Pilih modul yang ingin kamu akses.</p>
+            <ModuleGrid modules={MODULE_REGISTRY} hasAnyAccess={hasAnyAccess} isSuperadmin />
+          </>
+        ) : (
+          <>
+            {/* Layer 1 — Dashboard Saya: sama untuk semua karyawan */}
+            <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
+              Dashboard Saya
+            </h1>
+            <p className="text-sm text-[#6B6B6B] mb-8">Absensi, cuti, dan payslip kamu.</p>
+            <ModuleGrid
+              modules={MODULE_REGISTRY.filter((m) => m.layer === 'personal')}
+              hasAnyAccess={hasAnyAccess}
+            />
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {MODULE_REGISTRY
-            .filter((mod) => {
-              const isLive = mod.status === 'live';
-              const active = isLive && hasAnyAccess(mod);
-              // Superadmin tetap lihat semua (termasuk locked/coming soon) sebagai roadmap.
-              // Employee biasa cuma lihat modul yang benar-benar bisa dia akses.
-              return employee?.is_superadmin || active;
-            })
-            .map((mod) => {
-            const Icon = mod.icon;
-            const isLive = mod.status === 'live';
-            const active = isLive && hasAnyAccess(mod);
-            const CardTag = active ? Link : 'div';
-            const cardProps = active ? { href: mod.href } : {};
+            {/* Layer 2 — My Work: modul kerjaan sesuai akses yang diberikan */}
+            <h2 className="font-serif text-[22px] font-normal text-black tracking-[-0.02em] mt-12 mb-1">
+              My Work
+            </h2>
+            <p className="text-sm text-[#6B6B6B] mb-8">Modul kerjaan sesuai akses kamu.</p>
 
-            return (
-              <CardTag
-                key={mod.href}
-                {...cardProps}
-                className={`block border p-5 transition-colors ${
-                  active
-                    ? 'bg-white border-[#E0E0E0] hover:border-madael-red cursor-pointer'
-                    : 'bg-[#FAFAFA] border-[#E0E0E0] cursor-not-allowed'
-                }`}
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div
-                    className={`w-10 h-10 flex items-center justify-center ${
-                      active ? 'bg-madael-red text-white' : 'bg-[#E0E0E0] text-[#9A9A9A]'
-                    }`}
-                  >
-                    <Icon size={18} />
-                  </div>
-                  {!isLive ? (
-                    <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-[#E0E0E0] text-[#6B6B6B]">
-                      COMING SOON
-                    </span>
-                  ) : !active ? (
-                    <Lock size={14} className="text-[#9A9A9A]" />
-                  ) : null}
-                </div>
-                <p className={`text-sm font-medium mb-1 ${active ? 'text-black' : 'text-[#9A9A9A]'}`}>
-                  {mod.name}
-                </p>
-                <p className="text-xs text-[#6B6B6B]">{mod.desc}</p>
-              </CardTag>
-            );
-          })}
-        </div>
+            {(() => {
+              const hrisModules = MODULE_REGISTRY.filter((m) => m.layer === 'hris');
+              const generalModules = MODULE_REGISTRY.filter((m) => m.layer === 'general');
+              const showHris = hrisModules.some((m) => m.status === 'live' && hasAnyAccess(m));
+
+              return (
+                <>
+                  {showHris && (
+                    <div className="border border-madael-red/30 bg-madael-red/5 p-5 mb-6">
+                      <p className="text-xs font-medium tracking-[0.08em] text-madael-red mb-4">
+                        HRIS
+                      </p>
+                      <ModuleGrid modules={hrisModules} hasAnyAccess={hasAnyAccess} />
+                    </div>
+                  )}
+                  <ModuleGrid
+                    modules={generalModules.filter((m) => m.status === 'live' && hasAnyAccess(m))}
+                    hasAnyAccess={hasAnyAccess}
+                  />
+                </>
+              );
+            })()}
+          </>
+        )}
       </div>
     </section>
+  );
+}
+
+function ModuleGrid({ modules, hasAnyAccess, isSuperadmin = false }) {
+  const visible = modules.filter((mod) => {
+    const isLive = mod.status === 'live';
+    const active = isLive && hasAnyAccess(mod);
+    // Superadmin tetap lihat semua (termasuk locked/coming soon) sebagai roadmap.
+    // Employee biasa cuma lihat modul yang benar-benar bisa dia akses.
+    return isSuperadmin || active;
+  });
+
+  if (visible.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {visible.map((mod) => {
+        const Icon = mod.icon;
+        const isLive = mod.status === 'live';
+        const active = isLive && hasAnyAccess(mod);
+        const CardTag = active ? Link : 'div';
+        const cardProps = active ? { href: mod.href } : {};
+
+        return (
+          <CardTag
+            key={mod.href}
+            {...cardProps}
+            className={`block border p-5 transition-colors ${
+              active
+                ? 'bg-white border-[#E0E0E0] hover:border-madael-red cursor-pointer'
+                : 'bg-[#FAFAFA] border-[#E0E0E0] cursor-not-allowed'
+            }`}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div
+                className={`w-10 h-10 flex items-center justify-center ${
+                  active ? 'bg-madael-red text-white' : 'bg-[#E0E0E0] text-[#9A9A9A]'
+                }`}
+              >
+                <Icon size={18} />
+              </div>
+              {!isLive ? (
+                <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-[#E0E0E0] text-[#6B6B6B]">
+                  COMING SOON
+                </span>
+              ) : !active ? (
+                <Lock size={14} className="text-[#9A9A9A]" />
+              ) : null}
+            </div>
+            <p className={`text-sm font-medium mb-1 ${active ? 'text-black' : 'text-[#9A9A9A]'}`}>
+              {mod.name}
+            </p>
+            <p className="text-xs text-[#6B6B6B]">{mod.desc}</p>
+          </CardTag>
+        );
+      })}
+    </div>
   );
 }

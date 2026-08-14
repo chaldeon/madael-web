@@ -48,7 +48,7 @@ function timeInputToIso(tanggal, timeValue) {
 
 export default function KoreksiAbsensiPage() {
   const supabase = createClient();
-  const { status, employee } = useModuleAccess('absensi');
+  const { status, employee } = useModuleAccess('absensi_admin');
   const isSuperadmin = !!employee?.is_superadmin;
 
   const [monthValue, setMonthValue] = useState(currentMonthValue());

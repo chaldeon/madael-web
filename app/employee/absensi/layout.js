@@ -10,7 +10,7 @@ export default function AbsensiLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
-  const { status, employee, hasModule } = useModuleAccess('absensi');
+  const { status, hasModule } = useModuleAccess(['absensi', 'absensi_admin']);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -64,7 +64,7 @@ export default function AbsensiLayout({ children }) {
                   Absensi Saya
                 </Link>
               )}
-              {employee?.is_superadmin && (
+              {hasModule('absensi_admin') && (
                 <Link href="/employee/absensi/karyawan" className={tabClass(isKaryawanTab)}>
                   Semua Karyawan
                 </Link>
