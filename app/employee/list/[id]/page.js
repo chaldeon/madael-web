@@ -248,8 +248,8 @@ export default function EmployeeDetailPage() {
           ) : (
             <p className="text-sm text-[#6B6B6B]">Belum diatur.</p>
           )}
-          <Link href="/employee/absensi/jadwal" className="inline-block mt-4 text-xs text-madael-red hover:text-madael-dark font-medium">
-            Atur di Absensi &gt; Jadwal
+          <Link href="/employee/absensi/karyawan" className="inline-block mt-4 text-xs text-madael-red hover:text-madael-dark font-medium">
+            Atur di Absensi &gt; Semua Karyawan
           </Link>
         </div>
       </div>

@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, X } from 'lucide-react';
+import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, X, FileEdit, Upload, ExternalLink } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
@@ -103,6 +103,14 @@ export default function AbsensiPage() {
   const [cameraError, setCameraError] = useState(null);
   const [cameraStream, setCameraStream] = useState(null);
   const videoRef = useRef(null);
+
+  // --- Pengajuan koreksi absensi mandiri ---
+  const [myCorrections, setMyCorrections] = useState([]);
+  const [showKoreksiForm, setShowKoreksiForm] = useState(false);
+  const [koreksiForm, setKoreksiForm] = useState({ tanggal: todayStr(), jamMasuk: '', jamPulang: '', alasan: '' });
+  const [koreksiFoto, setKoreksiFoto] = useState(null);
+  const [koreksiSaving, setKoreksiSaving] = useState(false);
+  const [koreksiError, setKoreksiError] = useState(null);
   
 
   const loadData = useCallback(async () => {
@@ -110,7 +118,7 @@ export default function AbsensiPage() {
     setLoading(true);
     setLoadError(null);
 
-    const [schedRes, todayRes, histRes, yesterdayRes] = await Promise.all([
+    const [schedRes, todayRes, histRes, yesterdayRes, correctionsRes] = await Promise.all([
       supabase.from('work_schedule').select('*').eq('employee_id', employee.id).maybeSingle(),
       supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', todayStr()).maybeSingle(),
       supabase
@@ -120,9 +128,15 @@ export default function AbsensiPage() {
         .order('tanggal', { ascending: false })
         .limit(7),
       supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', yesterdayStr()).maybeSingle(),
+      supabase
+        .from('attendance_corrections')
+        .select('*')
+        .eq('requested_by', employee.id)
+        .order('created_at', { ascending: false })
+        .limit(10),
     ]);
 
-    const firstError = schedRes.error || todayRes.error || histRes.error || yesterdayRes.error;
+    const firstError = schedRes.error || todayRes.error || histRes.error || yesterdayRes.error || correctionsRes.error;
     if (firstError) {
       setLoadError(firstError.message || 'Gagal memuat data absensi. Periksa koneksi internet kamu.');
       setLoading(false);
@@ -134,6 +148,7 @@ export default function AbsensiPage() {
     setHistory(histRes.data || []);
     const yRow = yesterdayRes.data || null;
     setForgotClockOut(yRow && yRow.clock_in && !yRow.clock_out ? yRow : null);
+    setMyCorrections(correctionsRes.data || []);
     setLoading(false);
   }, [supabase, employee]);
 
@@ -247,6 +262,86 @@ export default function AbsensiPage() {
     }
   };
 
+  const openKoreksiForm = () => {
+    setKoreksiError(null);
+    setKoreksiForm({ tanggal: todayStr(), jamMasuk: '', jamPulang: '', alasan: '' });
+    setKoreksiFoto(null);
+    setShowKoreksiForm(true);
+  };
+
+  const handleSubmitKoreksi = async () => {
+    setKoreksiError(null);
+
+    if (!koreksiForm.alasan.trim()) {
+      setKoreksiError('Alasan koreksi wajib diisi.');
+      return;
+    }
+    if (!koreksiForm.jamMasuk && !koreksiForm.jamPulang) {
+      setKoreksiError('Isi minimal salah satu: jam masuk atau jam pulang yang seharusnya.');
+      return;
+    }
+    if (!koreksiFoto) {
+      setKoreksiError('Foto bukti wajib diupload (mis. foto absen fisik, selfie di lokasi kerja, dsb).');
+      return;
+    }
+
+    setKoreksiSaving(true);
+    try {
+      // 1. Upload foto bukti ke Google Drive (Shared Drive "Absensi")
+      const fd = new FormData();
+      fd.append('file', koreksiFoto);
+      fd.append('tanggal', koreksiForm.tanggal);
+      const uploadRes = await fetch('/api/attendance/koreksi-bukti', { method: 'POST', body: fd });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) throw new Error(uploadData.error || 'Gagal mengupload foto bukti.');
+
+      // 2. Ambil record attendance existing di tanggal itu (kalau ada) untuk jejak before_*
+      const { data: existingRow } = await supabase
+        .from('attendance')
+        .select('id, clock_in, clock_out, status_telat')
+        .eq('employee_id', employee.id)
+        .eq('tanggal', koreksiForm.tanggal)
+        .maybeSingle();
+
+      const afterClockIn = koreksiForm.jamMasuk
+        ? new Date(`${koreksiForm.tanggal}T${koreksiForm.jamMasuk}:00`).toISOString()
+        : (existingRow?.clock_in || null);
+      const afterClockOut = koreksiForm.jamPulang
+        ? new Date(`${koreksiForm.tanggal}T${koreksiForm.jamPulang}:00`).toISOString()
+        : (existingRow?.clock_out || null);
+
+      // 3. Insert pengajuan koreksi, status pending menunggu approval superadmin
+      const { data: inserted, error: insertError } = await supabase
+        .from('attendance_corrections')
+        .insert([{
+          attendance_id: existingRow?.id || null,
+          employee_id: employee.id,
+          requested_by: employee.id,
+          tanggal: koreksiForm.tanggal,
+          status: 'pending',
+          alasan: koreksiForm.alasan.trim(),
+          before_clock_in: existingRow?.clock_in || null,
+          before_clock_out: existingRow?.clock_out || null,
+          before_status_telat: existingRow?.status_telat ?? null,
+          after_clock_in: afterClockIn,
+          after_clock_out: afterClockOut,
+          foto_bukti_url: uploadData.driveUrl,
+          foto_bukti_drive_id: uploadData.driveFileId,
+        }])
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      setMyCorrections((prev) => [inserted, ...prev]);
+      setShowKoreksiForm(false);
+    } catch (err) {
+      setKoreksiError(err.message || 'Gagal mengirim pengajuan koreksi.');
+    } finally {
+      setKoreksiSaving(false);
+    }
+  };
+
   if (status === 'loading' || loading) {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
@@ -261,7 +356,7 @@ export default function AbsensiPage() {
         <div className="w-full max-w-[420px] border-t-4 border-madael-red bg-white p-8 text-center">
           <p className="text-sm text-black mb-6">Kamu tidak punya akses ke halaman Absensi.</p>
           <Link
-            href="/employee/absensi/jadwal"
+            href="/employee/dashboard"
             className="inline-block bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
           >
             Kembali
@@ -421,6 +516,165 @@ export default function AbsensiPage() {
           </tbody>
         </table>
       </div>
+
+      <div className="flex items-center justify-between mt-10 mb-3">
+        <h2 className="text-sm font-medium text-black">Pengajuan Koreksi Kehadiran</h2>
+        <button
+          onClick={openKoreksiForm}
+          className="flex items-center gap-1.5 text-xs font-medium tracking-[0.02em] text-madael-red hover:text-madael-dark"
+        >
+          <FileEdit size={14} />
+          Ajukan Koreksi
+        </button>
+      </div>
+      <p className="text-xs text-[#9A9A9A] mb-3">
+        Kalau lupa clock in/out atau ada kesalahan, ajukan koreksi mandiri di sini lengkap dengan foto bukti. Superadmin akan mereview sebelum data absensi kamu ikut berubah.
+      </p>
+      <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
+              <th className="px-4 py-3 font-medium">Tanggal</th>
+              <th className="px-4 py-3 font-medium">Diajukan</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Bukti</th>
+            </tr>
+          </thead>
+          <tbody>
+            {myCorrections.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="p-0">
+                  <EmptyState message="Belum ada pengajuan koreksi." />
+                </td>
+              </tr>
+            ) : (
+              myCorrections.map((row) => (
+                <tr key={row.id} className="border-b border-[#E0E0E0] last:border-0">
+                  <td className="px-4 py-3 text-black">{formatTanggal(row.tanggal)}</td>
+                  <td className="px-4 py-3 text-[#6B6B6B]">
+                    Masuk {formatWaktu(row.after_clock_in)} — Pulang {formatWaktu(row.after_clock_out)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {row.status === 'pending' && (
+                      <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-amber-100 text-amber-700">
+                        MENUNGGU
+                      </span>
+                    )}
+                    {row.status === 'approved' && (
+                      <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-green-100 text-green-700">
+                        DISETUJUI
+                      </span>
+                    )}
+                    {row.status === 'rejected' && (
+                      <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-red-100 text-red-700">
+                        DITOLAK
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {row.foto_bukti_url ? (
+                      <a
+                        href={row.foto_bukti_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-madael-red hover:text-madael-dark"
+                      >
+                        Lihat <ExternalLink size={12} />
+                      </a>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {showKoreksiForm && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] px-6">
+          <div className="bg-white w-full max-w-[440px] p-6 relative max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={() => setShowKoreksiForm(false)}
+              className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black"
+            >
+              <X size={18} />
+            </button>
+            <h2 className="text-sm font-medium text-black mb-4">Ajukan Koreksi Kehadiran</h2>
+
+            {koreksiError && (
+              <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2.5 mb-4">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                {koreksiError}
+              </div>
+            )}
+
+            <label className="block text-xs font-medium text-[#6B6B6B] mb-1.5">Tanggal</label>
+            <input
+              type="date"
+              value={koreksiForm.tanggal}
+              max={todayStr()}
+              onChange={(e) => setKoreksiForm((f) => ({ ...f, tanggal: e.target.value }))}
+              className="w-full border border-[#E0E0E0] px-3 py-2 text-sm mb-4 focus:outline-none focus:border-madael-red"
+            />
+
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div>
+                <label className="block text-xs font-medium text-[#6B6B6B] mb-1.5">Jam Masuk Seharusnya</label>
+                <input
+                  type="time"
+                  value={koreksiForm.jamMasuk}
+                  onChange={(e) => setKoreksiForm((f) => ({ ...f, jamMasuk: e.target.value }))}
+                  className="w-full border border-[#E0E0E0] px-3 py-2 text-sm focus:outline-none focus:border-madael-red"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#6B6B6B] mb-1.5">Jam Pulang Seharusnya</label>
+                <input
+                  type="time"
+                  value={koreksiForm.jamPulang}
+                  onChange={(e) => setKoreksiForm((f) => ({ ...f, jamPulang: e.target.value }))}
+                  className="w-full border border-[#E0E0E0] px-3 py-2 text-sm focus:outline-none focus:border-madael-red"
+                />
+              </div>
+            </div>
+
+            <label className="block text-xs font-medium text-[#6B6B6B] mb-1.5">Alasan</label>
+            <textarea
+              value={koreksiForm.alasan}
+              onChange={(e) => setKoreksiForm((f) => ({ ...f, alasan: e.target.value }))}
+              rows={3}
+              placeholder="Contoh: lupa clock in karena HP mati, tapi sudah masuk kerja sejak jam 08.00"
+              className="w-full border border-[#E0E0E0] px-3 py-2 text-sm mb-4 focus:outline-none focus:border-madael-red resize-none"
+            />
+
+            <label className="block text-xs font-medium text-[#6B6B6B] mb-1.5">Foto Bukti (wajib)</label>
+            <label className="flex items-center gap-2 border border-dashed border-[#E0E0E0] px-3 py-3 text-xs text-[#6B6B6B] mb-1 cursor-pointer hover:border-madael-red">
+              <Upload size={14} />
+              {koreksiFoto ? koreksiFoto.name : 'Pilih atau ambil foto (JPG/PNG, maks 5MB)'}
+              <input
+                type="file"
+                accept="image/jpeg,image/png"
+                capture="environment"
+                onChange={(e) => setKoreksiFoto(e.target.files?.[0] || null)}
+                className="hidden"
+              />
+            </label>
+            <p className="text-[11px] text-[#9A9A9A] mb-5">
+              Bukti bisa berupa foto kegiatan kerja, absensi manual fisik, atau bukti lain yang menunjukkan kamu benar-benar bekerja pada tanggal tersebut.
+            </p>
+
+            <button
+              onClick={handleSubmitKoreksi}
+              disabled={koreksiSaving}
+              className="w-full flex items-center justify-center gap-2 bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+            >
+              {koreksiSaving ? 'Mengirim...' : 'Kirim Pengajuan'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {cameraMode && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] px-6">

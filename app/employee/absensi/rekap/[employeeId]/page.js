@@ -175,11 +175,11 @@ export default function RekapDetailPage() {
     <div className="max-w-[900px] mx-auto px-6 py-10">
       <div className="mb-8">
         <Link
-          href="/employee/absensi/rekap"
+          href="/employee/absensi/karyawan"
           className="flex items-center gap-2 text-sm text-[#6B6B6B] hover:text-madael-red transition-colors mb-4"
         >
           <ArrowLeft size={16} />
-          Rekap Bulanan
+          Semua Karyawan
         </Link>
         <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
           {loading ? 'Memuat...' : (emp?.nama || 'Karyawan tidak ditemukan')}
