@@ -125,7 +125,7 @@ const TABS = [
 
 export default function SemuaKaryawanPage() {
   const supabase = createClient();
-  const { status, employee } = useModuleAccess('absensi');
+  const { status, employee } = useModuleAccess('absensi_admin');
   const isSuperadmin = !!employee?.is_superadmin;
 
   const [activeTab, setActiveTab] = useState('koreksi');

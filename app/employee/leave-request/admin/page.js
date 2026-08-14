@@ -37,7 +37,7 @@ function StatusBadge({ status }) {
 
 export default function LeaveRequestAdminPage() {
   const supabase = createClient();
-  const { status, employee } = useModuleAccess('leave_request');
+  const { status, employee } = useModuleAccess('leave_request_admin');
   const isSuperadmin = !!employee?.is_superadmin;
 
   const [statusFilter, setStatusFilter] = useState('pending');

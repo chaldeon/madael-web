@@ -69,7 +69,7 @@ function downloadRekapCsv(rows, monthValue) {
 
 export default function RekapAbsensiPage() {
   const supabase = createClient();
-  const { status, employee } = useModuleAccess('absensi');
+  const { status, employee } = useModuleAccess('absensi_admin');
 
   const [monthValue, setMonthValue] = useState(currentMonthValue());
   const [employeeFilter, setEmployeeFilter] = useState('all');
