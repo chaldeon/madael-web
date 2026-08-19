@@ -53,7 +53,7 @@ export default function PayrollLayout({ children }) {
     <section className="min-h-screen bg-[#F4F4F4]">
       <EmployeeHeader
         onLogout={handleLogout}
-        left={
+        subnav={
           <>
             <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
               ← Dashboard

@@ -46,7 +46,7 @@ export default function StatisticsLayout({ children }) {
       <EmployeeHeader
         printHidden
         onLogout={handleLogout}
-        left={
+        subnav={
           <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
             ← Dashboard
           </Link>

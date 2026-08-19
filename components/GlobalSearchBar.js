@@ -14,62 +14,103 @@ const DEBOUNCE_MS = 300;
 // hasil employee/invoice diarahkan ke halaman list masing-masing, bukan
 // deep-link ke row spesifik. Dokumen sudah punya detail route asli.
 export default function GlobalSearchBar() {
-  const supabase = createClient();
+  // PENTING: createClient() bikin instance Supabase baru tiap dipanggil.
+  // Kalau dipanggil langsung di body komponen (seperti sebelumnya), setiap
+  // render dapat object baru -> runSearch (useCallback) juga selalu dapat
+  // reference baru -> effect debounce di bawah selalu "berubah" dan re-run
+  // terus-menerus walau `query` tidak berubah -> infinite render loop
+  // begitu komponen ini mount. Fix: instance dibuat sekali saja lewat lazy
+  // initializer useState.
+  const [supabase] = useState(() => createClient());
+
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState({ employees: [], invoices: [], documents: [] });
   const [searchError, setSearchError] = useState(null);
   const wrapRef = useRef(null);
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(e) {
       if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
     }
+    function handleEscape(e) {
+      if (e.key === 'Escape') setOpen(false);
+    }
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, []);
 
-  const runSearch = useCallback(async (q) => {
-    setLoading(true);
-    setSearchError(null);
+  const runSearch = useCallback(
+    async (q) => {
+      const thisRequestId = ++requestIdRef.current;
+      setLoading(true);
+      setSearchError(null);
 
-    const [empRes, invRes, docRes] = await Promise.all([
-      supabase
-        .from('employees')
-        .select('id, nama, employee_id, companies:client_id ( nama_perusahaan )')
-        .or(`nama.ilike.%${q}%,employee_id.ilike.%${q}%`)
-        .limit(5),
-      // invoices — tabel opsional (Task 16). Kalau belum ada di environment
-      // ini, empRes/docRes tetap jalan normal, cuma hasil invoice kosong.
-      supabase
-        .from('invoices')
-        .select('id, nomor_surat, nominal')
-        .ilike('nomor_surat', `%${q}%`)
-        .limit(5),
-      supabase
-        .from('documents')
-        .select('id, nomor_surat, judul')
-        .ilike('nomor_surat', `%${q}%`)
-        .limit(5),
-    ]);
+      const [empRes, invRes, docRes] = await Promise.all([
+        supabase
+          .from('employees')
+          .select('id, nama, employee_id, companies:client_id ( nama_perusahaan )')
+          .or(`nama.ilike.%${q}%,employee_id.ilike.%${q}%`)
+          .limit(5),
+        // invoices — tabel opsional (Task 16). Kalau belum ada di environment
+        // ini, empRes/docRes tetap jalan normal, cuma hasil invoice kosong.
+        supabase
+          .from('invoices')
+          .select('id, nomor_surat, nominal')
+          .ilike('nomor_surat', `%${q}%`)
+          .limit(5),
+        supabase
+          .from('documents')
+          .select('id, nomor_surat, judul')
+          .ilike('nomor_surat', `%${q}%`)
+          .limit(5),
+      ]);
 
-    setResults({
-      employees: empRes.error ? [] : (empRes.data || []),
-      invoices: invRes.error ? [] : (invRes.data || []),
-      documents: docRes.error ? [] : (docRes.data || []),
-    });
+      // Kalau ada query lebih baru yang sudah menyusul (user ngetik lagi
+      // sebelum request ini selesai) atau komponen sudah unmount, jangan
+      // timpa hasil yang lebih relevan / setState ke komponen yang sudah
+      // hilang — ini nyegah race condition kalau response network datang
+      // tidak berurutan.
+      if (!mountedRef.current || thisRequestId !== requestIdRef.current) return;
 
-    // Kalau employees & documents (dua-duanya tabel wajib) gagal, itu baru
-    // dianggap error beneran — invoices sengaja tidak dihitung karena opsional.
-    setSearchError(empRes.error && docRes.error ? 'Gagal melakukan pencarian.' : null);
-    setLoading(false);
-  }, [supabase]);
+      setResults({
+        employees: empRes.error ? [] : (empRes.data || []),
+        invoices: invRes.error ? [] : (invRes.data || []),
+        documents: docRes.error ? [] : (docRes.data || []),
+      });
+
+      // Kalau employees & documents (dua-duanya tabel wajib) gagal, itu baru
+      // dianggap error beneran — invoices sengaja tidak dihitung karena opsional.
+      setSearchError(empRes.error && docRes.error ? 'Gagal melakukan pencarian.' : null);
+      setLoading(false);
+    },
+    [supabase]
+  );
 
   useEffect(() => {
     const q = query.trim();
     if (q.length < MIN_QUERY_LENGTH) {
-      setResults({ employees: [], invoices: [], documents: [] });
+      // Batalkan request yang mungkin masih in-flight dari ketikan sebelumnya.
+      requestIdRef.current += 1;
+      setResults((prev) =>
+        prev.employees.length || prev.invoices.length || prev.documents.length
+          ? { employees: [], invoices: [], documents: [] }
+          : prev
+      );
       setLoading(false);
       return;
     }
