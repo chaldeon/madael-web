@@ -127,11 +127,60 @@ export default function EmployeeDashboardPage() {
       <div className="max-w-[1100px] mx-auto px-6 py-10">
         {employee?.is_superadmin ? (
           <>
+            {/* Layer 1 — Dashboard Saya: superadmin tetap karyawan aktif, sama kayak yang lain */}
             <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
-              Dashboard
+              Dashboard Saya
             </h1>
-            <p className="text-sm text-[#6B6B6B] mb-8">Pilih modul yang ingin kamu akses.</p>
-            <ModuleGrid modules={MODULE_REGISTRY} hasAnyAccess={hasAnyAccess} isSuperadmin />
+            <p className="text-sm text-[#6B6B6B] mb-8">Absensi, cuti, dan payslip kamu.</p>
+            <ModuleGrid
+              modules={MODULE_REGISTRY.filter((m) => m.layer === 'personal')}
+              hasAnyAccess={hasAnyAccess}
+            />
+
+            {/* Layer 2 — My Work: semua modul yang sudah live (superadmin selalu punya akses penuh,
+                termasuk Reports & Activity Log yang eksklusif superadmin) */}
+            <h2 className="font-serif text-[22px] font-normal text-black tracking-[-0.02em] mt-12 mb-1">
+              My Work
+            </h2>
+            <p className="text-sm text-[#6B6B6B] mb-8">Semua modul kerja — akses penuh sebagai superadmin.</p>
+
+            {(() => {
+              const hrisModules = MODULE_REGISTRY.filter((m) => m.layer === 'hris' && m.status === 'live');
+              const generalModules = MODULE_REGISTRY.filter((m) => m.layer === 'general' && m.status === 'live');
+
+              return (
+                <>
+                  {hrisModules.length > 0 && (
+                    <div className="border border-madael-red/30 bg-madael-red/5 p-5 mb-6">
+                      <p className="text-xs font-medium tracking-[0.08em] text-madael-red mb-4">
+                        HRIS
+                      </p>
+                      <ModuleGrid modules={hrisModules} hasAnyAccess={hasAnyAccess} />
+                    </div>
+                  )}
+                  <ModuleGrid modules={generalModules} hasAnyAccess={hasAnyAccess} />
+                </>
+              );
+            })()}
+
+            {/* Roadmap — modul yang belum live (in_progress/coming_soon), dipisah dari area
+                kerja utama supaya grid "My Work" tetap bersih seiring registry makin panjang */}
+            {(() => {
+              const roadmapModules = MODULE_REGISTRY.filter((m) => m.status !== 'live');
+              if (roadmapModules.length === 0) return null;
+
+              return (
+                <>
+                  <h2 className="font-serif text-[22px] font-normal text-[#9A9A9A] tracking-[-0.02em] mt-12 mb-1">
+                    Roadmap
+                  </h2>
+                  <p className="text-sm text-[#6B6B6B] mb-8">Modul yang sedang atau akan dibangun.</p>
+                  <div className="border border-dashed border-[#D0D0D0] p-5">
+                    <ModuleGrid modules={roadmapModules} hasAnyAccess={hasAnyAccess} isSuperadmin />
+                  </div>
+                </>
+              );
+            })()}
           </>
         ) : (
           <>
