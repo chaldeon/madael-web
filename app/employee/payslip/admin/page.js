@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { X, Plus, Eye, Pencil } from 'lucide-react';
+import { X, Plus, Eye, Pencil, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { hitungBPJS, hitungBrutoPPh21, hitungPPh21TER, hitungPenaltyTelat, PTKP_DATA, JKK_OPTIONS } from '@/lib/payroll/calculations';
 import { useModuleAccess } from '@/lib/useModuleAccess';
@@ -116,6 +116,37 @@ function formatRupiah(value) {
 function formatRibuan(value) {
   const num = Number(value) || 0;
   return num === 0 ? '' : num.toLocaleString('id-ID');
+}
+
+function calcTHP(p) {
+  const totalPotongan = (p.penalty || 0) + (p.jht_karyawan || 0) + (p.jp_karyawan || 0) + (p.bpjs_k_karyawan || 0) + (p.pph21 || 0);
+  return (p.gaji_pokok || 0) + (p.lembur || 0) + (p.insentif || 0) + (p.kompensasi || 0) + (p.tunjangan_lain || 0) - totalPotongan;
+}
+
+// Kolom yang bisa disortir — pola sama seperti app/employee/list.
+const SORT_COLUMNS = {
+  nama: { get: (p) => (p.employees?.nama || '').toLowerCase() },
+  periode: { get: (p) => p.periode || '' },
+  nomor_dokumen: { get: (p) => (p.nomor_dokumen || '').toLowerCase() },
+  thp: { get: (p) => calcTHP(p) },
+  status: { get: (p) => (p.is_published ? 1 : 0) },
+};
+
+function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
+  const active = sortField === colKey;
+  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className="px-5 py-3 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(colKey)}
+        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
+      >
+        {label}
+        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />
+      </button>
+    </th>
+  );
 }
 
 function NumberField({ label, value, onChange }) {
@@ -601,6 +632,8 @@ export default function PayslipAdminPage() {
 
   const [filterEmployee, setFilterEmployee] = useState('');
   const [filterPeriode, setFilterPeriode] = useState('');
+  const [sortField, setSortField] = useState('periode');
+  const [sortDir, setSortDir] = useState('desc');
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -639,12 +672,33 @@ export default function PayslipAdminPage() {
   }, [status, loadData]);
 
   const filtered = useMemo(() => {
-    return payslips.filter((p) => {
+    const base = payslips.filter((p) => {
       const matchEmp = !filterEmployee || p.employee_id === filterEmployee;
       const matchPeriode = !filterPeriode || p.periode === filterPeriode;
       return matchEmp && matchPeriode;
     });
-  }, [payslips, filterEmployee, filterPeriode]);
+
+    const getValue = SORT_COLUMNS[sortField]?.get;
+    if (!getValue) return base;
+
+    const sorted = [...base].sort((a, b) => {
+      const va = getValue(a);
+      const vb = getValue(b);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return sortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [payslips, filterEmployee, filterPeriode, sortField, sortDir]);
+
+  const handleSort = (colKey) => {
+    if (sortField === colKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(colKey);
+      setSortDir('asc');
+    }
+  };
 
   const periodeOptions = useMemo(() => {
     return Array.from(new Set(payslips.map((p) => p.periode))).sort().reverse();
@@ -738,11 +792,6 @@ export default function PayslipAdminPage() {
     }
   };
 
-  const calcTHP = (p) => {
-    const totalPotongan = (p.penalty || 0) + (p.jht_karyawan || 0) + (p.jp_karyawan || 0) + (p.bpjs_k_karyawan || 0) + (p.pph21 || 0);
-    return (p.gaji_pokok || 0) + (p.lembur || 0) + (p.insentif || 0) + (p.kompensasi || 0) + (p.tunjangan_lain || 0) - totalPotongan;
-  };
-
   const selectClass =
     'border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
 
@@ -833,11 +882,11 @@ export default function PayslipAdminPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B] tracking-[0.04em]">
-                <th className="px-5 py-3 font-medium">Nama Karyawan</th>
-                <th className="px-5 py-3 font-medium">Periode</th>
-                <th className="px-5 py-3 font-medium">Nomor Dokumen</th>
-                <th className="px-5 py-3 font-medium">Take Home Pay</th>
-                <th className="px-5 py-3 font-medium">Status</th>
+                <SortableHeader colKey="nama" label="Nama Karyawan" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="periode" label="Periode" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="nomor_dokumen" label="Nomor Dokumen" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="thp" label="Take Home Pay" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-5 py-3 font-medium">Aksi</th>
               </tr>
             </thead>

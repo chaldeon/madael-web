@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState, useCallback, Fragment } from 'react';
+import { useEffect, useState, useCallback, useMemo, Fragment } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 
 const STATUS_OPTIONS = ['Baru', 'Review', 'Interview', 'Ditolak', 'Diterima'];
@@ -33,6 +34,31 @@ function csvEscape(value) {
   return str;
 }
 
+// Kolom yang bisa disortir — pola sama seperti app/employee/list.
+const SORT_COLUMNS = {
+  nama: { get: (a) => (a.nama || '').toLowerCase() },
+  posisi: { get: (a) => (a.job_listings?.title || 'CV Umum').toLowerCase() },
+  tanggal: { get: (a) => new Date(a.created_at).getTime() },
+  status: { get: (a) => a.status || '' },
+};
+
+function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
+  const active = sortField === colKey;
+  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className="px-5 py-3 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(colKey)}
+        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
+      >
+        {label}
+        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />
+      </button>
+    </th>
+  );
+}
+
 export default function JobPortalCandidatesPage() {
   const supabase = createClient();
   const searchParams = useSearchParams();
@@ -48,6 +74,8 @@ export default function JobPortalCandidatesPage() {
   const [catatanDrafts, setCatatanDrafts] = useState({});
   const [savingCatatanId, setSavingCatatanId] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  const [sortField, setSortField] = useState('tanggal');
+  const [sortDir, setSortDir] = useState('desc');
 
   // Sinkronkan filter dengan query param ?posisi= (mis. dari klik jumlah pelamar di halaman Lowongan)
   useEffect(() => {
@@ -109,11 +137,34 @@ export default function JobPortalCandidatesPage() {
     setSavingCatatanId(null);
   };
 
-  const filtered = applications.filter((a) => {
-    const matchJob = !filterJob || (filterJob === 'umum' ? !a.job_id : a.job_listings?.slug === filterJob);
-    const matchStatus = !filterStatus || a.status === filterStatus;
-    return matchJob && matchStatus;
-  });
+  const filtered = useMemo(() => {
+    const base = applications.filter((a) => {
+      const matchJob = !filterJob || (filterJob === 'umum' ? !a.job_id : a.job_listings?.slug === filterJob);
+      const matchStatus = !filterStatus || a.status === filterStatus;
+      return matchJob && matchStatus;
+    });
+
+    const getValue = SORT_COLUMNS[sortField]?.get;
+    if (!getValue) return base;
+
+    const sorted = [...base].sort((a, b) => {
+      const va = getValue(a);
+      const vb = getValue(b);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return sortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [applications, filterJob, filterStatus, sortField, sortDir]);
+
+  const handleSort = (colKey) => {
+    if (sortField === colKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(colKey);
+      setSortDir('asc');
+    }
+  };
 
   const handleExportCsv = () => {
     const header = ['Nama', 'Email', 'Telepon', 'Posisi', 'Tanggal Apply', 'Status', 'Catatan', 'Link CV'];
@@ -201,14 +252,14 @@ export default function JobPortalCandidatesPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B] tracking-[0.04em]">
-                <th className="px-5 py-3 font-medium">Nama</th>
-                <th className="px-5 py-3 font-medium">Posisi</th>
-                <th className="px-5 py-3 font-medium">Tanggal Apply</th>
+                <SortableHeader colKey="nama" label="Nama" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="posisi" label="Posisi" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="tanggal" label="Tanggal Apply" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-5 py-3 font-medium">Kontak</th>
                 <th className="px-5 py-3 font-medium">CV</th>
                 <th className="px-5 py-3 font-medium">Jawaban</th>
                 <th className="px-5 py-3 font-medium">Catatan</th>
-                <th className="px-5 py-3 font-medium">Status</th>
+                <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
               </tr>
             </thead>
             <tbody>

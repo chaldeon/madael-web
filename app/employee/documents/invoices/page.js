@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
@@ -42,6 +42,34 @@ function StatusBadge({ status }) {
   );
 }
 
+// Kolom yang bisa disortir — pola sama seperti app/employee/list. ctx berisi
+// clientById untuk menampilkan nama klien dari client_id.
+const SORT_COLUMNS = {
+  nomor: { get: (i) => (i.nomor_surat || '').toLowerCase() },
+  klien: { get: (i, ctx) => (ctx.clientById[i.client_id]?.nama_perusahaan || '').toLowerCase() },
+  nominal: { get: (i) => Number(i.nominal) || 0 },
+  terbit: { get: (i) => i.tanggal_terbit || '' },
+  lunas: { get: (i) => i.tanggal_lunas || '' },
+  status: { get: (i) => i.status || '' },
+};
+
+function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
+  const active = sortField === colKey;
+  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className="px-4 py-3 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(colKey)}
+        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
+      >
+        {label}
+        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />
+      </button>
+    </th>
+  );
+}
+
 const emptyForm = { clientId: '', nomorSurat: '', nominal: '', tanggalTerbit: todayValue(), catatan: '' };
 
 export default function InvoiceTrackerPage() {
@@ -51,6 +79,8 @@ export default function InvoiceTrackerPage() {
 
   const [statusFilter, setStatusFilter] = useState('all');
   const [clientFilter, setClientFilter] = useState('all');
+  const [sortField, setSortField] = useState('terbit');
+  const [sortDir, setSortDir] = useState('desc');
   const [clients, setClients] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -98,8 +128,29 @@ export default function InvoiceTrackerPage() {
     let list = invoices;
     if (statusFilter !== 'all') list = list.filter((i) => i.status === statusFilter);
     if (clientFilter !== 'all') list = list.filter((i) => i.client_id === clientFilter);
-    return list;
-  }, [invoices, statusFilter, clientFilter]);
+
+    const ctx = { clientById };
+    const getValue = SORT_COLUMNS[sortField]?.get;
+    if (!getValue) return list;
+
+    const sorted = [...list].sort((a, b) => {
+      const va = getValue(a, ctx);
+      const vb = getValue(b, ctx);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return sortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [invoices, statusFilter, clientFilter, sortField, sortDir, clientById]);
+
+  const handleSort = (colKey) => {
+    if (sortField === colKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(colKey);
+      setSortDir('asc');
+    }
+  };
 
   const totalOutstanding = useMemo(
     () => invoices.filter((i) => i.status !== 'lunas').reduce((sum, i) => sum + (Number(i.nominal) || 0), 0),
@@ -288,12 +339,12 @@ export default function InvoiceTrackerPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
-                <th className="px-4 py-3 font-medium">Nomor Surat</th>
-                <th className="px-4 py-3 font-medium">Klien</th>
-                <th className="px-4 py-3 font-medium">Nominal</th>
-                <th className="px-4 py-3 font-medium">Terbit</th>
-                <th className="px-4 py-3 font-medium">Lunas</th>
-                <th className="px-4 py-3 font-medium">Status</th>
+                <SortableHeader colKey="nomor" label="Nomor Surat" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="klien" label="Klien" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="nominal" label="Nominal" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="terbit" label="Terbit" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="lunas" label="Lunas" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>

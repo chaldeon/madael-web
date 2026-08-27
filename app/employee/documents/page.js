@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { Plus, ChevronDown } from 'lucide-react';
+import { Plus, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -59,6 +59,34 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// Kolom yang bisa disortir — pola sama seperti app/employee/list.
+const SORT_COLUMNS = {
+  nomor: { get: (d) => (d.nomor_surat || '').toLowerCase() },
+  judul: { get: (d) => (d.judul || '').toLowerCase() },
+  jenis: { get: (d) => (d.kode_jenis || '').toLowerCase() },
+  klien: { get: (d) => (d.clients?.nama_perusahaan || '').toLowerCase() },
+  dibuat_oleh: { get: (d) => (d.employees?.nama || '').toLowerCase() },
+  tanggal: { get: (d) => d.tanggal_dokumen || '' },
+  status: { get: (d) => d.status || '' },
+};
+
+function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
+  const active = sortField === colKey;
+  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className="px-4 py-3 font-medium">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onSort(colKey); }}
+        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
+      >
+        {label}
+        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />
+      </button>
+    </th>
+  );
+}
+
 function NewDocumentDropdown() {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -108,6 +136,8 @@ export default function DocumentsListPage() {
 
   const [filterJenis, setFilterJenis] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [sortField, setSortField] = useState('tanggal');
+  const [sortDir, setSortDir] = useState('desc');
 
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
@@ -130,12 +160,33 @@ export default function DocumentsListPage() {
   }, [fetchDocuments]);
 
   const filtered = useMemo(() => {
-    return documents.filter((d) => {
+    const base = documents.filter((d) => {
       const matchJenis = !filterJenis || d.kode_jenis === filterJenis;
       const matchStatus = !filterStatus || d.status === filterStatus;
       return matchJenis && matchStatus;
     });
-  }, [documents, filterJenis, filterStatus]);
+
+    const getValue = SORT_COLUMNS[sortField]?.get;
+    if (!getValue) return base;
+
+    const sorted = [...base].sort((a, b) => {
+      const va = getValue(a);
+      const vb = getValue(b);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return sortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [documents, filterJenis, filterStatus, sortField, sortDir]);
+
+  const handleSort = (colKey) => {
+    if (sortField === colKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(colKey);
+      setSortDir('asc');
+    }
+  };
 
   return (
     <div className="max-w-[1200px] mx-auto px-6 py-10">
@@ -182,13 +233,13 @@ export default function DocumentsListPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-[#6B6B6B]">
-                <th className="px-4 py-3 font-medium">Nomor Surat</th>
-                <th className="px-4 py-3 font-medium">Judul</th>
-                <th className="px-4 py-3 font-medium">Jenis</th>
-                <th className="px-4 py-3 font-medium">Klien</th>
-                <th className="px-4 py-3 font-medium">Dibuat Oleh</th>
-                <th className="px-4 py-3 font-medium">Tanggal</th>
-                <th className="px-4 py-3 font-medium">Status</th>
+                <SortableHeader colKey="nomor" label="Nomor Surat" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="judul" label="Judul" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="jenis" label="Jenis" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="klien" label="Klien" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="dibuat_oleh" label="Dibuat Oleh" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="tanggal" label="Tanggal" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
               </tr>
             </thead>
             <tbody>

@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, CheckCircle2, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { hitungBPJS, hitungBrutoPPh21, hitungPPh21TER } from '@/lib/payroll/calculations';
 import { useModuleAccess } from '@/lib/useModuleAccess';
@@ -22,6 +22,36 @@ const STATUS_STYLE = {
   Review: 'bg-amber-100 text-amber-800',
   Approved: 'bg-[#DCFCE7] text-[#166534]',
 };
+
+// Kolom yang bisa disortir. Overtime/Insentif/Kompensasi sengaja tidak
+// masuk karena kolom itu input aktif yang sedang diedit per baris.
+const SORT_COLUMNS = {
+  nama: { get: (i) => (i.employees_master?.nama || '').toLowerCase() },
+  posisi: { get: (i) => (i.employees_master?.posisi || '').toLowerCase() },
+  gaji_pokok: { get: (i) => Number(i.gaji_pokok) || 0 },
+  allowance: { get: (i) => Number(i.allowance) || 0 },
+  penalty: { get: (i) => Number(i.penalty) || 0 },
+  pph21: { get: (i) => Number(i.pph21) || 0 },
+  thp: { get: (i) => Number(i.take_home_pay) || 0 },
+};
+
+function SortableHeader({ colKey, label, sortField, sortDir, onSort, align }) {
+  const active = sortField === colKey;
+  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className={`px-4 py-3 font-medium ${align === 'right' ? 'text-right' : ''}`}>
+      <button
+        type="button"
+        onClick={() => onSort(colKey)}
+        className={`flex items-center gap-1.5 hover:text-black transition-colors ${align === 'right' ? 'ml-auto' : ''} ${active ? 'text-black' : ''}`}
+      >
+        {align === 'right' && <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />}
+        {label}
+        {align !== 'right' && <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />}
+      </button>
+    </th>
+  );
+}
 
 const MONTH_NAMES = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -97,6 +127,8 @@ export default function PayrollRunDetailPage() {
   const [confirmIncomplete, setConfirmIncomplete] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState(null);
+  const [sortField, setSortField] = useState('nama');
+  const [sortDir, setSortDir] = useState('asc');
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -242,6 +274,29 @@ export default function PayrollRunDetailPage() {
     [items]
   );
   const hasIncomplete = useMemo(() => items.some((i) => i.incomplete), [items]);
+
+  const sortedItems = useMemo(() => {
+    const getValue = SORT_COLUMNS[sortField]?.get;
+    if (!getValue) return items;
+
+    const sorted = [...items].sort((a, b) => {
+      const va = getValue(a);
+      const vb = getValue(b);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return sortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [items, sortField, sortDir]);
+
+  const handleSort = (colKey) => {
+    if (sortField === colKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(colKey);
+      setSortDir('asc');
+    }
+  };
   const approvingWithIssue = statusDraft === 'Approved' && run?.status !== 'Approved' && hasIncomplete;
 
   // Generate/update entry Payslip Portal untuk tiap item yang employee-nya
@@ -517,22 +572,22 @@ export default function PayrollRunDetailPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
-                <th className="px-4 py-3 font-medium">Nama</th>
-                <th className="px-4 py-3 font-medium">Posisi</th>
-                <th className="px-4 py-3 font-medium text-right">Gaji Pokok</th>
-                <th className="px-4 py-3 font-medium text-right">Allowance</th>
+                <SortableHeader colKey="nama" label="Nama" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="posisi" label="Posisi" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="gaji_pokok" label="Gaji Pokok" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                <SortableHeader colKey="allowance" label="Allowance" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
                 <th className="px-4 py-3 font-medium text-right">Overtime</th>
                 <th className="px-4 py-3 font-medium text-right">Insentif</th>
                 <th className="px-4 py-3 font-medium text-right">Kompensasi</th>
-                <th className="px-4 py-3 font-medium text-right">Penalty</th>
-                <th className="px-4 py-3 font-medium text-right">PPh21</th>
-                <th className="px-4 py-3 font-medium text-right">THP</th>
+                <SortableHeader colKey="penalty" label="Penalty" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                <SortableHeader colKey="pph21" label="PPh21" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                <SortableHeader colKey="thp" label="THP" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
                 <th className="px-4 py-3 font-medium">Slip</th>
                 <th className="px-4 py-3 font-medium">Aksi</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
+              {sortedItems.map((item) => (
                 <tr key={item.id} className="border-b border-[#E0E0E0] last:border-0">
                   <td className="px-4 py-3 text-black">{item.employees_master?.nama || '—'}</td>
                   <td className="px-4 py-3 text-[#6B6B6B]">{item.employees_master?.posisi || '—'}</td>

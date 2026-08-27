@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from 'react';
 import Link from 'next/link';
+import { ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 
 const emptyForm = {
@@ -49,6 +50,31 @@ async function findUniqueSlug(supabase, baseSlug, excludeId = null) {
   }
 }
 
+// Kolom yang bisa disortir — "Pelamar" pakai applicantCounts dari luar,
+// jadi get() menerima ctx berisi map itu. Baris "Umum" (fixed) tidak ikut disortir.
+const SORT_COLUMNS = {
+  judul: { get: (job) => (job.title || '').toLowerCase() },
+  pelamar: { get: (job, ctx) => ctx.applicantCounts[job.id] || 0 },
+  status: { get: (job) => (job.is_active ? 1 : 0) },
+};
+
+function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
+  const active = sortField === colKey;
+  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className="px-5 py-3 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(colKey)}
+        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
+      >
+        {label}
+        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />
+      </button>
+    </th>
+  );
+}
+
 export default function JobPortalLowonganPage() {
   const supabase = createClient();
 
@@ -65,6 +91,8 @@ export default function JobPortalLowonganPage() {
   const [formError, setFormError] = useState(null);
   const [togglingId, setTogglingId] = useState(null);
   const [duplicatingId, setDuplicatingId] = useState(null);
+  const [sortField, setSortField] = useState(null);
+  const [sortDir, setSortDir] = useState('asc');
 
   const editingId = openId && openId !== 'new' ? openId : null;
 
@@ -481,6 +509,30 @@ export default function JobPortalLowonganPage() {
     </div>
   );
 
+  const sortedListings = useMemo(() => {
+    const getValue = SORT_COLUMNS[sortField]?.get;
+    if (!getValue) return listings;
+
+    const ctx = { applicantCounts };
+    const sorted = [...listings].sort((a, b) => {
+      const va = getValue(a, ctx);
+      const vb = getValue(b, ctx);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return sortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [listings, applicantCounts, sortField, sortDir]);
+
+  const handleSort = (colKey) => {
+    if (sortField === colKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(colKey);
+      setSortDir('asc');
+    }
+  };
+
   const umumCount = applicantCounts.umum || 0;
 
   return (
@@ -521,9 +573,9 @@ export default function JobPortalLowonganPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B] tracking-[0.04em]">
-                  <th className="px-5 py-3 font-medium">Judul Posisi</th>
-                  <th className="px-5 py-3 font-medium">Pelamar</th>
-                  <th className="px-5 py-3 font-medium">Status</th>
+                  <SortableHeader colKey="judul" label="Judul Posisi" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                  <SortableHeader colKey="pelamar" label="Pelamar" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                  <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                   <th className="px-5 py-3 font-medium">Aksi</th>
                 </tr>
               </thead>
@@ -552,7 +604,7 @@ export default function JobPortalLowonganPage() {
                   <td className="px-5 py-3.5 text-xs text-[#AAA]">—</td>
                 </tr>
 
-                {listings.map((job) => (
+                {sortedListings.map((job) => (
                   <Fragment key={job.id}>
                     <tr ref={(el) => (rowRefs.current[job.id] = el)}>
                       <td className="px-5 py-3.5 text-black">

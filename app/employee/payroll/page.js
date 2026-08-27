@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { X, Plus, Pencil, Trash2, Calculator } from 'lucide-react';
+import { X, Plus, Pencil, Trash2, Calculator, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
@@ -82,6 +82,36 @@ function totalTunjangan(row) {
     0
   );
   return (Number(row.tunjangan) || 0) + komponenTotal;
+}
+
+// Kolom yang bisa disortir — pola sama seperti app/employee/list. ctx berisi
+// clientName untuk resolve nama klien dari client_id.
+const SORT_COLUMNS = {
+  nama: { get: (row) => (row.employees?.nama || row.nama || '').toLowerCase() },
+  klien: { get: (row, ctx) => ctx.clientName(row.client_id).toLowerCase() },
+  posisi: { get: (row) => (row.posisi || '').toLowerCase() },
+  status: { get: (row) => row.status || '' },
+  akun_absensi: { get: (row) => (row.linked_employee_id ? 1 : 0) },
+  gaji_pokok: { get: (row) => Number(row.gaji_pokok) || 0 },
+  allowance: { get: (row) => totalTunjangan(row) },
+};
+
+function SortableHeader({ colKey, label, sortField, sortDir, onSort, align }) {
+  const active = sortField === colKey;
+  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className={`px-4 py-3 font-medium ${align === 'right' ? 'text-right' : ''}`}>
+      <button
+        type="button"
+        onClick={() => onSort(colKey)}
+        className={`flex items-center gap-1.5 hover:text-black transition-colors ${align === 'right' ? 'ml-auto' : ''} ${active ? 'text-black' : ''}`}
+      >
+        {align === 'right' && <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />}
+        {label}
+        {align !== 'right' && <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />}
+      </button>
+    </th>
+  );
 }
 
 function objToPairs(obj) {
@@ -451,6 +481,8 @@ export default function PayrollManagerPage() {
   const [loadError, setLoadError] = useState(null);
   const [filterClient, setFilterClient] = useState('');
   const [periode, setPeriode] = useState(currentMonthValue());
+  const [sortField, setSortField] = useState('nama');
+  const [sortDir, setSortDir] = useState('asc');
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -507,9 +539,30 @@ export default function PayrollManagerPage() {
   const clientName = (id) => clients.find((c) => c.id === id)?.nama_perusahaan || '—';
 
   const filteredEmployees = useMemo(() => {
-    if (!filterClient) return employees;
-    return employees.filter((e) => e.client_id === filterClient);
-  }, [employees, filterClient]);
+    const base = filterClient ? employees.filter((e) => e.client_id === filterClient) : employees;
+
+    const ctx = { clientName };
+    const getValue = SORT_COLUMNS[sortField]?.get;
+    if (!getValue) return base;
+
+    const sorted = [...base].sort((a, b) => {
+      const va = getValue(a, ctx);
+      const vb = getValue(b, ctx);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return sortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [employees, filterClient, sortField, sortDir, clientName]);
+
+  const handleSort = (colKey) => {
+    if (sortField === colKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(colKey);
+      setSortDir('asc');
+    }
+  };
 
   const openAdd = () => {
     setForm(EMPTY_FORM);
@@ -645,13 +698,13 @@ export default function PayrollManagerPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
-                <th className="px-4 py-3 font-medium">Nama</th>
-                <th className="px-4 py-3 font-medium">Klien</th>
-                <th className="px-4 py-3 font-medium">Posisi</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Akun Absensi</th>
-                <th className="px-4 py-3 font-medium text-right">Gaji Pokok</th>
-                <th className="px-4 py-3 font-medium text-right">Allowance</th>
+                <SortableHeader colKey="nama" label="Nama" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="klien" label="Klien" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="posisi" label="Posisi" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="akun_absensi" label="Akun Absensi" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="gaji_pokok" label="Gaji Pokok" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                <SortableHeader colKey="allowance" label="Allowance" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>

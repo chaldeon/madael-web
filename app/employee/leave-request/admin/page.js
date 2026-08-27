@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { Check, X as XIcon } from 'lucide-react';
+import { Check, X as XIcon, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { notifyEmployee } from '@/lib/notify';
@@ -35,12 +35,47 @@ function StatusBadge({ status }) {
   );
 }
 
+// Kolom yang bisa disortir — pola sama seperti app/employee/list. ctx berisi
+// map turunan (empById, hariKerjaByEmpId, masterByEmpId) yang dibutuhkan
+// untuk menghitung Hari Kerja dan Sisa Kuota per baris.
+const SORT_COLUMNS = {
+  nama: { get: (r, ctx) => (ctx.empById[r.employee_id]?.nama || '').toLowerCase() },
+  periode: { get: (r) => r.tanggal_mulai || '' },
+  hari_kerja: { get: (r, ctx) => hitungHariKerja(r.tanggal_mulai, r.tanggal_selesai, ctx.hariKerjaByEmpId[r.employee_id]) },
+  sisa_kuota: {
+    get: (r, ctx) => {
+      const sisa = hitungSisaCuti(ctx.masterByEmpId[r.employee_id]);
+      return sisa ? sisa.sisa : -1;
+    },
+  },
+  status: { get: (r) => r.status || '' },
+};
+
+function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
+  const active = sortField === colKey;
+  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className="px-4 py-3 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(colKey)}
+        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
+      >
+        {label}
+        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />
+      </button>
+    </th>
+  );
+}
+
 export default function LeaveRequestAdminPage() {
   const supabase = createClient();
   const { status, employee } = useModuleAccess('leave_request_admin');
   const isSuperadmin = !!employee?.is_superadmin;
 
   const [statusFilter, setStatusFilter] = useState('pending');
+  const [sortField, setSortField] = useState('periode');
+  const [sortDir, setSortDir] = useState('desc');
   const [employees, setEmployees] = useState([]);
   const [requests, setRequests] = useState([]);
   const [schedules, setSchedules] = useState([]); // work_schedule rows
@@ -102,9 +137,30 @@ export default function LeaveRequestAdminPage() {
   }, [masterList]);
 
   const rows = useMemo(() => {
-    if (statusFilter === 'all') return requests;
-    return requests.filter((r) => r.status === statusFilter);
-  }, [requests, statusFilter]);
+    const filtered = statusFilter === 'all' ? requests : requests.filter((r) => r.status === statusFilter);
+
+    const ctx = { empById, hariKerjaByEmpId, masterByEmpId };
+    const getValue = SORT_COLUMNS[sortField]?.get;
+    if (!getValue) return filtered;
+
+    const sorted = [...filtered].sort((a, b) => {
+      const va = getValue(a, ctx);
+      const vb = getValue(b, ctx);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return sortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [requests, statusFilter, sortField, sortDir, empById, hariKerjaByEmpId, masterByEmpId]);
+
+  const handleSort = (colKey) => {
+    if (sortField === colKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(colKey);
+      setSortDir('asc');
+    }
+  };
 
   const handleDecision = async (row, decision) => {
     setActionError(null);
@@ -233,12 +289,12 @@ export default function LeaveRequestAdminPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
-                <th className="px-4 py-3 font-medium">Nama</th>
-                <th className="px-4 py-3 font-medium">Periode</th>
-                <th className="px-4 py-3 font-medium">Hari Kerja</th>
-                <th className="px-4 py-3 font-medium">Sisa Kuota</th>
+                <SortableHeader colKey="nama" label="Nama" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="periode" label="Periode" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="hari_kerja" label="Hari Kerja" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="sisa_kuota" label="Sisa Kuota" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-4 py-3 font-medium">Alasan</th>
-                <th className="px-4 py-3 font-medium">Status</th>
+                <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
