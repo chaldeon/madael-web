@@ -2,10 +2,10 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { computeSnapshot } from '@/lib/payroll/runSnapshot';
 import LoadingState from '@/components/LoadingState';
@@ -23,6 +23,31 @@ const STATUS_STYLE = {
   Approved: 'bg-[#DCFCE7] text-[#166534]',
 };
 
+// Kolom yang bisa disortir — pola sama seperti app/employee/list. ctx berisi
+// runs dan employeeCounts untuk resolve status/jumlah per klien.
+const SORT_COLUMNS = {
+  klien: { get: (client) => (client.nama_perusahaan || '').toLowerCase() },
+  jumlah: { get: (client, ctx) => ctx.employeeCounts[client.id] || 0 },
+  status: { get: (client, ctx) => ctx.runs[client.id]?.status || '' },
+};
+
+function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
+  const active = sortField === colKey;
+  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className="px-4 py-3 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(colKey)}
+        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
+      >
+        {label}
+        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />
+      </button>
+    </th>
+  );
+}
+
 export default function PayrollRunListPage() {
   const supabase = createClient();
   const router = useRouter();
@@ -35,6 +60,8 @@ export default function PayrollRunListPage() {
   const [loadError, setLoadError] = useState(null);
   const [creatingClientId, setCreatingClientId] = useState(null);
   const [createError, setCreateError] = useState(null);
+  const [sortField, setSortField] = useState('klien');
+  const [sortDir, setSortDir] = useState('asc');
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -118,6 +145,30 @@ export default function PayrollRunListPage() {
     router.push(`/employee/payroll/run/${run.id}`);
   };
 
+  const sortedClients = useMemo(() => {
+    const ctx = { runs, employeeCounts };
+    const getValue = SORT_COLUMNS[sortField]?.get;
+    if (!getValue) return clients;
+
+    const sorted = [...clients].sort((a, b) => {
+      const va = getValue(a, ctx);
+      const vb = getValue(b, ctx);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return sortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [clients, runs, employeeCounts, sortField, sortDir]);
+
+  const handleSort = (colKey) => {
+    if (sortField === colKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(colKey);
+      setSortDir('asc');
+    }
+  };
+
   const selectClass =
     'border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
 
@@ -165,14 +216,14 @@ export default function PayrollRunListPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
-                <th className="px-4 py-3 font-medium">Klien</th>
-                <th className="px-4 py-3 font-medium">Jumlah Employee</th>
-                <th className="px-4 py-3 font-medium">Status</th>
+                <SortableHeader colKey="klien" label="Klien" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="jumlah" label="Jumlah Employee" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody>
-              {clients.map((client) => {
+              {sortedClients.map((client) => {
                 const run = runs[client.id];
                 const count = employeeCounts[client.id] || 0;
                 return (

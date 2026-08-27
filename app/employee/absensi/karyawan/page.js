@@ -100,6 +100,14 @@ const JADWAL_SORT_COLUMNS = {
   jam_pulang: { label: 'Jam Pulang', get: (r) => r.sched?.jam_pulang || '' },
 };
 
+const REKAP_SORT_COLUMNS = {
+  nama: { label: 'Nama', get: (r) => (r.emp.nama || '').toLowerCase() },
+  perusahaan: { label: 'Perusahaan', get: (r) => (r.emp.companies?.nama_perusahaan || '').toLowerCase() },
+  hadir: { label: 'Total Hadir', get: (r) => r.totalHadir },
+  telat: { label: 'Total Telat', get: (r) => r.totalTelat },
+  tidak_hadir: { label: 'Tidak Hadir', get: (r) => (r.totalTidakHadir === null ? -1 : r.totalTidakHadir) },
+};
+
 function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
   const active = sortField === colKey;
   const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
@@ -152,6 +160,8 @@ export default function SemuaKaryawanPage() {
   const [rekapLoading, setRekapLoading] = useState(false);
   const [rekapError, setRekapError] = useState(null);
   const [rekapLoadedMonth, setRekapLoadedMonth] = useState(null);
+  const [rekapSortField, setRekapSortField] = useState('nama');
+  const [rekapSortDir, setRekapSortDir] = useState('asc');
 
   // ---- Approval Koreksi ----
   const [koreksiStatusFilter, setKoreksiStatusFilter] = useState('pending');
@@ -286,6 +296,15 @@ export default function SemuaKaryawanPage() {
     }
   };
 
+  const handleRekapSort = (colKey) => {
+    if (rekapSortField === colKey) {
+      setRekapSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setRekapSortField(colKey);
+      setRekapSortDir('asc');
+    }
+  };
+
   const openEditJadwal = (emp) => {
     const existing = schedules[emp.id];
     setJadwalForm(existing
@@ -340,7 +359,7 @@ export default function SemuaKaryawanPage() {
       ? employees
       : employees.filter((e) => e.id === rekapEmployeeFilter);
 
-    return list.map((emp) => {
+    const computed = list.map((emp) => {
       const empAtt = attendance.filter((a) => a.employee_id === emp.id);
       const totalHadir = empAtt.filter((a) => a.clock_in).length;
       const totalTelat = empAtt.filter((a) => a.status_telat).length;
@@ -353,7 +372,19 @@ export default function SemuaKaryawanPage() {
         : Math.max(0, scheduledWorkdays - totalHadir);
       return { emp, totalHadir, totalTelat, totalTidakHadir };
     });
-  }, [employees, attendance, schedules, rekapEmployeeFilter, monthValue]);
+
+    const getValue = REKAP_SORT_COLUMNS[rekapSortField]?.get;
+    if (!getValue) return computed;
+
+    const sorted = [...computed].sort((a, b) => {
+      const va = getValue(a);
+      const vb = getValue(b);
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    });
+    return rekapSortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [employees, attendance, schedules, rekapEmployeeFilter, monthValue, rekapSortField, rekapSortDir]);
 
   // ---- Approval Koreksi handlers ----
   const handleApproveKoreksi = async (row) => {
@@ -648,11 +679,11 @@ export default function SemuaKaryawanPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
-                        <th className="px-4 py-3 font-medium">Nama</th>
-                        <th className="px-4 py-3 font-medium">Perusahaan</th>
-                        <th className="px-4 py-3 font-medium">Total Hadir</th>
-                        <th className="px-4 py-3 font-medium">Total Telat</th>
-                        <th className="px-4 py-3 font-medium">Tidak Hadir</th>
+                        <SortableHeader colKey="nama" label="Nama" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+                        <SortableHeader colKey="perusahaan" label="Perusahaan" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+                        <SortableHeader colKey="hadir" label="Total Hadir" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+                        <SortableHeader colKey="telat" label="Total Telat" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+                        <SortableHeader colKey="tidak_hadir" label="Tidak Hadir" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
                         <th className="px-4 py-3 font-medium"></th>
                       </tr>
                     </thead>

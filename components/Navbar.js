@@ -48,20 +48,20 @@ export default function Navbar() {
 
       {/* ===== Desktop nav (>= lg) ===== */}
       <ul className="hidden lg:flex items-center gap-8 list-none">
-        <li>
+        <li className="flex items-center h-5">
           <Link
             href="/"
-            className={`text-sm tracking-[0.02em] no-underline transition-colors ${
+            className={`text-sm leading-5 tracking-[0.02em] no-underline transition-colors ${
               isHome ? 'text-black' : 'text-[#6B6B6B] hover:text-black'
             }`}
           >
             {lang === 'id' ? 'Beranda' : 'Home'}
           </Link>
         </li>
-        <li>
+        <li className="flex items-center h-5">
           <Link
             href="/about"
-            className={`text-sm tracking-[0.02em] no-underline transition-colors ${
+            className={`text-sm leading-5 tracking-[0.02em] no-underline transition-colors ${
               isAbout ? 'text-black' : 'text-[#6B6B6B] hover:text-black'
             }`}
           >
@@ -70,10 +70,10 @@ export default function Navbar() {
         </li>
 
         {SHOW_KARIR && (
-          <li>
+          <li className="flex items-center h-5">
             <Link
               href="/karir"
-              className={`text-sm tracking-[0.02em] no-underline transition-colors ${
+              className={`text-sm leading-5 tracking-[0.02em] no-underline transition-colors ${
                 pathname === '/karir' ? 'text-black' : 'text-[#6B6B6B] hover:text-black'
               }`}
             >
@@ -83,10 +83,10 @@ export default function Navbar() {
         )}
 
         {/* Dropdown "Alat" — hover trigger */}
-        <li className="relative group">
+        <li className="relative group flex items-center h-5">
           <button
             type="button"
-            className={`flex items-center gap-1 text-sm tracking-[0.02em] bg-transparent border-0 cursor-pointer transition-colors ${
+            className={`flex items-center gap-1 text-sm leading-5 tracking-[0.02em] bg-transparent border-0 cursor-pointer transition-colors ${
               isToolsActive ? 'text-black' : 'text-[#6B6B6B] hover:text-black'
             }`}
           >
