@@ -117,6 +117,30 @@ export async function POST(request) {
       }
     }
 
+    // Fase 3.1 — otomatis buat 1 baris employees_master kosong dan langsung
+    // ter-link ke akun baru ini, supaya admin tidak perlu lagi pilih dari
+    // dropdown "Nama" di Payroll Manager (baris payroll sudah ada & sudah
+    // ter-link sejak titik penciptaan akun). Ini menutup akar masalah #1/#2/#3
+    // di TODO alur data karyawan. Kegagalan di sini tidak fatal — employee
+    // tetap berhasil dibuat, superadmin tinggal tambah manual lewat Payroll
+    // Manager kalau baris draft ini gagal dibuat.
+    const { error: masterError } = await admin.from('employees_master').insert([
+      {
+        nama: empRow.nama,
+        client_id: empRow.client_id,
+        posisi: '',
+        status: 'PHL',
+        gaji_pokok: 0,
+        tunjangan: 0,
+        komponen_lain: {},
+        linked_employee_id: empRow.id,
+        jatah_cuti_tahunan: 12,
+      },
+    ]);
+    if (masterError) {
+      console.error('Gagal buat draft employees_master:', masterError.message);
+    }
+
     return NextResponse.json(
       { success: true, employee: empRow, tempPassword },
       { status: 200 }

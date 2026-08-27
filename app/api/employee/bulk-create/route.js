@@ -176,6 +176,29 @@ export async function POST(request) {
         await admin.from('employee_modules').insert(defaultRows);
       }
 
+      // Fase 3.1 — sama seperti create/route.js: satu baris employees_master
+      // draft per employee baru, langsung ter-link. Diproses satu-satu di
+      // dalam loop yang sudah sequential ini (lihat komentar di atas fungsi),
+      // jadi tidak ada risiko dobel-jalan per baris Excel. Kegagalan di sini
+      // tidak menggagalkan baris employee-nya sendiri — hanya dicatat, admin
+      // bisa tambah manual lewat Payroll Manager kalau perlu.
+      const { error: masterError } = await admin.from('employees_master').insert([
+        {
+          nama,
+          client_id: clientId,
+          posisi: '',
+          status: 'PHL',
+          gaji_pokok: 0,
+          tunjangan: 0,
+          komponen_lain: {},
+          linked_employee_id: empRow.id,
+          jatah_cuti_tahunan: 12,
+        },
+      ]);
+      if (masterError) {
+        console.error(`Gagal buat draft employees_master untuk baris ${rowNum}:`, masterError.message);
+      }
+
       results.push({
         row: rowNum,
         email,

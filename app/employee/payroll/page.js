@@ -181,6 +181,7 @@ function SelectField({ label, value, onChange, options }) {
 
 function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onSubmit, saving, saveError }) {
   const set = (key) => (val) => setForm((f) => ({ ...f, [key]: val }));
+  const [pendingConfirm, setPendingConfirm] = useState(false);
 
   const updatePair = (idx, field, val) => {
     setForm((f) => {
@@ -204,24 +205,37 @@ function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onS
         </h2>
 
         <div className="grid grid-cols-2 gap-4 mb-4">
-          <SelectField
-            label="Nama"
-            value={form.linked_employee_id}
-            onChange={(val) => {
-              const picked = linkableEmployees.find((e) => e.id === val);
-              setForm((f) => ({
-                ...f,
-                linked_employee_id: val,
-                nama: picked?.nama || '',
-                // Perusahaan sudah dipilih di Employee List — pakai itu sebagai
-                // default di sini, tapi jangan timpa kalau Klien di baris ini
-                // udah sengaja diisi beda (mis. employee lama yang belum
-                // migrasi/beda dari perusahaan akun login-nya).
-                client_id: f.client_id || picked?.client_id || '',
-              }));
-            }}
-            options={[{ value: '', label: '— Pilih Nama —' }, ...linkableEmployees.map((e) => ({ value: e.id, label: e.nama }))]}
-          />
+          <div>
+            <SelectField
+              label="Akun Absensi (Nama)"
+              value={form.linked_employee_id}
+              onChange={(val) => {
+                const picked = linkableEmployees.find((e) => e.id === val);
+                setForm((f) => ({
+                  ...f,
+                  linked_employee_id: val,
+                  // Kalau memilih akun, nama ikut akun itu (satu sumber
+                  // kebenaran = Employee List). Kalau balik ke "tidak ada
+                  // akun", nama dikosongkan lagi supaya admin sadar harus
+                  // isi manual, bukan diam-diam mempertahankan nama akun
+                  // yang baru saja dilepas.
+                  nama: picked?.nama || '',
+                  client_id: f.client_id || picked?.client_id || '',
+                }));
+                setPendingConfirm(false);
+              }}
+              options={[{ value: '', label: '— Tidak ada akun (payroll-only) —' }, ...linkableEmployees.map((e) => ({ value: e.id, label: e.nama }))]}
+            />
+            {form.linked_employee_id ? (
+              <p className="text-xs text-[#9A9A9A] mt-1">
+                Nama: <span className="font-medium text-black">{form.nama || '—'}</span> (ikut Employee List, tidak bisa diketik manual di sini)
+              </p>
+            ) : (
+              <div className="mt-2">
+                <TextField label="Nama (manual, tanpa akun)" value={form.nama} onChange={set('nama')} />
+              </div>
+            )}
+          </div>
           <SelectField
             label="Klien"
             value={form.client_id}
@@ -244,7 +258,7 @@ function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onS
         </div>
 
         <p className="text-xs text-[#9A9A9A] -mt-2 mb-4">
-          Ini satu-satunya tempat isi/ubah NPWP, PTKP, JKK, no. rekening & BPJS — Payslip &amp; Payroll Run otomatis narik dari sini, tidak diinput ulang di sana. "Nama" wajib dipilih dari akun yang sudah ada — itu yang menyambungkan baris ini ke semua modul lain (Payslip, Absensi, dst).
+          Ini satu-satunya tempat isi/ubah NPWP, PTKP, JKK, no. rekening &amp; BPJS — Payslip &amp; Payroll Run otomatis narik dari sini, tidak diinput ulang di sana. Kalau employee ini punya akun absensi, pilih dari dropdown "Akun Absensi" — itu yang menyambungkan baris ini ke semua modul lain (Payslip, Absensi, dst). Kalau tidak punya akun (payroll-only), isi nama manual.
         </p>
 
         <div className="mb-6">
@@ -283,6 +297,28 @@ function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onS
           </div>
         </div>
 
+        {pendingConfirm && (
+          <div className="flex flex-col gap-2 bg-amber-50 border border-amber-300 text-amber-800 text-xs px-3 py-3 mb-4">
+            <p>
+              Employee ini belum terhubung ke akun absensi — sisa cuti dan penalty telat tidak akan
+              terhitung otomatis untuk employee ini. Lanjutkan tanpa link akun?
+            </p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setPendingConfirm(false)} className="text-[#6B6B6B] hover:text-black">
+                Batal
+              </button>
+              <button
+                onClick={() => {
+                  setPendingConfirm(false);
+                  onSubmit();
+                }}
+                className="font-medium underline hover:text-amber-900"
+              >
+                Lanjutkan Tanpa Link
+              </button>
+            </div>
+          </div>
+        )}
         {saveError && (
           <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 mb-4">
             <span>{saveError}</span>
@@ -296,8 +332,14 @@ function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onS
             Batal
           </button>
           <button
-            onClick={onSubmit}
-            disabled={saving || !form.linked_employee_id}
+            onClick={() => {
+              if (!form.linked_employee_id) {
+                setPendingConfirm(true);
+                return;
+              }
+              onSubmit();
+            }}
+            disabled={saving || !form.nama.trim()}
             className="bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors disabled:opacity-40"
           >
             {saving ? 'Menyimpan...' : 'Simpan'}
@@ -510,20 +552,26 @@ export default function PayrollManagerPage() {
     return () => { ignore = true; };
   }, [supabase]);
 
+  const [scheduledIds, setScheduledIds] = useState(new Set());
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const [clRes, empRes, linkableRes] = await Promise.all([
+    const [clRes, empRes, linkableRes, scheduleRes] = await Promise.all([
       supabase.from('companies').select('id, nama_perusahaan').order('nama_perusahaan', { ascending: true }),
       supabase
         .from('employees_master')
         .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan, nama_rekening, no_rekening, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, created_at, employees:linked_employee_id ( nama )')
         .order('created_at', { ascending: false }),
       supabase.from('employees').select('id, nama, client_id').eq('status', 'Aktif').order('nama'),
+      // Fase 1.5 — dipakai hanya untuk badge "Jadwal belum diisi" di tabel
+      // utama; tidak butuh detail jam, cukup tahu employee_id mana saja
+      // yang sudah punya baris work_schedule.
+      supabase.from('work_schedule').select('employee_id'),
     ]);
 
-    if (clRes.error || empRes.error || linkableRes.error) {
-      setLoadError((clRes.error || empRes.error || linkableRes.error).message || 'Gagal memuat data payroll.');
+    if (clRes.error || empRes.error || linkableRes.error || scheduleRes.error) {
+      setLoadError((clRes.error || empRes.error || linkableRes.error || scheduleRes.error).message || 'Gagal memuat data payroll.');
       setLoading(false);
       return;
     }
@@ -531,12 +579,27 @@ export default function PayrollManagerPage() {
     setClients(clRes.data || []);
     setEmployees(empRes.data || []);
     setLinkableEmployees(linkableRes.data || []);
+    setScheduledIds(new Set((scheduleRes.data || []).map((r) => r.employee_id)));
     setLoading(false);
   }, [supabase]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   const clientName = (id) => clients.find((c) => c.id === id)?.nama_perusahaan || '—';
+
+  // Fase 1.1 — exclude akun yang sudah dipakai sebagai linked_employee_id di
+  // baris employees_master LAIN dari dropdown Nama, supaya satu akun tidak
+  // bisa dobel-link. Baris yang sedang diedit (form.id) dikecualikan dari
+  // daftar "sudah dipakai" itu sendiri, supaya akun yang memang sudah dia
+  // pakai tetap muncul (dan tetap terpilih) saat form dibuka untuk edit.
+  const availableLinkableEmployees = useMemo(() => {
+    const usedIds = new Set(
+      employees
+        .filter((row) => row.linked_employee_id && row.id !== form.id)
+        .map((row) => row.linked_employee_id)
+    );
+    return linkableEmployees.filter((emp) => !usedIds.has(emp.id));
+  }, [linkableEmployees, employees, form.id]);
 
   const filteredEmployees = useMemo(() => {
     const base = filterClient ? employees.filter((e) => e.client_id === filterClient) : employees;
@@ -572,7 +635,7 @@ export default function PayrollManagerPage() {
   const openEdit = (row) => {
     setForm({
       id: row.id,
-      nama: row.nama,
+      nama: row.employees?.nama || row.nama,
       client_id: row.client_id || '',
       posisi: row.posisi || '',
       status: row.status || 'PHL',
@@ -594,7 +657,7 @@ export default function PayrollManagerPage() {
   };
 
   const handleSubmit = async () => {
-    if (!form.linked_employee_id || !form.nama.trim()) return;
+    if (!form.nama.trim()) return;
     setSaving(true);
     setSaveError(null);
 
@@ -725,9 +788,18 @@ export default function PayrollManagerPage() {
                   </td>
                   <td className="px-4 py-3">
                     {row.linked_employee_id ? (
-                      <span className="inline-block px-2.5 py-1 text-[11px] font-medium rounded bg-[#E6F4EA] text-[#1E7A34]">
-                        Terhubung
-                      </span>
+                      scheduledIds.has(row.linked_employee_id) ? (
+                        <span className="inline-block px-2.5 py-1 text-[11px] font-medium rounded bg-[#E6F4EA] text-[#1E7A34]">
+                          Terhubung
+                        </span>
+                      ) : (
+                        <span
+                          title="Akun sudah terhubung tapi belum ada Jadwal Kerja (jam masuk/pulang) — penalty keterlambatan akan dianggap Rp0 sampai jadwal diisi."
+                          className="inline-block px-2.5 py-1 text-[11px] font-medium rounded bg-[#FDE8E8] text-[#B91C1C] cursor-help"
+                        >
+                          Jadwal belum diisi
+                        </span>
+                      )
                     ) : (
                       <span
                         title="Sisa kuota cuti & referensi kehadiran tidak akan muncul untuk employee ini sampai di-link ke akun absensi (klik Pencil untuk isi 'Akun Absensi')."
@@ -769,7 +841,7 @@ export default function PayrollManagerPage() {
       {modalOpen && (
         <EmployeeModal
           clients={clients}
-          linkableEmployees={linkableEmployees}
+          linkableEmployees={availableLinkableEmployees}
           form={form}
           setForm={setForm}
           onClose={() => setModalOpen(false)}
