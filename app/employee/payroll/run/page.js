@@ -99,6 +99,47 @@ export default function PayrollRunListPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  const [pendingDraft, setPendingDraft] = useState(null); // { client, emps, skippedNames, skippedIds }
+
+  // Melakukan pembuatan run + snapshot yang sebenarnya. excludeIds adalah
+  // id employees_master yang di-skip karena akun absensinya Nonaktif
+  // (hasil konfirmasi admin di modal ringkasan, Fase 1.4).
+  const createDraft = async (client, emps, excludeIds = []) => {
+    const empsToRun = excludeIds.length
+      ? emps.filter((e) => !excludeIds.includes(e.id))
+      : emps;
+
+    if (empsToRun.length === 0) {
+      setCreatingClientId(null);
+      setCreateError(`Semua employee klien "${client.nama_perusahaan}" dilewati (akun Nonaktif) — tidak ada yang bisa dimasukkan ke draft.`);
+      return;
+    }
+
+    const { data: run, error: runError } = await supabase
+      .from('payroll_runs')
+      .insert([{ client_id: client.id, periode, status: 'Draft' }])
+      .select()
+      .single();
+
+    if (runError) {
+      setCreatingClientId(null);
+      setCreateError(`Gagal membuat payroll run: ${runError.message}`);
+      return;
+    }
+
+    const snapshots = await Promise.all(empsToRun.map((e) => computeSnapshot(supabase, e, periode)));
+    const itemsPayload = snapshots.map((s) => ({ ...s, payroll_run_id: run.id }));
+
+    const { error: itemsError } = await supabase.from('payroll_run_items').insert(itemsPayload);
+    setCreatingClientId(null);
+
+    if (itemsError) {
+      setCreateError(`Run dibuat tapi gagal hitung item: ${itemsError.message}. Buka Detail untuk cek manual.`);
+    }
+
+    router.push(`/employee/payroll/run/${run.id}`);
+  };
+
   const handleBuatDraft = async (client) => {
     setCreatingClientId(client.id);
     setCreateError(null);
@@ -120,29 +161,44 @@ export default function PayrollRunListPage() {
       return;
     }
 
-    const { data: run, error: runError } = await supabase
-      .from('payroll_runs')
-      .insert([{ client_id: client.id, periode, status: 'Draft' }])
-      .select()
-      .single();
+    // Fase 1.4 — cek status akun absensi (employees.status) dari tiap
+    // linked_employee_id sebelum draft dibuat. Employee yang akunnya
+    // Nonaktif (resign/dinonaktifkan) di-exclude dari snapshot secara
+    // default, dan admin diberi ringkasan eksplisit dulu sebelum
+    // lanjut — bukan diam-diam di-skip tanpa pemberitahuan.
+    const linkedIds = emps.map((e) => e.linked_employee_id).filter(Boolean);
+    let nonaktifById = {};
+    if (linkedIds.length > 0) {
+      const { data: linkedAccounts, error: linkedError } = await supabase
+        .from('employees')
+        .select('id, nama, status')
+        .in('id', linkedIds);
 
-    if (runError) {
+      if (linkedError) {
+        setCreatingClientId(null);
+        setCreateError(`Gagal cek status akun absensi: ${linkedError.message}`);
+        return;
+      }
+
+      (linkedAccounts || []).forEach((acc) => {
+        if (acc.status === 'Nonaktif') nonaktifById[acc.id] = acc.nama;
+      });
+    }
+
+    const skipped = emps.filter((e) => e.linked_employee_id && nonaktifById[e.linked_employee_id]);
+
+    if (skipped.length > 0) {
       setCreatingClientId(null);
-      setCreateError(`Gagal membuat payroll run: ${runError.message}`);
+      setPendingDraft({
+        client,
+        emps,
+        skippedIds: skipped.map((e) => e.id),
+        skippedNames: skipped.map((e) => nonaktifById[e.linked_employee_id]),
+      });
       return;
     }
 
-    const snapshots = await Promise.all(emps.map((e) => computeSnapshot(supabase, e, periode)));
-    const itemsPayload = snapshots.map((s) => ({ ...s, payroll_run_id: run.id }));
-
-    const { error: itemsError } = await supabase.from('payroll_run_items').insert(itemsPayload);
-    setCreatingClientId(null);
-
-    if (itemsError) {
-      setCreateError(`Run dibuat tapi gagal hitung item: ${itemsError.message}. Buka Detail untuk cek manual.`);
-    }
-
-    router.push(`/employee/payroll/run/${run.id}`);
+    await createDraft(client, emps);
   };
 
   const sortedClients = useMemo(() => {
@@ -269,6 +325,44 @@ export default function PayrollRunListPage() {
         <AlertTriangle size={14} className="mt-0.5 shrink-0" />
         "Buat Draft" menghitung ulang gaji, BPJS, PPh21, dan penalty semua employee klien ini untuk periode yang dipilih, lalu menyimpannya sebagai snapshot run. Kalau ada perubahan data employee setelah draft dibuat, snapshot ini TIDAK otomatis ikut berubah — hapus dan buat ulang run kalau perlu.
       </div>
+
+      {pendingDraft && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] p-4">
+          <div className="bg-white w-full max-w-[480px] p-6">
+            <h2 className="text-base font-semibold text-black mb-3">Sebagian employee akan dilewati</h2>
+            <p className="text-sm text-[#6B6B6B] mb-3">
+              {pendingDraft.skippedNames.length} employee dilewati karena akun absensinya Nonaktif:
+            </p>
+            <ul className="text-sm text-black list-disc list-inside mb-4 max-h-40 overflow-y-auto">
+              {pendingDraft.skippedNames.map((nama, idx) => (
+                <li key={idx}>{nama}</li>
+              ))}
+            </ul>
+            <p className="text-xs text-[#9A9A9A] mb-5">
+              Employee ini tidak akan ikut masuk ke draft payroll run untuk periode ini. Sisa employee lain tetap diproses seperti biasa.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setPendingDraft(null)}
+                className="px-4 py-2 text-sm text-[#6B6B6B] hover:text-black transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={() => {
+                  const { client, emps, skippedIds } = pendingDraft;
+                  setPendingDraft(null);
+                  setCreatingClientId(client.id);
+                  createDraft(client, emps, skippedIds);
+                }}
+                className="bg-madael-red text-white px-4 py-2 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors"
+              >
+                Lanjutkan Buat Draft
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
