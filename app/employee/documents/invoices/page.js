@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { CheckCircle2, ArrowUp, ArrowDown, ArrowUpDown, Paperclip, X, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
@@ -92,6 +92,9 @@ export default function InvoiceTrackerPage() {
 
   const [updatingId, setUpdatingId] = useState(null);
   const [updateError, setUpdateError] = useState(null);
+
+  const [attachingId, setAttachingId] = useState(null);
+  const [attachError, setAttachError] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -218,6 +221,50 @@ export default function InvoiceTrackerPage() {
     setInvoices((prev) => prev.map((i) => (i.id === data.id ? data : i)));
   };
 
+  const handleAttach = async (row, file) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      setAttachError('Lampiran invoice harus berformat PDF.');
+      return;
+    }
+
+    setAttachError(null);
+    setAttachingId(row.id);
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch(`/api/invoices/${row.id}/attachment`, {
+        method: 'POST',
+        body: formData,
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Gagal mengupload lampiran.');
+      setInvoices((prev) => prev.map((i) => (i.id === body.invoice.id ? body.invoice : i)));
+    } catch (err) {
+      setAttachError(err.message || 'Gagal mengupload lampiran.');
+    } finally {
+      setAttachingId(null);
+    }
+  };
+
+  const handleRemoveAttach = async (row) => {
+    setAttachError(null);
+    setAttachingId(row.id);
+
+    try {
+      const res = await fetch(`/api/invoices/${row.id}/attachment`, { method: 'DELETE' });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Gagal menghapus lampiran.');
+      setInvoices((prev) => prev.map((i) => (i.id === body.invoice.id ? body.invoice : i)));
+    } catch (err) {
+      setAttachError(err.message || 'Gagal menghapus lampiran.');
+    } finally {
+      setAttachingId(null);
+    }
+  };
+
   if (status === 'loading') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
@@ -331,6 +378,7 @@ export default function InvoiceTrackerPage() {
       </div>
 
       {updateError && <p className="text-xs text-red-600 mb-4">{updateError}</p>}
+      {attachError && <p className="text-xs text-red-600 mb-4">{attachError}</p>}
 
       {loading ? (
         <LoadingState label="Memuat invoice..." />
@@ -345,13 +393,14 @@ export default function InvoiceTrackerPage() {
                 <SortableHeader colKey="terbit" label="Terbit" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="lunas" label="Lunas" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <th className="px-4 py-3 font-medium">Lampiran</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-0">
+                  <td colSpan={8} className="p-0">
                     <EmptyState message="Tidak ada invoice yang cocok dengan filter ini." />
                   </td>
                 </tr>
@@ -374,6 +423,40 @@ export default function InvoiceTrackerPage() {
                           <option key={s} value={s}>{STATUS_LABEL[s]}</option>
                         ))}
                       </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      {attachingId === row.id ? (
+                        <Loader2 size={14} className="animate-spin text-[#9A9A9A]" />
+                      ) : row.drive_file_link ? (
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={row.drive_file_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-madael-red hover:text-madael-dark font-medium"
+                          >
+                            <Paperclip size={12} /> Lihat PDF
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveAttach(row)}
+                            className="text-[#9A9A9A] hover:text-red-600"
+                            title="Hapus lampiran"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="inline-flex items-center gap-1 text-xs text-[#6B6B6B] hover:text-black cursor-pointer">
+                          <Paperclip size={12} /> Upload PDF
+                          <input
+                            type="file"
+                            accept="application/pdf"
+                            className="hidden"
+                            onChange={(e) => handleAttach(row, e.target.files?.[0])}
+                          />
+                        </label>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       {row.status !== 'lunas' && (
