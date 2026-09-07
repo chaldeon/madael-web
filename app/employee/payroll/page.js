@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { X, Plus, Pencil, Trash2, Calculator, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { X, Plus, Pencil, Trash2, Calculator, ArrowUp, ArrowDown, ArrowUpDown, Paperclip, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
@@ -533,6 +533,9 @@ export default function PayrollManagerPage() {
 
   const [hitungRow, setHitungRow] = useState(null);
 
+  const [attachingId, setAttachingId] = useState(null);
+  const [attachError, setAttachError] = useState(null);
+
   // Id employee (superadmin) yang lagi login — dipakai untuk activity log,
   // bukan untuk gating akses (itu sudah ditangani PayrollLayout).
   const [actingEmployeeId, setActingEmployeeId] = useState(null);
@@ -561,7 +564,7 @@ export default function PayrollManagerPage() {
       supabase.from('companies').select('id, nama_perusahaan').order('nama_perusahaan', { ascending: true }),
       supabase
         .from('employees_master')
-        .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan, nama_rekening, no_rekening, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, created_at, employees:linked_employee_id ( nama )')
+        .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan, nama_rekening, no_rekening, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, created_at, drive_file_id, drive_file_name, drive_file_link, employees:linked_employee_id ( nama )')
         .order('created_at', { ascending: false }),
       supabase.from('employees').select('id, nama, client_id').eq('status', 'Aktif').order('nama'),
       // Fase 1.5 — dipakai hanya untuk badge "Jadwal belum diisi" di tabel
@@ -705,6 +708,48 @@ export default function PayrollManagerPage() {
     loadData();
   };
 
+  const handleAttach = async (row, file) => {
+    if (!file) return;
+
+    setAttachError(null);
+    setAttachingId(row.id);
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch(`/api/payroll/${row.id}/document`, {
+        method: 'POST',
+        body: formData,
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Gagal mengupload dokumen.');
+      setEmployees((prev) => prev.map((e) => (e.id === body.employee.id ? { ...e, ...body.employee } : e)));
+    } catch (err) {
+      setAttachError(err.message || 'Gagal mengupload dokumen.');
+    } finally {
+      setAttachingId(null);
+    }
+  };
+
+  const handleRemoveAttach = async (row) => {
+    if (!confirm('Hapus dokumen ini? File di Google Drive juga akan dihapus.')) return;
+
+    setAttachError(null);
+    setAttachingId(row.id);
+
+    try {
+      const res = await fetch(`/api/payroll/${row.id}/document`, { method: 'DELETE' });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Gagal menghapus dokumen.');
+      setEmployees((prev) => prev.map((e) => (e.id === body.employee.id ? { ...e, ...body.employee } : e)));
+    } catch (err) {
+      setAttachError(err.message || 'Gagal menghapus dokumen.');
+    } finally {
+      setAttachingId(null);
+    }
+  };
+
   return (
     <div className="max-w-[1100px] mx-auto px-10 py-10">
       <div className="flex items-center justify-between mb-8">
@@ -725,6 +770,7 @@ export default function PayrollManagerPage() {
       </div>
 
       <div className="flex flex-wrap gap-3 mb-4">
+        {attachError && <p className="text-xs text-red-600 w-full">{attachError}</p>}
         <SelectField
           label="Filter Klien"
           value={filterClient}
@@ -768,6 +814,7 @@ export default function PayrollManagerPage() {
                 <SortableHeader colKey="akun_absensi" label="Akun Absensi" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="gaji_pokok" label="Gaji Pokok" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
                 <SortableHeader colKey="allowance" label="Allowance" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                <th className="px-4 py-3 font-medium">Dokumen</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
@@ -811,6 +858,40 @@ export default function PayrollManagerPage() {
                   </td>
                   <td className="px-4 py-3 text-right text-black">{formatRupiah(row.gaji_pokok)}</td>
                   <td className="px-4 py-3 text-right text-black">{formatRupiah(totalTunjangan(row))}</td>
+                  <td className="px-4 py-3">
+                    {attachingId === row.id ? (
+                      <Loader2 size={14} className="animate-spin text-[#9A9A9A]" />
+                    ) : row.drive_file_link ? (
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={row.drive_file_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-madael-red hover:text-madael-dark font-medium"
+                        >
+                          <Paperclip size={12} /> Lihat
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAttach(row)}
+                          className="text-[#9A9A9A] hover:text-red-600"
+                          title="Hapus dokumen"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="inline-flex items-center gap-1 text-xs text-[#6B6B6B] hover:text-black cursor-pointer">
+                        <Paperclip size={12} /> Upload
+                        <input
+                          type="file"
+                          accept="application/pdf,image/jpeg,image/png"
+                          className="hidden"
+                          onChange={(e) => handleAttach(row, e.target.files?.[0])}
+                        />
+                      </label>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-3">
                       <Link
