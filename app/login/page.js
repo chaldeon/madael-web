@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
 
 export default function LoginPage() {
@@ -75,6 +76,13 @@ export default function LoginPage() {
           >
             {loading ? 'Memproses...' : 'Login'}
           </button>
+
+          <Link
+            href="/forgot-password?portal=admin"
+            className="block text-center text-xs text-[#6B6B6B] hover:text-madael-red"
+          >
+            Lupa password?
+          </Link>
         </form>
       </div>
     </section>
