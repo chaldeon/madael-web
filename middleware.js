@@ -34,8 +34,13 @@ export async function middleware(request) {
 
   const { pathname } = request.nextUrl;
   const isAdminRoute = pathname.startsWith('/admin');
+  const PUBLIC_EMPLOYEE_PATHS = [
+    '/employee/login',
+    '/employee/forgot-password',
+    '/employee/reset-password',
+  ];
   const isEmployeeRoute =
-    pathname.startsWith('/employee') && pathname !== '/employee/login';
+    pathname.startsWith('/employee') && !PUBLIC_EMPLOYEE_PATHS.includes(pathname);
 
   if (isAdminRoute && !user) {
     const redirectUrl = request.nextUrl.clone();

@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase-browser';
 import { useLanguage } from '@/context/LanguageContext';
 
-export default function EmployeeLoginPage() {
+function EmployeeLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
@@ -138,5 +138,13 @@ export default function EmployeeLoginPage() {
         </form>
       </div>
     </section>
+  );
+}
+
+export default function EmployeeLoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <EmployeeLoginForm />
+    </Suspense>
   );
 }
