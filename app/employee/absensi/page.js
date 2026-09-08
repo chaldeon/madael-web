@@ -391,7 +391,7 @@ export default function AbsensiPage() {
         <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mb-6">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
           Kamu clock in pada {formatTanggal(forgotClockOut.tanggal)} pukul {formatWaktu(forgotClockOut.clock_in)} tapi belum clock out.
-          Kalau ini kelupaan, hubungi admin untuk koreksi manual.
+          Kalau ini kelupaan, hubungi superadmin untuk koreksi manual.
         </div>
       )}
       {!schedule && (
