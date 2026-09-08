@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase-browser';
 import { useLanguage } from '@/context/LanguageContext';
@@ -118,6 +119,13 @@ export default function EmployeeLoginPage() {
           >
             {loading ? lang === 'id' ? 'Memproses...' : 'Processing...' : lang === 'id' ? 'Masuk' : 'Login'}
           </button>
+
+          <Link
+            href="/forgot-password?portal=employee"
+            className="block text-center text-xs text-[#6B6B6B] hover:text-madael-red"
+          >
+            {lang === 'id' ? 'Lupa password?' : 'Forgot password?'}
+          </Link>
         </form>
       </div>
     </section>

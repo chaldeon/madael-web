@@ -616,7 +616,7 @@ export default function AbsensiPage() {
               value={koreksiForm.tanggal}
               max={todayStr()}
               onChange={(e) => setKoreksiForm((f) => ({ ...f, tanggal: e.target.value }))}
-              className="w-full border border-[#E0E0E0] px-3 py-2 text-sm mb-4 focus:outline-none focus:border-madael-red"
+              className="w-full border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white mb-4 focus:outline-none focus:border-madael-red"
             />
 
             <div className="grid grid-cols-2 gap-3 mb-4">
@@ -626,7 +626,7 @@ export default function AbsensiPage() {
                   type="time"
                   value={koreksiForm.jamMasuk}
                   onChange={(e) => setKoreksiForm((f) => ({ ...f, jamMasuk: e.target.value }))}
-                  className="w-full border border-[#E0E0E0] px-3 py-2 text-sm focus:outline-none focus:border-madael-red"
+                  className="w-full border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red"
                 />
               </div>
               <div>
@@ -635,7 +635,7 @@ export default function AbsensiPage() {
                   type="time"
                   value={koreksiForm.jamPulang}
                   onChange={(e) => setKoreksiForm((f) => ({ ...f, jamPulang: e.target.value }))}
-                  className="w-full border border-[#E0E0E0] px-3 py-2 text-sm focus:outline-none focus:border-madael-red"
+                  className="w-full border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red"
                 />
               </div>
             </div>
@@ -646,7 +646,7 @@ export default function AbsensiPage() {
               onChange={(e) => setKoreksiForm((f) => ({ ...f, alasan: e.target.value }))}
               rows={3}
               placeholder="Contoh: lupa clock in karena HP mati, tapi sudah masuk kerja sejak jam 08.00"
-              className="w-full border border-[#E0E0E0] px-3 py-2 text-sm mb-4 focus:outline-none focus:border-madael-red resize-none"
+              className="w-full border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white mb-4 focus:outline-none focus:border-madael-red resize-none"
             />
 
             <label className="block text-xs font-medium text-[#6B6B6B] mb-1.5">Foto Bukti (wajib)</label>
