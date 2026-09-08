@@ -1,19 +1,22 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase-browser';
 import { useLanguage } from '@/context/LanguageContext';
 
 export default function EmployeeLoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
   const { lang } = useLanguage();
+  const resetSuccess = searchParams.get('reset') === 'success';
 
   useEffect(() => {
     const checkSession = async () => {
@@ -84,6 +87,14 @@ export default function EmployeeLoginPage() {
             : 'Login portal for employees, partners, and other authorized parties of Madael Consult\u2019s internal system.'}
         </p>
 
+        {resetSuccess && (
+          <p className="text-sm text-green-600 text-center mb-4">
+            {lang === 'id'
+              ? 'Password berhasil diubah. Silakan login dengan password baru kamu.'
+              : 'Password changed successfully. Please log in with your new password.'}
+          </p>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label htmlFor="email" className={labelClass}>Email</label>
@@ -107,6 +118,12 @@ export default function EmployeeLoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               className={inputClass}
             />
+            <Link
+              href="/employee/forgot-password"
+              className="block mt-1.5 text-xs text-[#6B6B6B] hover:text-madael-red transition-colors"
+            >
+              {lang === 'id' ? 'Lupa password?' : 'Forgot password?'}
+            </Link>
           </div>
 
           {error && <p className="text-sm text-madael-red">{error}</p>}
