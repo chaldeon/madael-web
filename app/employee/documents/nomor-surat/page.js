@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { Pencil, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -41,10 +42,11 @@ function formatDate(value) {
 
 function EditCounterModal({ counter, onClose, onSave, saving, saveError }) {
   const [value, setValue] = useState(counter.last_number);
+  const handleModalBackdrop = useModalDismiss(true, onClose);
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[999] px-4">
-      <div className="bg-white w-full max-w-[400px] p-6">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[999] px-4" onClick={handleModalBackdrop}>
+      <div className="bg-white w-full max-w-[400px] p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h2 className="font-serif text-lg text-black">Koreksi Nomor — {counter.nama}</h2>
           <button onClick={onClose} className="text-[#6B6B6B] hover:text-black">

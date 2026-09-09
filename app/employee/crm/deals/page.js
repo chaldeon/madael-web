@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 
 // Sengaja pakai vocabulary stage yang sama dengan Kanban Perusahaan yang
 // sudah ada (bukan daftar stage baru), biar konsisten buat tim.
@@ -63,6 +64,7 @@ export default function CrmDealsPage() {
   const [filterCompany, setFilterCompany] = useState('');
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const handleAddModalBackdrop = useModalDismiss(showAddModal, () => setShowAddModal(false));
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
@@ -296,8 +298,8 @@ export default function CrmDealsPage() {
       )}
 
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <form onSubmit={handleSubmit} className="bg-white w-full max-w-[480px] p-6 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4" onClick={handleAddModalBackdrop}>
+          <form onSubmit={handleSubmit} className="bg-white w-full max-w-[480px] p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-semibold text-black">Tambah Deal</h2>
               <button type="button" onClick={() => setShowAddModal(false)} className="text-[#6B6B6B] hover:text-black">

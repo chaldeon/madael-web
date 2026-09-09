@@ -127,8 +127,8 @@ function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
 
 const TABS = [
   { key: 'jadwal', label: 'Jadwal Kerja' },
-  { key: 'rekap', label: 'Rekap Bulanan' },
   { key: 'koreksi', label: 'Approval Koreksi' },
+  { key: 'rekap', label: 'Rekap Bulanan' },
 ];
 
 export default function SemuaKaryawanPage() {
@@ -136,7 +136,7 @@ export default function SemuaKaryawanPage() {
   const { status, employee } = useModuleAccess('absensi_admin');
   const isSuperadmin = !!employee?.is_superadmin;
 
-  const [activeTab, setActiveTab] = useState('koreksi');
+  const [activeTab, setActiveTab] = useState('rekap');
 
   const [employees, setEmployees] = useState([]);
   const [companies, setCompanies] = useState([]);

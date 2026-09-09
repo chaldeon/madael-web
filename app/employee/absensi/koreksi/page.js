@@ -8,6 +8,7 @@ import { AlertTriangle, Pencil, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { logActivity } from '@/lib/activityLog';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -176,6 +177,8 @@ export default function KoreksiAbsensiPage() {
     setEditingRow(null);
     setSaveError(null);
   };
+
+  const handleEditModalBackdrop = useModalDismiss(!!editingRow, closeEdit);
 
   const handleSave = async () => {
     if (!form.alasan.trim()) {
@@ -481,8 +484,8 @@ export default function KoreksiAbsensiPage() {
       )}
 
       {editingRow && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6">
-          <div className="bg-white w-full max-w-[440px] p-6 relative">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={handleEditModalBackdrop}>
+          <div className="bg-white w-full max-w-[440px] p-6 relative" onClick={(e) => e.stopPropagation()}>
             <button
               onClick={closeEdit}
               className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black"
