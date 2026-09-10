@@ -237,7 +237,7 @@ export default function DataAuditPage() {
 
           <Section
             title="Ter-link ke Akun Nonaktif"
-            description="Baris payroll yang linked_employee_id-nya menunjuk ke akun berstatus Nonaktif — kandidat karyawan resign yang masih berisiko ikut Payroll Run berikutnya kalau belum diarsipkan (lihat Fase 1.4 dan 4.3)."
+            description="Baris payroll yang linked_employee_id-nya menunjuk ke akun berstatus Nonaktif — kandidat karyawan resign yang masih berisiko ikut Payroll Run berikutnya kalau belum diarsipkan."
             count={masterLinkedNonaktif.length}
           >
             {masterLinkedNonaktif.length === 0 ? (
@@ -260,12 +260,12 @@ export default function DataAuditPage() {
           </Section>
 
           <Section
-            title="Akun Dobel-link (Fase 2.2)"
-            description="Satu akun absensi dipakai lebih dari satu baris payroll — kemungkinan besar akibat celah sebelum quick-win Fase 1.1 diterapkan. Perlu direview manual, bukan auto-merge (lihat Fase 4.1)."
+            title="Akun double-link"
+            description="Satu akun absensi dipakai lebih dari satu baris payroll. Perlu direview manual, bukan auto-merge."
             count={duplicateLinks.length}
           >
             {duplicateLinks.length === 0 ? (
-              <EmptyState message="Tidak ada akun yang dobel-link." />
+              <EmptyState message="Tidak ada akun yang double-link." />
             ) : (
               <div className="flex flex-col gap-4">
                 {duplicateLinks.map((rows, idx) => (
@@ -294,8 +294,8 @@ export default function DataAuditPage() {
           </Section>
 
           <Section
-            title="Nama Drift (Fase 2.3)"
-            description="Nama di akun (Employee List) berbeda dengan nama di baris payroll untuk pasangan yang sama — Employee List adalah sumber kebenaran (lihat Fase 1.3/4.2)."
+            title="Nama Drift"
+            description="Nama di akun (Employee List) berbeda dengan nama di baris payroll untuk pasangan yang sama — Employee List adalah sumber kebenaran."
             count={namaDrift.length}
           >
             {namaDrift.length === 0 ? (

@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { MODULE_OPTIONS } from '@/lib/employeeModules';
 import { nextEmployeeId } from '@/lib/employeeId';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 
 const emptyForm = {
   nama: '',
@@ -162,6 +163,11 @@ export default function EmployeeListPage() {
   const [bulkParsing, setBulkParsing] = useState(false);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [bulkResult, setBulkResult] = useState(null); // { successCount, errorCount, results }
+
+  const handleAddModalBackdrop = useModalDismiss(showAddModal, () => setShowAddModal(false));
+  const handleAccessModalBackdrop = useModalDismiss(!!accessEmployee, () => setAccessEmployee(null));
+  const handleBulkModalBackdrop = useModalDismiss(showBulkModal, () => setShowBulkModal(false));
+  const handleDeleteModalBackdrop = useModalDismiss(!!deleteTarget, () => closeDeleteModal());
 
   // Perusahaan tempat karyawan bekerja/ditempatkan (termasuk outsourcing) —
   // narik dari `companies`, satu sumber yang sama dipakai Payroll Manager,
@@ -638,8 +644,8 @@ export default function EmployeeListPage() {
 
       {/* Modal Tambah Employee */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6">
-          <div className="w-full max-w-[440px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6" onClick={handleAddModalBackdrop}>
+          <div className="w-full max-w-[440px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-serif text-[20px] font-normal text-black">Tambah Employee</h2>
               <button onClick={() => setShowAddModal(false)} className="text-[#6B6B6B] hover:text-black">
@@ -738,8 +744,8 @@ export default function EmployeeListPage() {
 
       {/* Modal Kelola Akses */}
       {accessEmployee && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6">
-          <div className="w-full max-w-[420px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6" onClick={handleAccessModalBackdrop}>
+          <div className="w-full max-w-[420px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-2">
               <h2 className="font-serif text-[20px] font-normal text-black">Kelola Akses</h2>
               <button onClick={() => setAccessEmployee(null)} className="text-[#6B6B6B] hover:text-black">
@@ -786,8 +792,8 @@ export default function EmployeeListPage() {
           Kalau boleh dihapus, minta ketik ulang email employee sebagai
           konfirmasi (aksi ini tidak bisa dibatalkan). */}
       {deleteTarget && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6">
-          <div className="w-full max-w-[440px] bg-white border-t-4 border-madael-red p-8">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6" onClick={handleDeleteModalBackdrop}>
+          <div className="w-full max-w-[440px] bg-white border-t-4 border-madael-red p-8" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-serif text-[20px] font-normal text-black">Hapus Permanen</h2>
               <button onClick={closeDeleteModal} className="text-[#6B6B6B] hover:text-black">
@@ -862,8 +868,8 @@ export default function EmployeeListPage() {
 
       {/* Modal Bulk Tambah Employee */}
       {showBulkModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6">
-          <div className="w-full max-w-[560px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6" onClick={handleBulkModalBackdrop}>
+          <div className="w-full max-w-[560px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-serif text-[20px] font-normal text-black">Bulk Tambah Employee</h2>
               <button onClick={() => setShowBulkModal(false)} className="text-[#6B6B6B] hover:text-black">
