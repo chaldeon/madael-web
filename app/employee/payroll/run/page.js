@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { computeSnapshot } from '@/lib/payroll/runSnapshot';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -100,6 +101,7 @@ export default function PayrollRunListPage() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const [pendingDraft, setPendingDraft] = useState(null); // { client, emps, skippedNames, skippedIds }
+  const handlePendingDraftBackdrop = useModalDismiss(!!pendingDraft, () => setPendingDraft(null), false);
 
   // Melakukan pembuatan run + snapshot yang sebenarnya. excludeIds adalah
   // id employees_master yang di-skip karena akun absensinya Nonaktif
@@ -327,8 +329,8 @@ export default function PayrollRunListPage() {
       </div>
 
       {pendingDraft && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] p-4">
-          <div className="bg-white w-full max-w-[480px] p-6">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] p-4" onClick={handlePendingDraftBackdrop}>
+          <div className="bg-white w-full max-w-[480px] p-6" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-base font-semibold text-black mb-3">Sebagian employee akan dilewati</h2>
             <p className="text-sm text-[#6B6B6B] mb-3">
               {pendingDraft.skippedNames.length} employee dilewati karena akun absensinya Nonaktif:

@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { History, ArrowUp, ArrowDown, ArrowUpDown, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -74,10 +75,11 @@ function DetailButton({ detail, onOpen }) {
 // Modal detail — satu row dilihat dalam satu waktu (bukan expand inline
 // per baris), supaya layout tabel tetap stabil dan ruang JSON lebih lega.
 function DetailModal({ log, aksiLabel, empNama, onClose }) {
+  const handleModalBackdrop = useModalDismiss(!!log, onClose, false);
   if (!log) return null;
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6">
-      <div className="w-full max-w-[560px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6" onClick={handleModalBackdrop}>
+      <div className="w-full max-w-[560px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
           <h2 className="font-serif text-[20px] font-normal text-black">Detail Aktivitas</h2>
           <button onClick={onClose} className="text-[#6B6B6B] hover:text-black">

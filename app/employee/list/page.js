@@ -2,10 +2,12 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download, ShieldCheck } from 'lucide-react';
+import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download, ShieldCheck, Power, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { MODULE_OPTIONS } from '@/lib/employeeModules';
 import { nextEmployeeId } from '@/lib/employeeId';
+import { useModuleAccess } from '@/lib/useModuleAccess';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 
 const emptyForm = {
   nama: '',
@@ -117,6 +119,10 @@ function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
 
 export default function EmployeeListPage() {
   const supabase = createClient();
+  // Cuma dipakai untuk tahu apakah viewer yang sedang login superadmin —
+  // menentukan boleh/tidaknya lihat tombol "Hapus Permanen". Backend tetap
+  // jadi penjaga utama (DELETE /api/employee/[id] cek superadmin sendiri).
+  const { employee: viewer } = useModuleAccess('employee_list');
 
   const [employees, setEmployees] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -135,6 +141,15 @@ export default function EmployeeListPage() {
   const [formError, setFormError] = useState(null);
   const [createdInfo, setCreatedInfo] = useState(null); // { email, tempPassword }
 
+  // ---- Nonaktifkan / Aktifkan (soft delete) ----
+  const [togglingId, setTogglingId] = useState(null); // employee.id yang sedang diproses
+
+  // ---- Hapus Permanen (hard delete, superadmin only) ----
+  const [deleteTarget, setDeleteTarget] = useState(null); // employee row yang mau dihapus
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null); // string | { blockingReasons: string[] }
+
   const [accessEmployee, setAccessEmployee] = useState(null); // employee row lagi dibuka aksesnya
   const [accessModules, setAccessModules] = useState([]); // array module_name yang dicentang
   const [accessLoading, setAccessLoading] = useState(false);
@@ -148,6 +163,11 @@ export default function EmployeeListPage() {
   const [bulkParsing, setBulkParsing] = useState(false);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [bulkResult, setBulkResult] = useState(null); // { successCount, errorCount, results }
+
+  const handleAddModalBackdrop = useModalDismiss(showAddModal, () => setShowAddModal(false));
+  const handleAccessModalBackdrop = useModalDismiss(!!accessEmployee, () => setAccessEmployee(null));
+  const handleBulkModalBackdrop = useModalDismiss(showBulkModal, () => setShowBulkModal(false));
+  const handleDeleteModalBackdrop = useModalDismiss(!!deleteTarget, () => closeDeleteModal());
 
   // Perusahaan tempat karyawan bekerja/ditempatkan (termasuk outsourcing) —
   // narik dari `companies`, satu sumber yang sama dipakai Payroll Manager,
@@ -269,6 +289,81 @@ export default function EmployeeListPage() {
       setFormError('Terjadi kesalahan. Coba lagi.');
     }
     setSubmitting(false);
+  };
+
+  // ---- Nonaktifkan / Aktifkan ----
+  // Jalur aman default: pakai status Nonaktif, bukan hapus permanen. Sudah
+  // ditegakkan di app/employee/dashboard (blok akses) dan useModuleAccess
+  // (blok semua modul) begitu status bukan 'Aktif'.
+  const handleToggleStatus = async (emp) => {
+    const nextStatus = emp.status === 'Aktif' ? 'Nonaktif' : 'Aktif';
+    const confirmMsg =
+      nextStatus === 'Nonaktif'
+        ? `Nonaktifkan akun ${emp.nama}? Dia tidak akan bisa akses dashboard/modul lagi, tapi data historisnya tetap tersimpan.`
+        : `Aktifkan kembali akun ${emp.nama}?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setTogglingId(emp.id);
+    try {
+      const res = await fetch(`/api/employee/${emp.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nama: emp.nama,
+          employee_id: emp.employee_id,
+          client_id: emp.client_id,
+          status: nextStatus,
+          is_superadmin: emp.is_superadmin,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Gagal mengubah status employee.');
+      } else {
+        fetchEmployees();
+      }
+    } catch (err) {
+      alert('Terjadi kesalahan. Coba lagi.');
+    }
+    setTogglingId(null);
+  };
+
+  // ---- Hapus Permanen ----
+
+  const openDeleteModal = (emp) => {
+    setDeleteTarget(emp);
+    setDeleteConfirmText('');
+    setDeleteError(null);
+  };
+
+  const closeDeleteModal = () => {
+    setDeleteTarget(null);
+    setDeleteConfirmText('');
+    setDeleteError(null);
+    setDeleting(false);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const res = await fetch(`/api/employee/${deleteTarget.id}`, { method: 'DELETE' });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setDeleteError(data.blockingReasons ? data : data.error || 'Gagal menghapus employee.');
+        setDeleting(false);
+        return;
+      }
+
+      closeDeleteModal();
+      fetchEmployees();
+    } catch (err) {
+      setDeleteError('Terjadi kesalahan. Coba lagi.');
+      setDeleting(false);
+    }
   };
 
   // ---- Kelola Akses ----
@@ -505,14 +600,40 @@ export default function EmployeeListPage() {
                       {emp.is_superadmin ? 'Ya' : 'Tidak'}
                     </span>
                   </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() => openAccessModal(emp)}
-                      title="Kelola Akses"
-                      className="inline-flex text-[#6B6B6B] hover:text-madael-red transition-colors"
-                    >
-                      <ShieldCheck size={16} />
-                    </button>
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => openAccessModal(emp)}
+                        title="Kelola Akses"
+                        className="inline-flex text-[#6B6B6B] hover:text-madael-red transition-colors"
+                      >
+                        <ShieldCheck size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleToggleStatus(emp)}
+                        disabled={togglingId === emp.id}
+                        title={emp.status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan'}
+                        className={`inline-flex transition-colors disabled:opacity-40 ${
+                          emp.status === 'Aktif'
+                            ? 'text-[#6B6B6B] hover:text-madael-red'
+                            : 'text-[#6B6B6B] hover:text-[#166534]'
+                        }`}
+                      >
+                        <Power size={16} />
+                      </button>
+                      {/* Hapus permanen — hanya untuk superadmin, tidak bisa hapus akun sendiri.
+                          Backend (DELETE /api/employee/[id]) menegakkan ulang kedua aturan ini,
+                          jadi sembunyikan tombol di sini murni untuk kerapian UI. */}
+                      {viewer?.is_superadmin && viewer.id !== emp.id && (
+                        <button
+                          onClick={() => openDeleteModal(emp)}
+                          title="Hapus Permanen"
+                          className="inline-flex text-[#6B6B6B] hover:text-madael-red transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -523,8 +644,8 @@ export default function EmployeeListPage() {
 
       {/* Modal Tambah Employee */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6">
-          <div className="w-full max-w-[440px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6" onClick={handleAddModalBackdrop}>
+          <div className="w-full max-w-[440px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-serif text-[20px] font-normal text-black">Tambah Employee</h2>
               <button onClick={() => setShowAddModal(false)} className="text-[#6B6B6B] hover:text-black">
@@ -623,8 +744,8 @@ export default function EmployeeListPage() {
 
       {/* Modal Kelola Akses */}
       {accessEmployee && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6">
-          <div className="w-full max-w-[420px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6" onClick={handleAccessModalBackdrop}>
+          <div className="w-full max-w-[420px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-2">
               <h2 className="font-serif text-[20px] font-normal text-black">Kelola Akses</h2>
               <button onClick={() => setAccessEmployee(null)} className="text-[#6B6B6B] hover:text-black">
@@ -666,10 +787,89 @@ export default function EmployeeListPage() {
         </div>
       )}
 
+      {/* Modal Hapus Permanen — dua langkah: kalau backend nolak karena ada
+          data historis, tampilkan alasannya dan sarankan Nonaktifkan.
+          Kalau boleh dihapus, minta ketik ulang email employee sebagai
+          konfirmasi (aksi ini tidak bisa dibatalkan). */}
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6" onClick={handleDeleteModalBackdrop}>
+          <div className="w-full max-w-[440px] bg-white border-t-4 border-madael-red p-8" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-serif text-[20px] font-normal text-black">Hapus Permanen</h2>
+              <button onClick={closeDeleteModal} className="text-[#6B6B6B] hover:text-black">
+                <X size={20} />
+              </button>
+            </div>
+
+            {deleteError?.blockingReasons ? (
+              <div>
+                <p className="text-sm text-black mb-3">
+                  <strong>{deleteTarget.nama}</strong> tidak bisa dihapus permanen karena masih punya:
+                </p>
+                <ul className="text-sm text-[#6B6B6B] list-disc pl-5 mb-4 space-y-1">
+                  {deleteError.blockingReasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+                <p className="text-sm text-black mb-6">
+                  Data ini wajib disimpan untuk keperluan payroll/pajak/audit. Gunakan tombol{' '}
+                  <span className="inline-flex items-center gap-1 font-medium"><Power size={12} /> Nonaktifkan</span>{' '}
+                  di baris employee sebagai gantinya.
+                </p>
+                <button
+                  onClick={closeDeleteModal}
+                  className="w-full border border-[#E0E0E0] text-black px-8 py-3 text-sm font-medium tracking-[0.04em] hover:border-madael-red hover:text-madael-red transition-colors"
+                >
+                  Mengerti
+                </button>
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm text-black mb-2">
+                  Menghapus <strong>{deleteTarget.nama}</strong> ({deleteTarget.email}) secara permanen. Aksi ini{' '}
+                  <strong>tidak bisa dibatalkan</strong> — akun login dan seluruh data terkait akan hilang.
+                </p>
+                <p className="text-sm text-[#6B6B6B] mb-4">
+                  Kalau employee ini sudah pernah absen, cuti, atau punya slip gaji, sebaiknya pakai Nonaktifkan saja.
+                </p>
+                <label className="block text-xs font-medium text-[#3D3D3D] mb-1.5">
+                  Ketik email employee (<span className="font-mono">{deleteTarget.email}</span>) untuk konfirmasi
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  className="w-full border border-[#E0E0E0] px-4 py-2.5 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors mb-2"
+                  autoFocus
+                />
+                {deleteError && typeof deleteError === 'string' && (
+                  <p className="text-sm text-madael-red mb-2">{deleteError}</p>
+                )}
+                <div className="flex gap-3 mt-4">
+                  <button
+                    onClick={closeDeleteModal}
+                    className="flex-1 border border-[#E0E0E0] text-black px-6 py-3 text-sm font-medium tracking-[0.04em] hover:border-black transition-colors"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={handleConfirmDelete}
+                    disabled={deleting || deleteConfirmText.trim().toLowerCase() !== deleteTarget.email.toLowerCase()}
+                    className="flex-1 bg-madael-red text-white px-6 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {deleting ? 'Menghapus...' : 'Hapus Permanen'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Modal Bulk Tambah Employee */}
       {showBulkModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6">
-          <div className="w-full max-w-[560px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6" onClick={handleBulkModalBackdrop}>
+          <div className="w-full max-w-[560px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-serif text-[20px] font-normal text-black">Bulk Tambah Employee</h2>
               <button onClick={() => setShowBulkModal(false)} className="text-[#6B6B6B] hover:text-black">

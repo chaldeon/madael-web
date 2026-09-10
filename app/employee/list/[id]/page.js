@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Pencil, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 
 const inputClass =
   'w-full border border-[#E0E0E0] px-3 py-2 text-sm text-black focus:outline-none focus:border-madael-red';
@@ -46,6 +47,8 @@ export default function EmployeeDetailPage() {
   const [editForm, setEditForm] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState(null);
+
+  const handleEditModalBackdrop = useModalDismiss(showEditModal, () => setShowEditModal(false));
 
   const loadData = useCallback(async () => {
     if (!employeeId) return;
@@ -256,8 +259,8 @@ export default function EmployeeDetailPage() {
 
       {/* Modal Edit */}
       {showEditModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6">
-          <div className="w-full max-w-[480px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6" onClick={handleEditModalBackdrop}>
+          <div className="w-full max-w-[480px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-serif text-[20px] font-normal text-black">Edit Karyawan</h2>
               <button onClick={() => setShowEditModal(false)} className="text-[#6B6B6B] hover:text-black">

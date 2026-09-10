@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { X, Plus, Pencil, Trash2, Calculator, ArrowUp, ArrowDown, ArrowUpDown, Paperclip, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { logActivity } from '@/lib/activityLog';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -182,6 +183,7 @@ function SelectField({ label, value, onChange, options }) {
 function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onSubmit, saving, saveError }) {
   const set = (key) => (val) => setForm((f) => ({ ...f, [key]: val }));
   const [pendingConfirm, setPendingConfirm] = useState(false);
+  const handleModalBackdrop = useModalDismiss(true, onClose);
 
   const updatePair = (idx, field, val) => {
     setForm((f) => {
@@ -195,8 +197,8 @@ function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onS
     setForm((f) => ({ ...f, komponen_lain: f.komponen_lain.filter((_, i) => i !== idx) }));
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] p-4">
-      <div className="bg-white w-full max-w-[560px] max-h-[90vh] overflow-y-auto p-8 relative">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] p-4" onClick={handleModalBackdrop}>
+      <div className="bg-white w-full max-w-[560px] max-h-[90vh] overflow-y-auto p-8 relative" onClick={(e) => e.stopPropagation()}>
         <button onClick={onClose} className="absolute top-6 right-6 text-[#6B6B6B] hover:text-black">
           <X size={20} />
         </button>
@@ -352,6 +354,7 @@ function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onS
 
 function HitungModal({ row, periode, onClose }) {
   const supabase = createClient();
+  const handleModalBackdrop = useModalDismiss(true, onClose, false);
   const [attSummary, setAttSummary] = useState(null);
   const [attLoading, setAttLoading] = useState(false);
   const [manualOvertime, setManualOvertime] = useState(0);
@@ -411,8 +414,8 @@ function HitungModal({ row, periode, onClose }) {
   const pph21 = (bpjs && row.status_ptkp) ? hitungPPh21TER(brutoPPh21, row.status_ptkp) : null;
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] p-4">
-      <div className="bg-white w-full max-w-[560px] max-h-[90vh] overflow-y-auto p-8 relative">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] p-4" onClick={handleModalBackdrop}>
+      <div className="bg-white w-full max-w-[560px] max-h-[90vh] overflow-y-auto p-8 relative" onClick={(e) => e.stopPropagation()}>
         <button onClick={onClose} className="absolute top-6 right-6 text-[#6B6B6B] hover:text-black">
           <X size={20} />
         </button>

@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -127,8 +128,8 @@ function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
 
 const TABS = [
   { key: 'jadwal', label: 'Jadwal Kerja' },
-  { key: 'rekap', label: 'Rekap Bulanan' },
   { key: 'koreksi', label: 'Approval Koreksi' },
+  { key: 'rekap', label: 'Rekap Bulanan' },
 ];
 
 export default function SemuaKaryawanPage() {
@@ -136,7 +137,7 @@ export default function SemuaKaryawanPage() {
   const { status, employee } = useModuleAccess('absensi_admin');
   const isSuperadmin = !!employee?.is_superadmin;
 
-  const [activeTab, setActiveTab] = useState('koreksi');
+  const [activeTab, setActiveTab] = useState('rekap');
 
   const [employees, setEmployees] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -170,6 +171,8 @@ export default function SemuaKaryawanPage() {
   const [koreksiError, setKoreksiError] = useState(null);
   const [processingId, setProcessingId] = useState(null);
   const [rejectingRow, setRejectingRow] = useState(null);
+  const handleJadwalModalBackdrop = useModalDismiss(!!editingEmp, () => setEditingEmp(null));
+  const handleRejectModalBackdrop = useModalDismiss(!!rejectingRow, () => setRejectingRow(null));
   const [rejectCatatan, setRejectCatatan] = useState('');
 
   // Employees + schedules dipakai bareng oleh tab Jadwal & Rekap, jadi
@@ -845,8 +848,8 @@ export default function SemuaKaryawanPage() {
       )}
 
       {editingEmp && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6">
-          <div className="bg-white w-full max-w-[440px] p-6 relative">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={handleJadwalModalBackdrop}>
+          <div className="bg-white w-full max-w-[440px] p-6 relative" onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => setEditingEmp(null)}
               className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black"
@@ -917,8 +920,8 @@ export default function SemuaKaryawanPage() {
       )}
 
       {rejectingRow && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6">
-          <div className="bg-white w-full max-w-[420px] p-6 relative">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={handleRejectModalBackdrop}>
+          <div className="bg-white w-full max-w-[420px] p-6 relative" onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => setRejectingRow(null)}
               className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black"

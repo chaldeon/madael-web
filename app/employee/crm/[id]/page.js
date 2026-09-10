@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Plus, X, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 
 const STAGES = [
   'Prospek',
@@ -111,6 +112,12 @@ export default function ClientDetailPage() {
   const [showDealModal, setShowDealModal] = useState(false);
   const [dealForm, setDealForm] = useState(null);
   const [savingDeal, setSavingDeal] = useState(false);
+
+  const handleEditModalBackdrop = useModalDismiss(showEditModal, () => setShowEditModal(false));
+  const handleStageModalBackdrop = useModalDismiss(showStageModal, () => setShowStageModal(false));
+  const handleActivityModalBackdrop = useModalDismiss(showActivityModal, () => setShowActivityModal(false));
+  const handleProjectModalBackdrop = useModalDismiss(showProjectModal, () => setShowProjectModal(false));
+  const handleDealModalBackdrop = useModalDismiss(showDealModal, () => setShowDealModal(false));
 
   const emptyActivity = { tipe: 'Email', judul: '', deskripsi: '', tanggal: new Date().toISOString().slice(0, 10), follow_up_date: '' };
   const emptyProject = { nama_project: '', jenis_layanan: '', status: 'Aktif', nilai_kontrak: '', tanggal_mulai: '', tanggal_selesai: '', pic_madael: '', catatan: '' };
@@ -577,8 +584,8 @@ export default function ClientDetailPage() {
 
       {/* Modal Edit Info */}
       {showEditModal && editForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4">
-          <div className="bg-white w-full max-w-[560px] max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4" onClick={handleEditModalBackdrop}>
+          <div className="bg-white w-full max-w-[560px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-[#E0E0E0] sticky top-0 bg-white">
               <h2 className="font-serif text-lg text-black">Edit Info Klien</h2>
               <button onClick={() => setShowEditModal(false)} className="text-[#6B6B6B] hover:text-black cursor-pointer border-0 bg-transparent"><X size={18} /></button>
@@ -687,8 +694,8 @@ export default function ClientDetailPage() {
 
       {/* Modal Ganti Stage */}
       {showStageModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4">
-          <div className="bg-white w-full max-w-[380px]">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4" onClick={handleStageModalBackdrop}>
+          <div className="bg-white w-full max-w-[380px]" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-[#E0E0E0]">
               <h2 className="font-serif text-lg text-black">Ganti Stage</h2>
               <button onClick={() => setShowStageModal(false)} className="text-[#6B6B6B] hover:text-black cursor-pointer border-0 bg-transparent"><X size={18} /></button>
@@ -710,8 +717,8 @@ export default function ClientDetailPage() {
 
       {/* Modal Tambah Aktivitas */}
       {showActivityModal && activityForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4">
-          <div className="bg-white w-full max-w-[480px] max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4" onClick={handleActivityModalBackdrop}>
+          <div className="bg-white w-full max-w-[480px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-[#E0E0E0] sticky top-0 bg-white">
               <h2 className="font-serif text-lg text-black">Tambah Aktivitas</h2>
               <button onClick={() => setShowActivityModal(false)} className="text-[#6B6B6B] hover:text-black cursor-pointer border-0 bg-transparent"><X size={18} /></button>
@@ -754,8 +761,8 @@ export default function ClientDetailPage() {
 
       {/* Modal Tambah Project */}
       {showProjectModal && projectForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4">
-          <div className="bg-white w-full max-w-[480px] max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4" onClick={handleProjectModalBackdrop}>
+          <div className="bg-white w-full max-w-[480px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-[#E0E0E0] sticky top-0 bg-white">
               <h2 className="font-serif text-lg text-black">Tambah Project</h2>
               <button onClick={() => setShowProjectModal(false)} className="text-[#6B6B6B] hover:text-black cursor-pointer border-0 bg-transparent"><X size={18} /></button>
@@ -817,8 +824,8 @@ export default function ClientDetailPage() {
       )}
 
       {showDealModal && dealForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4">
-          <div className="bg-white w-full max-w-[480px] max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4" onClick={handleDealModalBackdrop}>
+          <div className="bg-white w-full max-w-[480px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-[#E0E0E0] sticky top-0 bg-white">
               <h2 className="font-serif text-lg text-black">Tambah Deal</h2>
               <button onClick={() => setShowDealModal(false)} className="text-[#6B6B6B] hover:text-black cursor-pointer border-0 bg-transparent"><X size={18} /></button>

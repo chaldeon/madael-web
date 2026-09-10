@@ -8,6 +8,7 @@ import { X, Plus, Eye, Pencil, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-re
 import { createClient } from '@/lib/supabase-browser';
 import { hitungBPJS, hitungBrutoPPh21, hitungPPh21TER, hitungPenaltyTelat, PTKP_DATA, JKK_OPTIONS } from '@/lib/payroll/calculations';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -213,6 +214,7 @@ function ReadOnlyField({ label, value }) {
 }
 
 function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmit, saving, isEdit, saveError }) {
+  const handleModalBackdrop = useModalDismiss(true, onClose);
   const [loadingDefaults, setLoadingDefaults] = useState(false);
   const [loadingPenalty, setLoadingPenalty] = useState(false);
   const [penaltyNote, setPenaltyNote] = useState('');
@@ -390,8 +392,8 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-[1000] flex items-start justify-center overflow-y-auto py-10 px-4">
-      <div className="bg-white w-full max-w-[720px] p-8">
+    <div className="fixed inset-0 bg-black/40 z-[1000] flex items-start justify-center overflow-y-auto py-10 px-4" onClick={handleModalBackdrop}>
+      <div className="bg-white w-full max-w-[720px] p-8" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
           <h2 className="font-serif text-xl text-black">{isEdit ? 'Edit Slip Gaji' : 'Tambah Slip Gaji'}</h2>
           <button onClick={onClose} className="text-[#6B6B6B] hover:text-black">

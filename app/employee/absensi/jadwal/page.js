@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { X, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -30,6 +31,7 @@ export default function JadwalKerjaPage() {
   const [loadError, setLoadError] = useState(null);
 
   const [editingEmp, setEditingEmp] = useState(null);
+  const handleEditModalBackdrop = useModalDismiss(!!editingEmp, () => setEditingEmp(null));
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -201,8 +203,8 @@ export default function JadwalKerjaPage() {
       )}
 
       {editingEmp && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6">
-          <div className="bg-white w-full max-w-[440px] p-6 relative">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={handleEditModalBackdrop}>
+          <div className="bg-white w-full max-w-[440px] p-6 relative" onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => setEditingEmp(null)}
               className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black"

@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, X, FileEdit, Upload, ExternalLink } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -107,6 +108,8 @@ export default function AbsensiPage() {
   // --- Pengajuan koreksi absensi mandiri ---
   const [myCorrections, setMyCorrections] = useState([]);
   const [showKoreksiForm, setShowKoreksiForm] = useState(false);
+  const handleKoreksiModalBackdrop = useModalDismiss(showKoreksiForm, () => setShowKoreksiForm(false));
+  const handleCameraModalBackdrop = useModalDismiss(!!cameraMode, () => closeCamera());
   const [koreksiForm, setKoreksiForm] = useState({ tanggal: todayStr(), jamMasuk: '', jamPulang: '', alasan: '' });
   const [koreksiFoto, setKoreksiFoto] = useState(null);
   const [koreksiSaving, setKoreksiSaving] = useState(false);
@@ -597,8 +600,8 @@ export default function AbsensiPage() {
       </div>
 
       {showKoreksiForm && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] px-6">
-          <div className="bg-white w-full max-w-[440px] p-6 relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] px-6" onClick={handleKoreksiModalBackdrop}>
+          <div className="bg-white w-full max-w-[440px] p-6 relative max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => setShowKoreksiForm(false)}
               className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black"
@@ -681,8 +684,8 @@ export default function AbsensiPage() {
       )}
 
       {cameraMode && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] px-6">
-          <div className="bg-white w-full max-w-[420px] p-6 relative">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] px-6" onClick={handleCameraModalBackdrop}>
+          <div className="bg-white w-full max-w-[420px] p-6 relative" onClick={(e) => e.stopPropagation()}>
             <button
               onClick={closeCamera}
               className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black"

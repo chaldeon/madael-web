@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { Plus, X, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { useModalDismiss } from '@/lib/useModalDismiss';
 
 const STAGES = [
   'Prospek',
@@ -132,6 +133,7 @@ export default function CrmClientListPage() {
   const [sortDir, setSortDir] = useState('desc');
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const handleAddModalBackdrop = useModalDismiss(showAddModal, () => setShowAddModal(false));
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
@@ -369,8 +371,8 @@ export default function CrmClientListPage() {
 
       {/* Modal Tambah Klien */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4">
-          <div className="bg-white w-full max-w-[560px] max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-4" onClick={handleAddModalBackdrop}>
+          <div className="bg-white w-full max-w-[560px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-[#E0E0E0] sticky top-0 bg-white">
               <h2 className="font-serif text-lg text-black">Tambah Klien</h2>
               <button onClick={() => setShowAddModal(false)} className="text-[#6B6B6B] hover:text-black cursor-pointer border-0 bg-transparent">
