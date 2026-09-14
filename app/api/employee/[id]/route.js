@@ -55,14 +55,53 @@ export async function PATCH(request, { params }) {
 
     const admin = createAdminClient();
 
+    const nextStatus = status || 'Aktif';
+    const nextIsSuperadmin = !!is_superadmin;
+
+    // Jangan sampai perusahaan kehilangan superadmin aktif terakhir — cek
+    // sama seperti di DELETE, tapi di sini juga mencakup kasus dinonaktifkan
+    // (bukan cuma di-demote), karena status != 'Aktif' juga memblokir akses
+    // lewat useModuleAccess.
+    const { data: target, error: targetError } = await admin
+      .from('employees')
+      .select('id, is_superadmin, status')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (targetError || !target) {
+      return NextResponse.json({ error: 'Employee tidak ditemukan.' }, { status: 404 });
+    }
+
+    const wasActiveSuperadmin = target.is_superadmin && target.status === 'Aktif';
+    const willStillBeActiveSuperadmin = nextIsSuperadmin && nextStatus === 'Aktif';
+
+    if (wasActiveSuperadmin && !willStillBeActiveSuperadmin) {
+      const { count: otherActiveSuperadmins } = await admin
+        .from('employees')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_superadmin', true)
+        .eq('status', 'Aktif')
+        .neq('id', id);
+
+      if ((otherActiveSuperadmins || 0) === 0) {
+        return NextResponse.json(
+          {
+            error:
+              'Tidak bisa mengubah status/hak akses superadmin ini karena dia adalah satu-satunya superadmin aktif yang tersisa. Jadikan employee lain superadmin dulu sebelum mengubah yang ini.',
+          },
+          { status: 400 }
+        );
+      }
+    }
+
     const { data: empRow, error: empError } = await admin
       .from('employees')
       .update({
         nama,
         employee_id: employee_id || null,
         client_id: client_id || null,
-        status: status || 'Aktif',
-        is_superadmin: !!is_superadmin,
+        status: nextStatus,
+        is_superadmin: nextIsSuperadmin,
       })
       .eq('id', id)
       .select()
