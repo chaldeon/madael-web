@@ -8,7 +8,6 @@ import { MODULE_OPTIONS } from '@/lib/employeeModules';
 import { nextEmployeeId } from '@/lib/employeeId';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
-import { logActivity } from '@/lib/activityLog';
 
 const emptyForm = {
   nama: '',
@@ -386,41 +385,25 @@ export default function EmployeeListPage() {
 
     const alreadyHas = accessModules.includes(moduleKey);
 
-    if (alreadyHas) {
-      const { error } = await supabase
-        .from('employee_modules')
-        .delete()
-        .eq('employee_id', accessEmployee.id)
-        .eq('module_name', moduleKey);
-      if (!error) {
+    try {
+      const res = await fetch(`/api/employee/${accessEmployee.id}/modules`, {
+        method: alreadyHas ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ module_name: moduleKey }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert((alreadyHas ? 'Gagal menghapus akses modul: ' : 'Gagal menambah akses modul: ') + (data.error || ''));
+      } else if (alreadyHas) {
         setAccessModules((prev) => prev.filter((m) => m !== moduleKey));
-        logActivity(supabase, {
-          userId: viewer?.id,
-          aksi: 'cabut_akses_modul',
-          targetTable: 'employee_modules',
-          targetId: accessEmployee.id,
-          detail: { employee_nama: accessEmployee.nama, module_name: moduleKey },
-        });
       } else {
-        alert('Gagal menghapus akses modul: ' + error.message);
-      }
-    } else {
-      const { error } = await supabase
-        .from('employee_modules')
-        .insert([{ employee_id: accessEmployee.id, module_name: moduleKey }]);
-      if (!error) {
         setAccessModules((prev) => [...prev, moduleKey]);
-        logActivity(supabase, {
-          userId: viewer?.id,
-          aksi: 'tambah_akses_modul',
-          targetTable: 'employee_modules',
-          targetId: accessEmployee.id,
-          detail: { employee_nama: accessEmployee.nama, module_name: moduleKey },
-        });
-      } else {
-        alert('Gagal menambah akses modul: ' + error.message);
       }
+    } catch (err) {
+      alert('Terjadi kesalahan. Coba lagi.');
     }
+
     setAccessSavingKey(null);
   };
 
