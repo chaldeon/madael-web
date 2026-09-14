@@ -8,6 +8,7 @@ import { MODULE_OPTIONS } from '@/lib/employeeModules';
 import { nextEmployeeId } from '@/lib/employeeId';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
+import { logActivity } from '@/lib/activityLog';
 
 const emptyForm = {
   nama: '',
@@ -393,6 +394,13 @@ export default function EmployeeListPage() {
         .eq('module_name', moduleKey);
       if (!error) {
         setAccessModules((prev) => prev.filter((m) => m !== moduleKey));
+        logActivity(supabase, {
+          userId: viewer?.id,
+          aksi: 'cabut_akses_modul',
+          targetTable: 'employee_modules',
+          targetId: accessEmployee.id,
+          detail: { employee_nama: accessEmployee.nama, module_name: moduleKey },
+        });
       } else {
         alert('Gagal menghapus akses modul: ' + error.message);
       }
@@ -402,6 +410,13 @@ export default function EmployeeListPage() {
         .insert([{ employee_id: accessEmployee.id, module_name: moduleKey }]);
       if (!error) {
         setAccessModules((prev) => [...prev, moduleKey]);
+        logActivity(supabase, {
+          userId: viewer?.id,
+          aksi: 'tambah_akses_modul',
+          targetTable: 'employee_modules',
+          targetId: accessEmployee.id,
+          detail: { employee_nama: accessEmployee.nama, module_name: moduleKey },
+        });
       } else {
         alert('Gagal menambah akses modul: ' + error.message);
       }
