@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download, ShieldCheck, Power, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { getCompletenessInfo } from '@/lib/dataCompleteness';
 import { MODULE_OPTIONS } from '@/lib/employeeModules';
 import { nextEmployeeId } from '@/lib/employeeId';
 import { useModuleAccess } from '@/lib/useModuleAccess';
@@ -117,6 +118,28 @@ function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
   );
 }
 
+// Nonaktif tidak dinilai kelengkapannya — kosong di situ tidak relevan
+// sampai diaktifkan lagi.
+function CompletenessBadge({ emp, master, hasSchedule }) {
+  if (emp.status !== 'Aktif') {
+    return <span className="text-xs text-[#B0B0B0]">—</span>;
+  }
+  const info = getCompletenessInfo({ master, hasSchedule });
+  const styles = {
+    complete: 'bg-[#DCFCE7] text-[#166534]',
+    warning: 'bg-amber-100 text-amber-800',
+    critical: 'bg-red-100 text-red-700',
+  };
+  return (
+    <span
+      title={info.missing.length ? `Kosong: ${info.missing.join(', ')}` : undefined}
+      className={`text-xs font-medium px-2.5 py-1 ${styles[info.level]}`}
+    >
+      {info.label}
+    </span>
+  );
+}
+
 export default function EmployeeListPage() {
   const supabase = createClient();
   // Cuma dipakai untuk tahu apakah viewer yang sedang login superadmin —
@@ -126,6 +149,8 @@ export default function EmployeeListPage() {
 
   const [employees, setEmployees] = useState([]);
   const [companies, setCompanies] = useState([]);
+  const [masterByEmployeeId, setMasterByEmployeeId] = useState({}); // employee.id -> employees_master row
+  const [scheduledIds, setScheduledIds] = useState(new Set()); // employee.id yang sudah punya work_schedule
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -183,16 +208,28 @@ export default function EmployeeListPage() {
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
-      .from('employees')
-      .select('id, nama, employee_id, email, client_id, companies:client_id ( id, nama_perusahaan ), status, is_superadmin, created_at')
-      .order('created_at', { ascending: false });
+    const [empRes, masterRes, scheduleRes] = await Promise.all([
+      supabase
+        .from('employees')
+        .select('id, nama, employee_id, email, client_id, companies:client_id ( id, nama_perusahaan ), status, is_superadmin, created_at')
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('employees_master')
+        .select('linked_employee_id, status_ptkp, npwp_status, jkk_rate, nama_rekening, no_rekening, alamat, kontak_darurat_nama, kontak_darurat_telepon')
+        .not('linked_employee_id', 'is', null),
+      supabase.from('work_schedule').select('employee_id'),
+    ]);
 
+    const { data, error } = empRes;
     if (error) {
       setError(error.message);
     } else {
       setEmployees(data || []);
     }
+    setMasterByEmployeeId(
+      Object.fromEntries((masterRes.data || []).map((m) => [m.linked_employee_id, m]))
+    );
+    setScheduledIds(new Set((scheduleRes.data || []).map((r) => r.employee_id)));
     setLoading(false);
   }, [supabase]);
 
@@ -566,6 +603,7 @@ export default function EmployeeListPage() {
                 <SortableHeader colKey="perusahaan" label="Perusahaan" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="is_superadmin" label="Superadmin" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <th className="px-5 py-3 font-medium">Kelengkapan Data</th>
                 <th className="px-5 py-3 font-medium text-right">Akses</th>
               </tr>
             </thead>
@@ -597,6 +635,15 @@ export default function EmployeeListPage() {
                     >
                       {emp.is_superadmin ? 'Ya' : 'Tidak'}
                     </span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <Link href={`/employee/list/${emp.id}`}>
+                      <CompletenessBadge
+                        emp={emp}
+                        master={masterByEmployeeId[emp.id]}
+                        hasSchedule={scheduledIds.has(emp.id)}
+                      />
+                    </Link>
                   </td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-end gap-3">
