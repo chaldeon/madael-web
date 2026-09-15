@@ -40,6 +40,7 @@ export default function EmployeeDetailPage() {
   const [master, setMaster] = useState(null); // row employees_master, null kalau belum ada
   const [schedule, setSchedule] = useState(null); // row work_schedule, null kalau belum diatur
   const [companies, setCompanies] = useState([]);
+  const [pendingProfileCount, setPendingProfileCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -60,6 +61,7 @@ export default function EmployeeDetailPage() {
       { data: masterData },
       { data: schedData },
       { data: companyData },
+      { count: pendingCount },
     ] = await Promise.all([
       supabase
         .from('employees')
@@ -69,6 +71,7 @@ export default function EmployeeDetailPage() {
       supabase.from('employees_master').select('id, posisi, status, gaji_pokok, tunjangan').eq('linked_employee_id', employeeId).maybeSingle(),
       supabase.from('work_schedule').select('jam_masuk, jam_pulang, hari_kerja').eq('employee_id', employeeId).maybeSingle(),
       supabase.from('companies').select('id, nama_perusahaan').order('nama_perusahaan', { ascending: true }),
+      supabase.from('profile_change_requests').select('id', { count: 'exact', head: true }).eq('employee_id', employeeId).eq('status', 'pending'),
     ]);
 
     if (empError || !empData) {
@@ -81,6 +84,7 @@ export default function EmployeeDetailPage() {
     setMaster(masterData || null);
     setSchedule(schedData || null);
     setCompanies(companyData || []);
+    setPendingProfileCount(pendingCount || 0);
     setLoading(false);
   }, [supabase, employeeId]);
 
@@ -257,7 +261,23 @@ export default function EmployeeDetailPage() {
         </div>
       </div>
 
-      {/* Modal Edit */}
+      {/* Riwayat Perubahan Profil */}
+      <div className="bg-white border border-[#E0E0E0] p-5 mt-6 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-xs font-semibold text-black tracking-[0.02em] mb-1">Perubahan Profil</p>
+          <p className="text-sm text-[#6B6B6B]">
+            {pendingProfileCount > 0
+              ? `${pendingProfileCount} pengajuan menunggu review dari karyawan ini.`
+              : 'Tidak ada pengajuan yang menunggu dari karyawan ini.'}
+          </p>
+        </div>
+        <Link
+          href={`/employee/profile/admin?employee=${employee.id}&nama=${encodeURIComponent(employee.nama || '')}`}
+          className="text-xs text-madael-red hover:text-madael-dark font-medium whitespace-nowrap"
+        >
+          Lihat Riwayat Pengajuan
+        </Link>
+      </div>
       {showEditModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6" onClick={handleEditModalBackdrop}>
           <div className="w-full max-w-[480px] bg-white border-t-4 border-madael-red p-8 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
