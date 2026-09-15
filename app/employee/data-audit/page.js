@@ -6,21 +6,14 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { missingImportantFields } from '@/lib/dataCompleteness';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 
-// Field payroll yang dianggap "penting" untuk keperluan Fase 2.1 seksi 3 —
-// kalau salah satu kosong pada baris yang SUDAH ter-link, baris itu masih
-// dianggap belum lengkap meskipun sudah tersambung ke akun absensi.
-function missingImportantFields(row) {
-  const missing = [];
-  if (!row.status_ptkp) missing.push('Status PTKP');
-  if (!row.npwp_status) missing.push('Status NPWP');
-  if (row.jkk_rate === null || row.jkk_rate === undefined || row.jkk_rate === '') missing.push('Tingkat Risiko JKK');
-  if (!row.nama_rekening || !row.no_rekening) missing.push('Rekening (nama/nomor)');
-  return missing;
-}
+// Field payroll & personal yang dianggap "penting" untuk keperluan Seksi 3
+// sekarang didefinisikan di satu tempat: lib/dataCompleteness.js — dipakai
+// bersama dengan badge kelengkapan data di Employee List.
 
 function Section({ title, description, count, children }) {
   return (
@@ -63,7 +56,7 @@ export default function DataAuditPage() {
       supabase.from('work_schedule').select('employee_id'),
       supabase
         .from('employees_master')
-        .select('id, nama, client_id, linked_employee_id, status_ptkp, npwp_status, jkk_rate, nama_rekening, no_rekening, created_at, employees:linked_employee_id ( nama, status )')
+        .select('id, nama, client_id, linked_employee_id, status_ptkp, npwp_status, jkk_rate, nama_rekening, no_rekening, alamat, kontak_darurat_nama, kontak_darurat_telepon, created_at, employees:linked_employee_id ( nama, status )')
         .order('created_at', { ascending: false }),
       supabase.from('companies').select('id, nama_perusahaan'),
     ]);
