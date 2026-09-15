@@ -3,7 +3,9 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Check, X as XIcon } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { Check, X as XIcon, ArrowLeft } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { notifyEmployee } from '@/lib/notify';
@@ -30,6 +32,9 @@ function StatusBadge({ status }) {
 export default function ProfileRequestsAdminPage() {
   const supabase = createClient();
   const { status, employee } = useModuleAccess('profile_admin');
+  const searchParams = useSearchParams();
+  const filterEmployeeId = searchParams.get('employee');
+  const filterEmployeeName = searchParams.get('nama');
 
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -43,10 +48,16 @@ export default function ProfileRequestsAdminPage() {
     setLoading(true);
     setLoadError(null);
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('profile_change_requests')
       .select('*, employees:employee_id ( nama, employee_id )')
       .order('created_at', { ascending: false });
+
+    if (filterEmployeeId) {
+      query = query.eq('employee_id', filterEmployeeId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       setLoadError(error.message || 'Gagal memuat pengajuan.');
@@ -56,7 +67,7 @@ export default function ProfileRequestsAdminPage() {
 
     setRequests(data || []);
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, filterEmployeeId]);
 
   useEffect(() => {
     if (status === 'allowed') loadData();
@@ -144,25 +155,36 @@ export default function ProfileRequestsAdminPage() {
     );
   }
 
-  const visibleRequests = showAll ? requests : requests.filter((r) => r.status === 'pending');
+  const visibleRequests = showAll || filterEmployeeId ? requests : requests.filter((r) => r.status === 'pending');
   const pendingCount = requests.filter((r) => r.status === 'pending').length;
 
   return (
     <div className="max-w-[900px] mx-auto px-6 py-10">
+      {filterEmployeeId && (
+        <Link href={`/employee/list/${filterEmployeeId}`} className="inline-flex items-center gap-1.5 text-sm text-[#6B6B6B] hover:text-black mb-6">
+          <ArrowLeft size={14} /> Kembali ke {filterEmployeeName || 'Detail Karyawan'}
+        </Link>
+      )}
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Kelola Perubahan Profil</h1>
+          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
+            {filterEmployeeId ? `Riwayat Perubahan Profil${filterEmployeeName ? ' — ' + filterEmployeeName : ''}` : 'Kelola Perubahan Profil'}
+          </h1>
           <p className="text-sm text-[#6B6B6B] mt-1">
-            {pendingCount > 0 ? `${pendingCount} pengajuan menunggu review.` : 'Tidak ada pengajuan yang menunggu.'}
+            {filterEmployeeId
+              ? `${requests.length} pengajuan ditemukan.`
+              : pendingCount > 0 ? `${pendingCount} pengajuan menunggu review.` : 'Tidak ada pengajuan yang menunggu.'}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowAll((v) => !v)}
-          className="text-xs text-madael-red hover:text-madael-dark font-medium"
-        >
-          {showAll ? 'Tampilkan yang pending saja' : 'Tampilkan semua riwayat'}
-        </button>
+        {!filterEmployeeId && (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="text-xs text-madael-red hover:text-madael-dark font-medium"
+          >
+            {showAll ? 'Tampilkan yang pending saja' : 'Tampilkan semua riwayat'}
+          </button>
+        )}
       </div>
 
       {actionError && <p className="text-xs text-red-600 mb-4">{actionError}</p>}
