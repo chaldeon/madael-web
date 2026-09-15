@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Pencil, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { notifyEmployee } from '@/lib/notify';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { logActivity } from '@/lib/activityLog';
 import { useModalDismiss } from '@/lib/useModalDismiss';
@@ -251,6 +252,14 @@ export default function KoreksiAbsensiPage() {
         targetId: inserted.id,
         detail: { employee_id: editingRow.employee_id, tanggal: editingRow.tanggal, alasan: form.alasan.trim() },
       });
+
+      notifyEmployee(supabase, {
+        userId: editingRow.employee_id,
+        tipe: 'absensi_dikoreksi',
+        pesan: `Record absensi tanggal ${formatTanggal(editingRow.tanggal)} ditambahkan oleh admin. Alasan: ${form.alasan.trim()}`,
+        link: '/employee/absensi',
+      });
+
       return;
     }
 
@@ -307,6 +316,13 @@ export default function KoreksiAbsensiPage() {
         before: { clock_in: editingRow.clock_in, clock_out: editingRow.clock_out, status_telat: editingRow.status_telat },
         after: { clock_in: newClockIn, clock_out: newClockOut, status_telat: form.statusTelat },
       },
+    });
+
+    notifyEmployee(supabase, {
+      userId: editingRow.employee_id,
+      tipe: 'absensi_dikoreksi',
+      pesan: `Record absensi tanggal ${formatTanggal(editingRow.tanggal)} dikoreksi oleh admin. Alasan: ${form.alasan.trim()}`,
+      link: '/employee/absensi',
     });
   };
 

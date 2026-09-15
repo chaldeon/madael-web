@@ -6,6 +6,8 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { X, Plus, Eye, Pencil, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { notifyEmployee } from '@/lib/notify';
+import { logActivity } from '@/lib/activityLog';
 import { hitungBPJS, hitungBrutoPPh21, hitungPPh21TER, hitungPenaltyTelat, PTKP_DATA, JKK_OPTIONS } from '@/lib/payroll/calculations';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
@@ -624,7 +626,7 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
 
 export default function PayslipAdminPage() {
   const supabase = createClient();
-  const { status } = useModuleAccess('payslip_admin');
+  const { status, employee } = useModuleAccess('payslip_admin');
 
   const [payslips, setPayslips] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -783,14 +785,34 @@ export default function PayslipAdminPage() {
 
   const togglePublish = async (p) => {
     setActionError(null);
+    const willPublish = !p.is_published;
     const { error } = await supabase
       .from('payslips')
-      .update({ is_published: !p.is_published })
+      .update({ is_published: willPublish })
       .eq('id', p.id);
     if (error) {
       setActionError(`Gagal update status "${p.employees?.nama || 'slip ini'}": ${error.message}`);
-    } else {
-      setPayslips((prev) => prev.map((x) => (x.id === p.id ? { ...x, is_published: !p.is_published } : x)));
+      return;
+    }
+
+    setPayslips((prev) => prev.map((x) => (x.id === p.id ? { ...x, is_published: willPublish } : x)));
+
+    // Notif hanya saat publish (bukan saat unpublish/tarik-lagi).
+    if (willPublish) {
+      notifyEmployee(supabase, {
+        userId: p.employee_id,
+        tipe: 'payslip_published',
+        pesan: `Slip gaji periode ${p.periode_label || p.periode} sudah bisa dilihat.`,
+        link: '/employee/payslip',
+      });
+
+      logActivity(supabase, {
+        userId: employee?.id,
+        aksi: 'publish_payslip',
+        targetTable: 'payslips',
+        targetId: p.id,
+        detail: { employee_id: p.employee_id, periode: p.periode },
+      });
     }
   };
 
