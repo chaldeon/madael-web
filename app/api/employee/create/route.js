@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { DEFAULT_MODULE_ACCESS } from '@/lib/employeeModules';
 import { nextEmployeeId } from '@/lib/employeeId';
+import { logActivity } from '@/lib/activityLog';
 
 export async function POST(request) {
   try {
@@ -31,7 +32,7 @@ export async function POST(request) {
     // Verifikasi requester adalah superadmin
     const { data: requester } = await supabase
       .from('employees')
-      .select('is_superadmin')
+      .select('id, is_superadmin')
       .eq('email', user.email)
       .maybeSingle();
 
@@ -140,6 +141,16 @@ export async function POST(request) {
     if (masterError) {
       console.error('Gagal buat draft employees_master:', masterError.message);
     }
+
+    // Fire-and-forget — kegagalan mencatat log tidak boleh menggagalkan
+    // pembuatan employee yang sudah berhasil.
+    logActivity(admin, {
+      userId: requester.id,
+      aksi: 'tambah_employee',
+      targetTable: 'employees',
+      targetId: empRow.id,
+      detail: { nama: empRow.nama, email: empRow.email, is_superadmin: empRow.is_superadmin },
+    });
 
     return NextResponse.json(
       { success: true, employee: empRow, tempPassword },
