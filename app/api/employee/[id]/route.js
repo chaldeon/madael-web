@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { logActivity } from '@/lib/activityLog';
 
 // PATCH /api/employee/[id]
 // Update data karyawan (nama, employee_id, client_id, status, is_superadmin).
@@ -35,7 +36,7 @@ export async function PATCH(request, { params }) {
     // Verifikasi requester adalah superadmin
     const { data: requester } = await supabase
       .from('employees')
-      .select('is_superadmin')
+      .select('id, is_superadmin')
       .eq('email', user.email)
       .maybeSingle();
 
@@ -113,6 +114,19 @@ export async function PATCH(request, { params }) {
         { status: 500 }
       );
     }
+
+    // Fire-and-forget — kegagalan mencatat log tidak boleh menggagalkan
+    // perubahan yang sudah tersimpan.
+    logActivity(admin, {
+      userId: requester.id,
+      aksi: 'edit_employee',
+      targetTable: 'employees',
+      targetId: id,
+      detail: {
+        before: { status: target.status, is_superadmin: target.is_superadmin },
+        after: { nama, status: nextStatus, is_superadmin: nextIsSuperadmin },
+      },
+    });
 
     return NextResponse.json({ success: true, employee: empRow }, { status: 200 });
   } catch (err) {
@@ -291,6 +305,16 @@ export async function DELETE(request, { params }) {
     if (authUserId) {
       await admin.auth.admin.deleteUser(authUserId);
     }
+
+    // Fire-and-forget — dicatat setelah sukses karena row employees-nya
+    // sendiri sudah tidak ada lagi untuk di-FK-kan.
+    logActivity(admin, {
+      userId: requester.id,
+      aksi: 'hapus_employee',
+      targetTable: 'employees',
+      targetId: id,
+      detail: { nama: target.nama, email: target.email },
+    });
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (err) {
