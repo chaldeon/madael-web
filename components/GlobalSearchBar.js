@@ -10,9 +10,9 @@ const DEBOUNCE_MS = 300;
 
 // Search bar global untuk dashboard superadmin — cari lintas employee,
 // invoice (Task 16, tabel opsional), dan dokumen (Document Generator).
-// Belum ada halaman detail per-employee/per-invoice di codebase ini, jadi
-// hasil employee/invoice diarahkan ke halaman list masing-masing, bukan
-// deep-link ke row spesifik. Dokumen sudah punya detail route asli.
+// Employee sudah deep-link ke halaman detailnya (app/employee/list/[id]).
+// Invoice belum punya halaman detail sendiri di codebase ini, jadi hasilnya
+// masih diarahkan ke halaman list invoice. Dokumen sudah punya detail route asli.
 export default function GlobalSearchBar() {
   // PENTING: createClient() bikin instance Supabase baru tiap dipanggil.
   // Kalau dipanggil langsung di body komponen (seperti sebelumnya), setiap
@@ -152,7 +152,7 @@ export default function GlobalSearchBar() {
                   {results.employees.map((e) => (
                     <Link
                       key={e.id}
-                      href="/employee/list"
+                      href={`/employee/list/${e.id}`}
                       onClick={() => setOpen(false)}
                       className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#FAFAFA] no-underline transition-colors"
                     >
