@@ -131,7 +131,7 @@ export default function EmployeeDashboardPage() {
             <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
               Dashboard Saya
             </h1>
-            <p className="text-sm text-[#6B6B6B] mb-8">Absensi, cuti, dan payslip kamu.</p>
+            <p className="text-sm text-[#6B6B6B] mb-8">Profil, absensi, cuti, dan payslip kamu.</p>
             <ModuleGrid
               modules={MODULE_REGISTRY.filter((m) => m.layer === 'personal')}
               hasAnyAccess={hasAnyAccess}
@@ -188,7 +188,7 @@ export default function EmployeeDashboardPage() {
             <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
               Dashboard Saya
             </h1>
-            <p className="text-sm text-[#6B6B6B] mb-8">Absensi, cuti, dan payslip kamu.</p>
+            <p className="text-sm text-[#6B6B6B] mb-8">Profil, absensi, cuti, dan payslip kamu.</p>
             <ModuleGrid
               modules={MODULE_REGISTRY.filter((m) => m.layer === 'personal')}
               hasAnyAccess={hasAnyAccess}
