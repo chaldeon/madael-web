@@ -215,8 +215,8 @@ function ReadOnlyField({ label, value }) {
   );
 }
 
-function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmit, saving, isEdit, saveError }) {
-  const handleModalBackdrop = useModalDismiss(true, onClose);
+function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmit, saving, isEdit, saveError, isDirty }) {
+  const handleModalBackdrop = useModalDismiss(true, onClose, undefined, isDirty);
   const [loadingDefaults, setLoadingDefaults] = useState(false);
   const [loadingPenalty, setLoadingPenalty] = useState(false);
   const [penaltyNote, setPenaltyNote] = useState('');
@@ -642,6 +642,8 @@ export default function PayslipAdminPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  // Snapshot data awal form (dipakai buat dirty-check di PayslipFormModal).
+  const formBaselineRef = useRef(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
@@ -710,7 +712,9 @@ export default function PayslipAdminPage() {
 
   const openCreate = async () => {
     const tahunSekarang = String(new Date().getFullYear());
-    setForm({ ...EMPTY_FORM, periode: `${tahunSekarang}-`, periode_label: '' });
+    const initial = { ...EMPTY_FORM, periode: `${tahunSekarang}-`, periode_label: '' };
+    formBaselineRef.current = initial;
+    setForm(initial);
     setEditingId(null);
     setModalOpen(true);
     const { data } = await supabase
@@ -718,7 +722,11 @@ export default function PayslipAdminPage() {
       .select('last_number')
       .eq('kode', 'INV')
       .maybeSingle();
-    setForm((prev) => ({ ...prev, nomor_dokumen: previewNomorDokumen(data?.last_number) }));
+    // nomor_dokumen ini diisi otomatis, bukan diketik user — masukkan juga ke
+    // baseline supaya tidak dianggap "perubahan" begitu modal baru dibuka.
+    const nomorPreview = previewNomorDokumen(data?.last_number);
+    formBaselineRef.current = { ...formBaselineRef.current, nomor_dokumen: nomorPreview };
+    setForm((prev) => ({ ...prev, nomor_dokumen: nomorPreview }));
   };
 
   const openEdit = (p) => {
@@ -727,6 +735,7 @@ export default function PayslipAdminPage() {
       if (p[key] !== undefined && p[key] !== null) next[key] = p[key];
     });
     next.employee_id = p.employee_id;
+    formBaselineRef.current = next;
     setForm(next);
     setEditingId(p.id);
     setModalOpen(true);
@@ -959,6 +968,7 @@ export default function PayslipAdminPage() {
           saving={saving}
           isEdit={!!editingId}
           saveError={saveError}
+          isDirty={JSON.stringify(form) !== JSON.stringify(formBaselineRef.current)}
         />
       )}
     </div>

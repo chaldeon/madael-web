@@ -315,6 +315,9 @@ export default function EmployeeListPage() {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  // employee_id disarankan beda tiap kali modal dibuka, jadi baseline-nya
+  // tidak bisa pakai konstanta emptyForm statis — perlu snapshot per-buka.
+  const formBaselineRef = useRef(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
   const [createdInfo, setCreatedInfo] = useState(null); // { email, tempPassword }
@@ -352,10 +355,28 @@ export default function EmployeeListPage() {
   const [pageSize, setPageSize] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const handleAddModalBackdrop = useModalDismiss(showAddModal, () => setShowAddModal(false));
-  const handleAccessModalBackdrop = useModalDismiss(!!accessEmployee, () => setAccessEmployee(null));
-  const handleBulkModalBackdrop = useModalDismiss(showBulkModal, () => setShowBulkModal(false));
-  const handleDeleteModalBackdrop = useModalDismiss(!!deleteTarget, () => closeDeleteModal());
+  const handleAddModalBackdrop = useModalDismiss(
+    showAddModal,
+    () => setShowAddModal(false),
+    undefined,
+    JSON.stringify(form) !== JSON.stringify(formBaselineRef.current)
+  );
+  // Tiap checkbox modul di modal ini langsung tersimpan ke server saat
+  // diklik (lihat toggleModule) — tidak ada state draft yang bisa hilang,
+  // jadi aman langsung tutup tanpa konfirmasi.
+  const handleAccessModalBackdrop = useModalDismiss(!!accessEmployee, () => setAccessEmployee(null), false);
+  const handleBulkModalBackdrop = useModalDismiss(
+    showBulkModal,
+    () => setShowBulkModal(false),
+    undefined,
+    !!bulkFile && !bulkResult
+  );
+  const handleDeleteModalBackdrop = useModalDismiss(
+    !!deleteTarget,
+    () => closeDeleteModal(),
+    undefined,
+    deleteConfirmText.trim() !== ''
+  );
   const handleStatusConfirmBackdrop = useModalDismiss(!!statusConfirmTarget, closeStatusConfirm, false);
 
   // Perusahaan tempat karyawan bekerja/ditempatkan (termasuk outsourcing) —
@@ -480,7 +501,9 @@ export default function EmployeeListPage() {
     // Employee ID disarankan otomatis (format MDL0001, urut, 4 digit) dari ID
     // tertinggi yang sudah ada — superadmin masih bisa timpa manual kalau perlu.
     const suggestedId = nextEmployeeId(employees.map((e) => e.employee_id));
-    setForm({ ...emptyForm, employee_id: suggestedId });
+    const initial = { ...emptyForm, employee_id: suggestedId };
+    formBaselineRef.current = initial;
+    setForm(initial);
     setFormError(null);
     setCreatedInfo(null);
     setShowAddModal(true);

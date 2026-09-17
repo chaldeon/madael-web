@@ -64,8 +64,13 @@ export default function CrmDealsPage() {
   const [filterCompany, setFilterCompany] = useState('');
 
   const [showAddModal, setShowAddModal] = useState(false);
-  const handleAddModalBackdrop = useModalDismiss(showAddModal, () => setShowAddModal(false));
   const [form, setForm] = useState(emptyForm);
+  const handleAddModalBackdrop = useModalDismiss(
+    showAddModal,
+    () => setShowAddModal(false),
+    undefined,
+    JSON.stringify(form) !== JSON.stringify(emptyForm)
+  );
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
 

@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Pencil, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
@@ -63,6 +63,9 @@ export default function KoreksiAbsensiPage() {
 
   const [editingRow, setEditingRow] = useState(null);
   const [form, setForm] = useState({ clockIn: '', clockOut: '', statusTelat: false, alasan: '' });
+  // Snapshot form koreksi saat modal dibuka (nilai awal beda-beda tergantung
+  // row yang lagi dikoreksi).
+  const formBaselineRef = useRef({ clockIn: '', clockOut: '', statusTelat: false, alasan: '' });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
@@ -127,12 +130,14 @@ export default function KoreksiAbsensiPage() {
 
   const openEdit = (row) => {
     setSaveError(null);
-    setForm({
+    const initial = {
       clockIn: isoToTimeInput(row.clock_in),
       clockOut: isoToTimeInput(row.clock_out),
       statusTelat: !!row.status_telat,
       alasan: '',
-    });
+    };
+    formBaselineRef.current = initial;
+    setForm(initial);
     setEditingRow(row);
   };
 
@@ -179,7 +184,12 @@ export default function KoreksiAbsensiPage() {
     setSaveError(null);
   };
 
-  const handleEditModalBackdrop = useModalDismiss(!!editingRow, closeEdit);
+  const handleEditModalBackdrop = useModalDismiss(
+    !!editingRow,
+    closeEdit,
+    undefined,
+    JSON.stringify(form) !== JSON.stringify(formBaselineRef.current)
+  );
 
   const handleSave = async () => {
     if (!form.alasan.trim()) {

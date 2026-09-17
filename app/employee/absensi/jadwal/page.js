@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { X, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
@@ -31,8 +31,16 @@ export default function JadwalKerjaPage() {
   const [loadError, setLoadError] = useState(null);
 
   const [editingEmp, setEditingEmp] = useState(null);
-  const handleEditModalBackdrop = useModalDismiss(!!editingEmp, () => setEditingEmp(null));
   const [form, setForm] = useState(EMPTY_FORM);
+  // Snapshot jadwal awal (bisa jadwal yang sudah ada, atau EMPTY_FORM kalau
+  // karyawan belum punya jadwal) supaya bisa dibandingkan dengan form saat ini.
+  const formBaselineRef = useRef(EMPTY_FORM);
+  const handleEditModalBackdrop = useModalDismiss(
+    !!editingEmp,
+    () => setEditingEmp(null),
+    undefined,
+    JSON.stringify(form) !== JSON.stringify(formBaselineRef.current)
+  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
@@ -69,9 +77,11 @@ export default function JadwalKerjaPage() {
 
   const openEdit = (emp) => {
     const existing = schedules[emp.id];
-    setForm(existing
+    const initial = existing
       ? { jam_masuk: formatJam(existing.jam_masuk), jam_pulang: formatJam(existing.jam_pulang), hari_kerja: existing.hari_kerja || DEFAULT_HARI }
-      : EMPTY_FORM);
+      : EMPTY_FORM;
+    formBaselineRef.current = initial;
+    setForm(initial);
     setEditingEmp(emp);
   };
 
