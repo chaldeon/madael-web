@@ -21,6 +21,9 @@ const emptyForm = {
 
 const TEMPLATE_URL = '/templates/template-bulk-employee.xlsx';
 
+// Pilihan ukuran halaman untuk pagination tabel Employee List.
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
 // Kolom yang bisa disortir + cara ambil value-nya dari row employee.
 const SORT_COLUMNS = {
   nama: { label: 'Nama', get: (e) => (e.nama || '').toLowerCase() },
@@ -190,6 +193,11 @@ export default function EmployeeListPage() {
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [bulkResult, setBulkResult] = useState(null); // { successCount, errorCount, results }
 
+  // Pagination tabel — murni render di client, data tetap di-fetch penuh
+  // (aman untuk skala saat ini).
+  const [pageSize, setPageSize] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
+
   const handleAddModalBackdrop = useModalDismiss(showAddModal, () => setShowAddModal(false));
   const handleAccessModalBackdrop = useModalDismiss(!!accessEmployee, () => setAccessEmployee(null));
   const handleBulkModalBackdrop = useModalDismiss(showBulkModal, () => setShowBulkModal(false));
@@ -273,6 +281,25 @@ export default function EmployeeListPage() {
     });
     return sortDir === 'desc' ? sorted.reverse() : sorted;
   }, [employees, filterClientId, filterStatus, searchQuery, sortField, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+
+  // Balikin ke halaman valid kalau halaman aktif jadi kosong — misalnya
+  // setelah ganti filter, ganti page size, atau data berkurang (hapus/nonaktif).
+  useEffect(() => {
+    setCurrentPage((prev) => Math.min(prev, totalPages));
+  }, [totalPages]);
+
+  // Ganti filter, search, atau page size → balik ke halaman 1 (biar nggak
+  // nyangkut di halaman yang tiba-tiba jadi nggak relevan).
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterClientId, filterStatus, searchQuery, pageSize]);
+
+  const paginated = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
 
   // Tambah perusahaan baru langsung dari sini — nulis ke tabel `companies`
   // yang sama, jadi otomatis muncul juga di Payroll Manager/CRM/dll.
@@ -635,7 +662,7 @@ export default function EmployeeListPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((emp) => (
+              {paginated.map((emp) => (
                 <tr key={emp.id} className="border-b border-[#F0F0F0] last:border-0">
                   <td className="px-5 py-3.5 text-black">
                     <Link href={`/employee/list/${emp.id}`} className="hover:text-madael-red hover:underline underline-offset-2">
@@ -713,6 +740,48 @@ export default function EmployeeListPage() {
           </table>
         )}
       </div>
+
+      {!loading && !error && filtered.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-4 text-sm text-[#6B6B6B]">
+          <div>
+            Menampilkan {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, filtered.length)} dari {filtered.length} employee
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label htmlFor="pageSize" className="whitespace-nowrap">Per halaman</label>
+              <select
+                id="pageSize"
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="border border-[#E0E0E0] px-2 py-1 text-sm"
+              >
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 border border-[#E0E0E0] disabled:opacity-40 hover:border-madael-red hover:text-madael-red transition-colors"
+              >
+                Sebelumnya
+              </button>
+              <span className="px-1 whitespace-nowrap">Halaman {currentPage} / {totalPages}</span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 border border-[#E0E0E0] disabled:opacity-40 hover:border-madael-red hover:text-madael-red transition-colors"
+              >
+                Berikutnya
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Tambah Employee */}
       {showAddModal && (
