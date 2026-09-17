@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download, ShieldCheck, Power, Trash2 } from 'lucide-react';
+import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download, ShieldCheck, Power, Trash2, Search } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { getCompletenessInfo } from '@/lib/dataCompleteness';
 import { MODULE_OPTIONS } from '@/lib/employeeModules';
@@ -133,7 +133,7 @@ function CompletenessBadge({ emp, master, hasSchedule }) {
   return (
     <span
       title={info.missing.length ? `Kosong: ${info.missing.join(', ')}` : undefined}
-      className={`text-xs font-medium px-2.5 py-1 ${styles[info.level]}`}
+      className={`inline-block whitespace-nowrap text-xs font-medium px-2.5 py-1 ${styles[info.level]}`}
     >
       {info.label}
     </span>
@@ -156,6 +156,7 @@ export default function EmployeeListPage() {
 
   const [filterClientId, setFilterClientId] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [sortField, setSortField] = useState('nama');
   const [sortDir, setSortDir] = useState('asc');
@@ -248,10 +249,16 @@ export default function EmployeeListPage() {
   };
 
   const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     const rows = employees.filter((e) => {
       const matchPerusahaan = !filterClientId || e.client_id === filterClientId;
       const matchStatus = !filterStatus || e.status === filterStatus;
-      return matchPerusahaan && matchStatus;
+      const matchSearch =
+        !q ||
+        (e.nama || '').toLowerCase().includes(q) ||
+        (e.employee_id || '').toLowerCase().includes(q) ||
+        (e.email || '').toLowerCase().includes(q);
+      return matchPerusahaan && matchStatus && matchSearch;
     });
 
     const getValue = SORT_COLUMNS[sortField]?.get;
@@ -265,7 +272,7 @@ export default function EmployeeListPage() {
       return 0;
     });
     return sortDir === 'desc' ? sorted.reverse() : sorted;
-  }, [employees, filterClientId, filterStatus, sortField, sortDir]);
+  }, [employees, filterClientId, filterStatus, searchQuery, sortField, sortDir]);
 
   // Tambah perusahaan baru langsung dari sini — nulis ke tabel `companies`
   // yang sama, jadi otomatis muncul juga di Payroll Manager/CRM/dll.
@@ -572,6 +579,26 @@ export default function EmployeeListPage() {
       </div>
 
       <div className="flex flex-wrap gap-3 mb-6">
+        <div className="relative flex-1 min-w-[240px] max-w-[360px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9A9A9A] pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Cari nama, employee ID, atau email..."
+            className="w-full border border-[#E0E0E0] pl-8 pr-8 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#9A9A9A] hover:text-black"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
         <select value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} className={selectClass}>
           <option value="">Semua Perusahaan</option>
           {companies.map((c) => (
@@ -603,7 +630,7 @@ export default function EmployeeListPage() {
                 <SortableHeader colKey="perusahaan" label="Perusahaan" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="is_superadmin" label="Superadmin" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
-                <th className="px-5 py-3 font-medium">Kelengkapan Data</th>
+                <th className="px-5 py-3 font-medium whitespace-nowrap">Kelengkapan Data</th>
                 <th className="px-5 py-3 font-medium text-right">Akses</th>
               </tr>
             </thead>
