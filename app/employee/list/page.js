@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download, ShieldCheck, Power, Trash2, Search } from 'lucide-react';
+import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download, ShieldCheck, Power, Trash2, Search, MoreVertical, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { getCompletenessInfo } from '@/lib/dataCompleteness';
 import { MODULE_OPTIONS } from '@/lib/employeeModules';
@@ -21,8 +21,133 @@ const emptyForm = {
 
 const TEMPLATE_URL = '/templates/template-bulk-employee.xlsx';
 
+// MODULE_OPTIONS itu list flat, tapi sub-permission-nya ditandai lewat
+// prefix teks "— Sub: ..." pada label. Susun ulang jadi grup (modul utama +
+// sub-modulnya) di sini, sekali saat load, supaya modal "Kelola Akses" bisa
+// menampilkannya terindentasi/dikelompokkan alih-alih list checkbox lurus.
+const SUB_PREFIX = '— Sub: ';
+const MODULE_GROUPS = MODULE_OPTIONS.reduce((groups, mod) => {
+  if (mod.label.startsWith(SUB_PREFIX)) {
+    const parent = groups[groups.length - 1];
+    const child = { ...mod, label: mod.label.slice(SUB_PREFIX.length) };
+    if (parent) parent.children.push(child);
+    else groups.push({ ...mod, label: child.label, children: [] }); // fallback kalau tidak ada parent di atasnya
+  } else {
+    groups.push({ ...mod, children: [] });
+  }
+  return groups;
+}, []);
+
 // Pilihan ukuran halaman untuk pagination tabel Employee List.
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+// Banner notifikasi non-blocking — pengganti alert() supaya gayanya konsisten
+// sama modal custom lain di halaman ini (bukan dialog browser native).
+// Auto-dismiss setelah beberapa detik, tapi tetap bisa ditutup manual.
+function Toast({ toast, onDismiss }) {
+  useEffect(() => {
+    if (!toast) return undefined;
+    const t = setTimeout(onDismiss, toast.type === 'error' ? 6000 : 3500);
+    return () => clearTimeout(t);
+  }, [toast, onDismiss]);
+
+  if (!toast) return null;
+  const isError = toast.type === 'error';
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`fixed top-5 right-5 z-[1100] max-w-[380px] flex items-start gap-2.5 px-4 py-3.5 shadow-lg border-l-4 bg-white ${
+        isError ? 'border-madael-red' : 'border-[#166534]'
+      }`}
+    >
+      {isError ? (
+        <AlertCircle size={18} className="text-madael-red shrink-0 mt-0.5" />
+      ) : (
+        <CheckCircle2 size={18} className="text-[#166534] shrink-0 mt-0.5" />
+      )}
+      <p className="text-sm text-black flex-1">{toast.message}</p>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Tutup notifikasi"
+        className="text-[#9A9A9A] hover:text-black shrink-0"
+      >
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+// Menu aksi per baris ("⋯") — pengganti 3 icon polos yang cuma punya title
+// tooltip (tidak kebaca di layar sentuh). Klik di luar / Esc menutup menu.
+function RowActionsMenu({ emp, canDelete, onManageAccess, onToggleStatus, onDelete, togglingThis }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function handleClickOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    function handleEscape(e) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [open]);
+
+  const item = (label, Icon, onClick, extraClass = '') => (
+    <button
+      type="button"
+      onClick={() => {
+        setOpen(false);
+        onClick();
+      }}
+      className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left hover:bg-[#F4F4F4] transition-colors ${extraClass}`}
+    >
+      <Icon size={14} />
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="relative inline-block text-left" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Aksi untuk ${emp.nama}`}
+        disabled={togglingThis}
+        className="inline-flex p-1.5 text-[#6B6B6B] hover:text-black hover:bg-[#F4F4F4] transition-colors disabled:opacity-40"
+      >
+        <MoreVertical size={16} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 mt-1 w-52 bg-white border border-[#E0E0E0] shadow-lg z-20 py-1"
+        >
+          {item('Kelola Akses', ShieldCheck, () => onManageAccess(emp), 'text-black')}
+          {item(
+            emp.status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan',
+            Power,
+            () => onToggleStatus(emp),
+            emp.status === 'Aktif' ? 'text-madael-red' : 'text-[#166534]'
+          )}
+          {canDelete && item('Hapus Permanen', Trash2, () => onDelete(emp), 'text-madael-red')}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Kolom yang bisa disortir + cara ambil value-nya dari row employee.
 const SORT_COLUMNS = {
@@ -103,19 +228,43 @@ function CompanySelect({ value, onChange, companies, onAddCompany, inputClass, l
   );
 }
 
+// Baris skeleton saat data awal masih dimuat — cuma dipakai untuk initial
+// load (lihat `loading`), bukan untuk refresh-in-background setelah aksi
+// (toggle status/tambah akses sudah update state lokal langsung, tanpa
+// nge-refetch penuh, jadi tabel tidak perlu hilang lagi tiap ada aksi).
+function SkeletonRows({ rows = 6 }) {
+  return (
+    <table className="w-full text-sm" aria-hidden="true">
+      <tbody>
+        {Array.from({ length: rows }).map((_, i) => (
+          <tr key={i} className="border-b border-[#F0F0F0] last:border-0 animate-pulse">
+            {Array.from({ length: 8 }).map((__, j) => (
+              <td key={j} className="px-5 py-3.5">
+                <div className="h-3 bg-[#EFEFEF] rounded-sm" style={{ width: j === 0 ? '70%' : '55%' }} />
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 // Header kolom tabel yang bisa diklik buat sortir.
 function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
   const active = sortField === colKey;
   const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  const ariaSort = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
   return (
-    <th className="px-5 py-3 font-medium">
+    <th className="px-5 py-3 font-medium" aria-sort={ariaSort}>
       <button
         type="button"
         onClick={() => onSort(colKey)}
+        aria-label={`Urutkan berdasarkan ${label}${active ? (sortDir === 'asc' ? ', sedang A-Z' : ', sedang Z-A') : ''}`}
         className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
       >
         {label}
-        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />
+        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} aria-hidden="true" />
       </button>
     </th>
   );
@@ -170,8 +319,13 @@ export default function EmployeeListPage() {
   const [formError, setFormError] = useState(null);
   const [createdInfo, setCreatedInfo] = useState(null); // { email, tempPassword }
 
+  // Notifikasi non-blocking (pengganti alert()) — { type: 'error'|'success', message }
+  const [toast, setToast] = useState(null);
+
   // ---- Nonaktifkan / Aktifkan (soft delete) ----
   const [togglingId, setTogglingId] = useState(null); // employee.id yang sedang diproses
+  const [statusConfirmTarget, setStatusConfirmTarget] = useState(null); // employee row yang mau diubah statusnya
+  const closeStatusConfirm = useCallback(() => setStatusConfirmTarget(null), []);
 
   // ---- Hapus Permanen (hard delete, superadmin only) ----
   const [deleteTarget, setDeleteTarget] = useState(null); // employee row yang mau dihapus
@@ -202,6 +356,7 @@ export default function EmployeeListPage() {
   const handleAccessModalBackdrop = useModalDismiss(!!accessEmployee, () => setAccessEmployee(null));
   const handleBulkModalBackdrop = useModalDismiss(showBulkModal, () => setShowBulkModal(false));
   const handleDeleteModalBackdrop = useModalDismiss(!!deleteTarget, () => closeDeleteModal());
+  const handleStatusConfirmBackdrop = useModalDismiss(!!statusConfirmTarget, closeStatusConfirm, false);
 
   // Perusahaan tempat karyawan bekerja/ditempatkan (termasuk outsourcing) —
   // narik dari `companies`, satu sumber yang sama dipakai Payroll Manager,
@@ -366,13 +521,14 @@ export default function EmployeeListPage() {
   // Jalur aman default: pakai status Nonaktif, bukan hapus permanen. Sudah
   // ditegakkan di app/employee/dashboard (blok akses) dan useModuleAccess
   // (blok semua modul) begitu status bukan 'Aktif'.
-  const handleToggleStatus = async (emp) => {
+  // Klik icon/menu "Nonaktifkan"/"Aktifkan" cuma buka modal konfirmasi —
+  // request PATCH yang sesungguhnya baru jalan di handleConfirmToggleStatus.
+  const openStatusConfirm = (emp) => setStatusConfirmTarget(emp);
+
+  const handleConfirmToggleStatus = async () => {
+    const emp = statusConfirmTarget;
+    if (!emp) return;
     const nextStatus = emp.status === 'Aktif' ? 'Nonaktif' : 'Aktif';
-    const confirmMsg =
-      nextStatus === 'Nonaktif'
-        ? `Nonaktifkan akun ${emp.nama}? Dia tidak akan bisa akses dashboard/modul lagi, tapi data historisnya tetap tersimpan.`
-        : `Aktifkan kembali akun ${emp.nama}?`;
-    if (!window.confirm(confirmMsg)) return;
 
     setTogglingId(emp.id);
     try {
@@ -389,14 +545,21 @@ export default function EmployeeListPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error || 'Gagal mengubah status employee.');
+        setToast({ type: 'error', message: data.error || 'Gagal mengubah status employee.' });
       } else {
-        fetchEmployees();
+        // Update baris terkait langsung di state lokal — tidak perlu refetch
+        // penuh (yang tadinya bikin seluruh tabel sempat blank "Memuat data...").
+        setEmployees((prev) => prev.map((e) => (e.id === emp.id ? { ...e, status: nextStatus } : e)));
+        setToast({
+          type: 'success',
+          message: nextStatus === 'Aktif' ? `${emp.nama} diaktifkan kembali.` : `${emp.nama} dinonaktifkan.`,
+        });
       }
     } catch (err) {
-      alert('Terjadi kesalahan. Coba lagi.');
+      setToast({ type: 'error', message: 'Terjadi kesalahan. Coba lagi.' });
     }
     setTogglingId(null);
+    closeStatusConfirm();
   };
 
   // ---- Hapus Permanen ----
@@ -462,17 +625,36 @@ export default function EmployeeListPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ module_name: moduleKey }),
       });
-      const data = await res.json();
+
+      // Server ini selalu balas JSON (lihat try/catch di route.js), tapi kalau
+      // request-nya gagal sebelum sampai ke handler (mis. 401/middleware,
+      // proxy, atau error 500 di luar try/catch), body-nya bisa jadi bukan
+      // JSON — res.json() dulu bisa throw dan ketelan jadi pesan generik.
+      // Ditangkap terpisah di sini biar pesan errornya kebaca jelas.
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        setToast({
+          type: 'error',
+          message: `Server merespons status ${res.status} (bukan format yang dikenali). Cek koneksi/login lalu coba lagi.`,
+        });
+        setAccessSavingKey(null);
+        return;
+      }
 
       if (!res.ok) {
-        alert((alreadyHas ? 'Gagal menghapus akses modul: ' : 'Gagal menambah akses modul: ') + (data.error || ''));
+        setToast({
+          type: 'error',
+          message: (alreadyHas ? 'Gagal menghapus akses modul: ' : 'Gagal menambah akses modul: ') + (data.error || `status ${res.status}`),
+        });
       } else if (alreadyHas) {
         setAccessModules((prev) => prev.filter((m) => m !== moduleKey));
       } else {
         setAccessModules((prev) => [...prev, moduleKey]);
       }
     } catch (err) {
-      alert('Terjadi kesalahan. Coba lagi.');
+      setToast({ type: 'error', message: 'Terjadi kesalahan: ' + (err?.message || 'tidak diketahui') + '. Coba lagi.' });
     }
 
     setAccessSavingKey(null);
@@ -581,6 +763,7 @@ export default function EmployeeListPage() {
 
   return (
     <div className="max-w-[1200px] mx-auto px-6 py-10">
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
       <div className="flex items-start justify-between mb-8">
         <div>
           <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
@@ -642,7 +825,10 @@ export default function EmployeeListPage() {
 
       <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
         {loading ? (
-          <p className="text-sm text-[#6B6B6B] p-6">Memuat data...</p>
+          <>
+            <span className="sr-only" role="status">Memuat data employee...</span>
+            <SkeletonRows />
+          </>
         ) : error ? (
           <p className="text-sm text-madael-red p-6">Gagal memuat data: {error}</p>
         ) : filtered.length === 0 ? (
@@ -700,38 +886,20 @@ export default function EmployeeListPage() {
                     </Link>
                   </td>
                   <td className="px-5 py-3.5">
-                    <div className="flex items-center justify-end gap-3">
-                      <button
-                        onClick={() => openAccessModal(emp)}
-                        title="Kelola Akses"
-                        className="inline-flex text-[#6B6B6B] hover:text-madael-red transition-colors"
-                      >
-                        <ShieldCheck size={16} />
-                      </button>
-                      <button
-                        onClick={() => handleToggleStatus(emp)}
-                        disabled={togglingId === emp.id}
-                        title={emp.status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan'}
-                        className={`inline-flex transition-colors disabled:opacity-40 ${
-                          emp.status === 'Aktif'
-                            ? 'text-[#6B6B6B] hover:text-madael-red'
-                            : 'text-[#6B6B6B] hover:text-[#166534]'
-                        }`}
-                      >
-                        <Power size={16} />
-                      </button>
-                      {/* Hapus permanen — hanya untuk superadmin, tidak bisa hapus akun sendiri.
-                          Backend (DELETE /api/employee/[id]) menegakkan ulang kedua aturan ini,
-                          jadi sembunyikan tombol di sini murni untuk kerapian UI. */}
-                      {viewer?.is_superadmin && viewer.id !== emp.id && (
-                        <button
-                          onClick={() => openDeleteModal(emp)}
-                          title="Hapus Permanen"
-                          className="inline-flex text-[#6B6B6B] hover:text-madael-red transition-colors"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
+                    <div className="flex items-center justify-end">
+                      {/* Menu "⋯" dengan label teks — dulunya 3 icon polos yang cuma
+                          punya title tooltip (tidak kebaca di layar sentuh). Hapus
+                          Permanen hanya muncul untuk superadmin & bukan akun sendiri;
+                          backend (DELETE /api/employee/[id]) menegakkan ulang kedua
+                          aturan ini, jadi sembunyikan opsi di sini murni kerapian UI. */}
+                      <RowActionsMenu
+                        emp={emp}
+                        canDelete={viewer?.is_superadmin && viewer.id !== emp.id}
+                        onManageAccess={openAccessModal}
+                        onToggleStatus={openStatusConfirm}
+                        onDelete={openDeleteModal}
+                        togglingThis={togglingId === emp.id}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -902,28 +1070,92 @@ export default function EmployeeListPage() {
             ) : accessLoading ? (
               <p className="text-sm text-[#6B6B6B]">Memuat...</p>
             ) : (
-              <div className="space-y-1">
-                {MODULE_OPTIONS.map((mod) => {
+              <div className="space-y-0.5">
+                {MODULE_GROUPS.map((mod) => {
                   const checked = accessModules.includes(mod.key);
                   const saving = accessSavingKey === mod.key;
                   return (
-                    <label
-                      key={mod.key}
-                      className="flex items-center gap-3 px-1 py-2.5 border-b border-[#F0F0F0] last:border-0 cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={saving}
-                        onChange={() => toggleModule(mod.key)}
-                      />
-                      <span className="text-sm text-black">{mod.label}</span>
-                      {saving && <span className="text-xs text-[#9A9A9A] ml-auto">menyimpan...</span>}
-                    </label>
+                    <div key={mod.key} className="border-b border-[#F0F0F0] last:border-0">
+                      <label className="flex items-center gap-3 px-1 py-2.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={saving}
+                          onChange={() => toggleModule(mod.key)}
+                        />
+                        <span className="text-sm text-black">{mod.label}</span>
+                        {saving && <span className="text-xs text-[#9A9A9A] ml-auto">menyimpan...</span>}
+                      </label>
+                      {mod.children.map((child) => {
+                        const childChecked = accessModules.includes(child.key);
+                        const childSaving = accessSavingKey === child.key;
+                        return (
+                          <label
+                            key={child.key}
+                            className="flex items-center gap-3 pl-8 pr-1 py-2 cursor-pointer"
+                          >
+                            <span className="w-3 h-px bg-[#D8D8D8] shrink-0" aria-hidden="true" />
+                            <input
+                              type="checkbox"
+                              checked={childChecked}
+                              disabled={childSaving}
+                              onChange={() => toggleModule(child.key)}
+                            />
+                            <span className="text-sm text-[#3D3D3D]">{child.label}</span>
+                            {childSaving && <span className="text-xs text-[#9A9A9A] ml-auto">menyimpan...</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
                   );
                 })}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Nonaktifkan/Aktifkan — sebelumnya window.confirm()
+          browser native, sekarang gayanya disamakan dengan modal lain di
+          halaman ini. */}
+      {statusConfirmTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] px-6" onClick={handleStatusConfirmBackdrop}>
+          <div className="w-full max-w-[420px] bg-white border-t-4 border-madael-red p-8" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-serif text-[20px] font-normal text-black">
+                {statusConfirmTarget.status === 'Aktif' ? 'Nonaktifkan Employee' : 'Aktifkan Employee'}
+              </h2>
+              <button onClick={closeStatusConfirm} className="text-[#6B6B6B] hover:text-black">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-black mb-6">
+              {statusConfirmTarget.status === 'Aktif' ? (
+                <>
+                  Nonaktifkan akun <strong>{statusConfirmTarget.nama}</strong>? Dia tidak akan bisa akses
+                  dashboard/modul lagi, tapi data historisnya tetap tersimpan.
+                </>
+              ) : (
+                <>Aktifkan kembali akun <strong>{statusConfirmTarget.nama}</strong>?</>
+              )}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={closeStatusConfirm}
+                className="flex-1 border border-[#E0E0E0] text-black px-6 py-3 text-sm font-medium tracking-[0.04em] hover:border-black transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleConfirmToggleStatus}
+                disabled={togglingId === statusConfirmTarget.id}
+                className="flex-1 bg-madael-red text-white px-6 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {togglingId === statusConfirmTarget.id
+                  ? 'Memproses...'
+                  : statusConfirmTarget.status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan'}
+              </button>
+            </div>
           </div>
         </div>
       )}
