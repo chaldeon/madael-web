@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Pencil, X } from 'lucide-react';
@@ -48,8 +48,15 @@ export default function EmployeeDetailPage() {
   const [editForm, setEditForm] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState(null);
+  // Snapshot data awal saat modal edit dibuka.
+  const editFormBaselineRef = useRef(null);
 
-  const handleEditModalBackdrop = useModalDismiss(showEditModal, () => setShowEditModal(false));
+  const handleEditModalBackdrop = useModalDismiss(
+    showEditModal,
+    () => setShowEditModal(false),
+    undefined,
+    !!editForm && JSON.stringify(editForm) !== JSON.stringify(editFormBaselineRef.current)
+  );
 
   const loadData = useCallback(async () => {
     if (!employeeId) return;
@@ -95,7 +102,7 @@ export default function EmployeeDetailPage() {
   // ---- Edit ----
 
   const openEditModal = () => {
-    setEditForm({
+    const initial = {
       nama: employee.nama || '',
       employee_id: employee.employee_id || '',
       client_id: employee.client_id || '',
@@ -105,7 +112,9 @@ export default function EmployeeDetailPage() {
       status_karyawan: master?.status || 'PHL',
       gaji_pokok: master?.gaji_pokok ?? 0,
       tunjangan: master?.tunjangan ?? 0,
-    });
+    };
+    editFormBaselineRef.current = initial;
+    setEditForm(initial);
     setEditError(null);
     setShowEditModal(true);
   };

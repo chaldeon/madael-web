@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { X, Plus, Pencil, Trash2, Calculator, ArrowUp, ArrowDown, ArrowUpDown, Paperclip, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
@@ -180,10 +180,10 @@ function SelectField({ label, value, onChange, options }) {
   );
 }
 
-function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onSubmit, saving, saveError }) {
+function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onSubmit, saving, saveError, isDirty }) {
   const set = (key) => (val) => setForm((f) => ({ ...f, [key]: val }));
   const [pendingConfirm, setPendingConfirm] = useState(false);
-  const handleModalBackdrop = useModalDismiss(true, onClose);
+  const handleModalBackdrop = useModalDismiss(true, onClose, undefined, isDirty);
 
   const updatePair = (idx, field, val) => {
     setForm((f) => {
@@ -531,6 +531,8 @@ export default function PayrollManagerPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  // Snapshot data awal form (EMPTY_FORM saat tambah, data row saat edit).
+  const formBaselineRef = useRef(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
@@ -634,12 +636,13 @@ export default function PayrollManagerPage() {
   };
 
   const openAdd = () => {
+    formBaselineRef.current = EMPTY_FORM;
     setForm(EMPTY_FORM);
     setModalOpen(true);
   };
 
   const openEdit = (row) => {
-    setForm({
+    const initial = {
       id: row.id,
       nama: row.employees?.nama || row.nama,
       client_id: row.client_id || '',
@@ -658,7 +661,9 @@ export default function PayrollManagerPage() {
       nama_rekening: row.nama_rekening || '',
       no_rekening: row.no_rekening || '',
       jatah_cuti_tahunan: row.jatah_cuti_tahunan ?? 12,
-    });
+    };
+    formBaselineRef.current = initial;
+    setForm(initial);
     setModalOpen(true);
   };
 
@@ -932,6 +937,7 @@ export default function PayrollManagerPage() {
           onSubmit={handleSubmit}
           saving={saving}
           saveError={saveError}
+          isDirty={JSON.stringify(form) !== JSON.stringify(formBaselineRef.current)}
         />
       )}
 

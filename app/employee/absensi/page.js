@@ -108,10 +108,19 @@ export default function AbsensiPage() {
   // --- Pengajuan koreksi absensi mandiri ---
   const [myCorrections, setMyCorrections] = useState([]);
   const [showKoreksiForm, setShowKoreksiForm] = useState(false);
-  const handleKoreksiModalBackdrop = useModalDismiss(showKoreksiForm, () => setShowKoreksiForm(false));
-  const handleCameraModalBackdrop = useModalDismiss(!!cameraMode, () => closeCamera());
   const [koreksiForm, setKoreksiForm] = useState({ tanggal: todayStr(), jamMasuk: '', jamPulang: '', alasan: '' });
   const [koreksiFoto, setKoreksiFoto] = useState(null);
+  // Snapshot form koreksi saat dibuka, supaya bisa dibandingkan ke isinya sekarang.
+  const koreksiFormBaselineRef = useRef({ tanggal: todayStr(), jamMasuk: '', jamPulang: '', alasan: '' });
+  const handleKoreksiModalBackdrop = useModalDismiss(
+    showKoreksiForm,
+    () => setShowKoreksiForm(false),
+    undefined,
+    JSON.stringify(koreksiForm) !== JSON.stringify(koreksiFormBaselineRef.current) || !!koreksiFoto
+  );
+  // Modal kamera cuma preview live buat ambil foto saat itu juga — tidak ada
+  // data yang keburu diisi/hilang, jadi aman langsung tutup tanpa konfirmasi.
+  const handleCameraModalBackdrop = useModalDismiss(!!cameraMode, () => closeCamera(), false);
   const [koreksiSaving, setKoreksiSaving] = useState(false);
   const [koreksiError, setKoreksiError] = useState(null);
   
@@ -271,7 +280,9 @@ export default function AbsensiPage() {
 
   const openKoreksiForm = () => {
     setKoreksiError(null);
-    setKoreksiForm({ tanggal: todayStr(), jamMasuk: '', jamPulang: '', alasan: '' });
+    const initial = { tanggal: todayStr(), jamMasuk: '', jamPulang: '', alasan: '' };
+    koreksiFormBaselineRef.current = initial;
+    setKoreksiForm(initial);
     setKoreksiFoto(null);
     setShowKoreksiForm(true);
   };

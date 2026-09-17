@@ -42,7 +42,7 @@ function formatDate(value) {
 
 function EditCounterModal({ counter, onClose, onSave, saving, saveError }) {
   const [value, setValue] = useState(counter.last_number);
-  const handleModalBackdrop = useModalDismiss(true, onClose);
+  const handleModalBackdrop = useModalDismiss(true, onClose, undefined, value !== counter.last_number);
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[999] px-4" onClick={handleModalBackdrop}>

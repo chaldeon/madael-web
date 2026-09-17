@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import {
   ArrowUp, ArrowDown, ArrowUpDown, Pencil, X, AlertTriangle,
@@ -150,6 +150,9 @@ export default function SemuaKaryawanPage() {
   const [jadwalSortDir, setJadwalSortDir] = useState('asc');
   const [jadwalFilterClientId, setJadwalFilterClientId] = useState('');
   const [editingEmp, setEditingEmp] = useState(null);
+  // Snapshot jadwal awal (bisa jadwal yang sudah ada, atau EMPTY_JADWAL_FORM
+  // kalau karyawan belum punya jadwal) untuk perbandingan dirty-check.
+  const jadwalFormBaselineRef = useRef(EMPTY_JADWAL_FORM);
   const [jadwalForm, setJadwalForm] = useState(EMPTY_JADWAL_FORM);
   const [jadwalSaving, setJadwalSaving] = useState(false);
   const [jadwalSaveError, setJadwalSaveError] = useState(null);
@@ -171,9 +174,19 @@ export default function SemuaKaryawanPage() {
   const [koreksiError, setKoreksiError] = useState(null);
   const [processingId, setProcessingId] = useState(null);
   const [rejectingRow, setRejectingRow] = useState(null);
-  const handleJadwalModalBackdrop = useModalDismiss(!!editingEmp, () => setEditingEmp(null));
-  const handleRejectModalBackdrop = useModalDismiss(!!rejectingRow, () => setRejectingRow(null));
   const [rejectCatatan, setRejectCatatan] = useState('');
+  const handleJadwalModalBackdrop = useModalDismiss(
+    !!editingEmp,
+    () => setEditingEmp(null),
+    undefined,
+    JSON.stringify(jadwalForm) !== JSON.stringify(jadwalFormBaselineRef.current)
+  );
+  const handleRejectModalBackdrop = useModalDismiss(
+    !!rejectingRow,
+    () => setRejectingRow(null),
+    undefined,
+    rejectCatatan.trim() !== ''
+  );
 
   // Employees + schedules dipakai bareng oleh tab Jadwal & Rekap, jadi
   // di-load sekali di awal.

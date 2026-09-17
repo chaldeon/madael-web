@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Plus, X, Pencil } from 'lucide-react';
@@ -113,15 +113,45 @@ export default function ClientDetailPage() {
   const [dealForm, setDealForm] = useState(null);
   const [savingDeal, setSavingDeal] = useState(false);
 
-  const handleEditModalBackdrop = useModalDismiss(showEditModal, () => setShowEditModal(false));
-  const handleStageModalBackdrop = useModalDismiss(showStageModal, () => setShowStageModal(false));
-  const handleActivityModalBackdrop = useModalDismiss(showActivityModal, () => setShowActivityModal(false));
-  const handleProjectModalBackdrop = useModalDismiss(showProjectModal, () => setShowProjectModal(false));
-  const handleDealModalBackdrop = useModalDismiss(showDealModal, () => setShowDealModal(false));
+  // Snapshot data awal editForm saat modal dibuka (client yang di-edit sudah
+  // ada isinya, jadi tidak bisa dibandingkan ke template kosong seperti form
+  // "tambah baru" lainnya).
+  const editFormBaselineRef = useRef(null);
 
   const emptyActivity = { tipe: 'Email', judul: '', deskripsi: '', tanggal: new Date().toISOString().slice(0, 10), follow_up_date: '' };
   const emptyProject = { nama_project: '', jenis_layanan: '', status: 'Aktif', nilai_kontrak: '', tanggal_mulai: '', tanggal_selesai: '', pic_madael: '', catatan: '' };
   const emptyDeal = { stage: 'Prospek', nilai_potensial: '', pic_internal: '', catatan: '' };
+
+  const handleEditModalBackdrop = useModalDismiss(
+    showEditModal,
+    () => setShowEditModal(false),
+    undefined,
+    !!editForm && JSON.stringify(editForm) !== JSON.stringify(editFormBaselineRef.current)
+  );
+  const handleStageModalBackdrop = useModalDismiss(
+    showStageModal,
+    () => setShowStageModal(false),
+    undefined,
+    stageDraft !== client?.stage
+  );
+  const handleActivityModalBackdrop = useModalDismiss(
+    showActivityModal,
+    () => setShowActivityModal(false),
+    undefined,
+    !!activityForm && JSON.stringify(activityForm) !== JSON.stringify(emptyActivity)
+  );
+  const handleProjectModalBackdrop = useModalDismiss(
+    showProjectModal,
+    () => setShowProjectModal(false),
+    undefined,
+    !!projectForm && JSON.stringify(projectForm) !== JSON.stringify(emptyProject)
+  );
+  const handleDealModalBackdrop = useModalDismiss(
+    showDealModal,
+    () => setShowDealModal(false),
+    undefined,
+    !!dealForm && JSON.stringify(dealForm) !== JSON.stringify(emptyDeal)
+  );
 
   const loadData = useCallback(async () => {
     if (!clientId) return;
@@ -165,7 +195,7 @@ export default function ClientDetailPage() {
 
   // ---- Edit info klien ----
   const openEditModal = () => {
-    setEditForm({
+    const initial = {
       nama_perusahaan: client.nama_perusahaan || '',
       industri: client.industri || '',
       ukuran: client.ukuran || '',
@@ -181,7 +211,9 @@ export default function ClientDetailPage() {
       tipe: client.tipe && client.tipe.length > 0 ? client.tipe : ['client'],
       fee_structure_tipe: client.fee_structure?.tipe || '',
       fee_structure_detail: client.fee_structure?.detail || '',
-    });
+    };
+    editFormBaselineRef.current = initial;
+    setEditForm(initial);
     setShowEditModal(true);
   };
 
