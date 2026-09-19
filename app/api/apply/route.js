@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { uploadCVToDrive } from '@/lib/googleDrive';
+import { createAdminClient } from '@/lib/supabase-admin';
+import { notifyByModule } from '@/lib/notify';
 
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 const GENERAL_FOLDER_NAME = 'Umum';
@@ -111,6 +113,23 @@ export async function POST(request) {
         { error: 'CV berhasil diupload, tetapi gagal menyimpan data pelamar. Hubungi admin.' },
         { status: 500 }
       );
+    }
+
+    // Notifikasi in-app ke tim rekrutmen (pemegang akses modul job_portal +
+    // superadmin). Pakai admin client karena endpoint ini publik/anon —
+    // tidak ada sesi login yang bisa dipakai untuk query employees/employee_modules.
+    // Fire-and-forget: gagal kirim notifikasi tidak boleh menggagalkan submit
+    // lamaran yang sudah berhasil tersimpan.
+    try {
+      const admin = createAdminClient();
+      await notifyByModule(admin, {
+        moduleKey: 'job_portal',
+        tipe: 'pelamar_baru',
+        pesan: `Lamaran baru dari ${nama} untuk posisi ${isGeneral ? (posisiMinat || 'Umum') : positionName}.`,
+        link: '/employee/job-portal/pelamar',
+      });
+    } catch (notifyErr) {
+      console.error('Gagal mengirim notifikasi pelamar baru:', notifyErr);
     }
 
     return NextResponse.json({ success: true }, { status: 200 });

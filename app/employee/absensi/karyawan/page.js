@@ -15,6 +15,8 @@ import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import LokasiKerjaManager from '@/components/LokasiKerjaManager';
+import AbsensiReviewPanel from '@/components/AbsensiReviewPanel';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 const HARI_OPTIONS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
@@ -130,6 +132,8 @@ const TABS = [
   { key: 'jadwal', label: 'Jadwal Kerja' },
   { key: 'koreksi', label: 'Approval Koreksi' },
   { key: 'rekap', label: 'Rekap Bulanan' },
+  { key: 'review', label: 'Perlu Review' },
+  { key: 'lokasi', label: 'Lokasi Kerja' },
 ];
 
 export default function SemuaKaryawanPage() {
@@ -857,6 +861,10 @@ export default function SemuaKaryawanPage() {
               )}
             </div>
           )}
+
+          {activeTab === 'review' && <AbsensiReviewPanel supabase={supabase} />}
+
+          {activeTab === 'lokasi' && <LokasiKerjaManager supabase={supabase} />}
         </>
       )}
 
