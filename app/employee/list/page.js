@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download, ShieldCheck, Power, Trash2, Search, MoreVertical, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download, ShieldCheck, Power, Trash2, Search, MoreVertical, AlertCircle, CheckCircle2, FileText } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { getCompletenessInfo } from '@/lib/dataCompleteness';
 import { MODULE_OPTIONS } from '@/lib/employeeModules';
@@ -135,6 +135,15 @@ function RowActionsMenu({ emp, canDelete, onManageAccess, onToggleStatus, onDele
           role="menu"
           className="absolute right-0 mt-1 w-52 bg-white border border-[#E0E0E0] shadow-lg z-20 py-1"
         >
+          <Link
+            href={`/employee/list/dokumen/${emp.id}`}
+            onClick={() => setOpen(false)}
+            role="menuitem"
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left hover:bg-[#F4F4F4] transition-colors text-black"
+          >
+            <FileText size={14} />
+            Lihat Dokumen
+          </Link>
           {item('Kelola Akses', ShieldCheck, () => onManageAccess(emp), 'text-black')}
           {item(
             emp.status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan',
