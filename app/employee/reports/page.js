@@ -3,12 +3,13 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Clock, Wallet, Receipt, Briefcase } from 'lucide-react';
+import { Clock, Wallet, Receipt, Briefcase, Printer } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ResponsiveContainer,
 } from 'recharts';
 import { createClient } from '@/lib/supabase-browser';
+import ExportCsvButton from '@/components/ExportCsvButton';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 
@@ -207,9 +208,31 @@ export default function ReportsDashboardPage() {
 
   return (
     <div className="max-w-[1000px] mx-auto px-6 py-10">
-      <div className="mb-8">
-        <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Reports Dashboard</h1>
-        <p className="text-sm text-[#6B6B6B] mt-1">Ringkasan lintas modul untuk periode {stats.monthLabel}. Murni read-only.</p>
+      <div className="mb-8 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Reports Dashboard</h1>
+          <p className="text-sm text-[#6B6B6B] mt-1">Ringkasan lintas modul untuk periode {stats.monthLabel}. Murni read-only.</p>
+        </div>
+        <div className="flex items-center gap-4 print:hidden">
+          <ExportCsvButton
+            label="Export Ringkasan (CSV)"
+            filename={`reports-ringkasan-${stats.monthLabel}`}
+            headers={[{ key: 'metrik', label: 'Metrik' }, { key: 'nilai', label: 'Nilai' }]}
+            rows={[
+              { metrik: 'Total Kehadiran Bulan Ini', nilai: stats.totalKehadiran },
+              { metrik: 'Payroll Approved Bulan Ini', nilai: stats.payrollApproved },
+              { metrik: 'Invoice Outstanding (Jumlah)', nilai: stats.invoiceOutstandingCount ?? '—' },
+              { metrik: 'Invoice Outstanding (Total)', nilai: formatRupiah(stats.invoiceOutstandingTotal) },
+              { metrik: 'Kandidat Aktif — Job Portal', nilai: stats.kandidatAktif },
+            ]}
+          />
+          <button
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-[#6B6B6B] hover:text-black"
+          >
+            <Printer size={13} /> Export PDF
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
@@ -245,7 +268,14 @@ export default function ReportsDashboardPage() {
 
       {/* Chart 1 — Tren Kehadiran per Bulan */}
       <div className="bg-white border border-[#E0E0E0] p-5 mb-6">
-        <p className="text-sm font-medium text-black mb-4">Tren Kehadiran per Bulan (6 Bulan Terakhir)</p>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <p className="text-sm font-medium text-black">Tren Kehadiran per Bulan (6 Bulan Terakhir)</p>
+          <ExportCsvButton
+            filename="tren-kehadiran-6-bulan"
+            headers={[{ key: 'bulan', label: 'Bulan' }, { key: 'jumlah', label: 'Jumlah Kehadiran' }]}
+            rows={attendanceTrend}
+          />
+        </div>
         {trendError ? (
           <p className="text-xs text-madael-red">{trendError}</p>
         ) : trendLoading ? (
@@ -274,12 +304,24 @@ export default function ReportsDashboardPage() {
       <div className="bg-white border border-[#E0E0E0] p-5">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
           <p className="text-sm font-medium text-black">Breakdown Status Payroll per Klien</p>
-          <input
-            type="month"
-            value={payrollPeriode}
-            onChange={(e) => setPayrollPeriode(e.target.value)}
-            className="border border-[#E0E0E0] px-3 py-1.5 text-xs text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
-          />
+          <div className="flex items-center gap-4">
+            <ExportCsvButton
+              filename={`payroll-per-klien-${payrollPeriode}`}
+              headers={[
+                { key: 'klien', label: 'Klien' },
+                { key: 'Draft', label: 'Draft' },
+                { key: 'Review', label: 'Review' },
+                { key: 'Approved', label: 'Approved' },
+              ]}
+              rows={payrollByClient}
+            />
+            <input
+              type="month"
+              value={payrollPeriode}
+              onChange={(e) => setPayrollPeriode(e.target.value)}
+              className="border border-[#E0E0E0] px-3 py-1.5 text-xs text-black bg-white focus:outline-none focus:border-madael-red transition-colors print:hidden"
+            />
+          </div>
         </div>
         {payrollError ? (
           <p className="text-xs text-madael-red">{payrollError}</p>
