@@ -3,13 +3,15 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback } from 'react';
-import { UserCircle } from 'lucide-react';
+import { UserCircle, Camera, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { notifySuperadmins } from '@/lib/notify';
 import { PROFILE_EDITABLE_FIELDS, fieldLabel } from '@/lib/profileFields';
+import { getFaceDescriptor } from '@/lib/faceVerification';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import CameraCapture from '@/components/CameraCapture';
 
 function StatusBadge({ status }) {
   const map = {
@@ -45,6 +47,13 @@ export default function ProfilePage() {
   const [formError, setFormError] = useState(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
+  // --- Foto referensi wajah (dipakai Absensi untuk verifikasi otomatis) ---
+  const [photoUrl, setPhotoUrl] = useState(null); // signed URL buat preview
+  const [showCamera, setShowCamera] = useState(false);
+  const [photoSaving, setPhotoSaving] = useState(false);
+  const [photoError, setPhotoError] = useState(null);
+  const [photoSuccess, setPhotoSuccess] = useState(false);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -58,7 +67,7 @@ export default function ProfilePage() {
 
     const { data: emp, error: empError } = await supabase
       .from('employees')
-      .select('id, nama')
+      .select('id, nama, foto_referensi_url')
       .eq('email', user.email)
       .maybeSingle();
 
@@ -70,6 +79,13 @@ export default function ProfilePage() {
 
     setEmployeeId(emp.id);
     setEmployeeName(emp.nama || '');
+
+    if (emp.foto_referensi_url) {
+      const { data: signed } = await supabase.storage
+        .from('employee-photos')
+        .createSignedUrl(emp.foto_referensi_url, 60 * 60);
+      setPhotoUrl(signed?.signedUrl || null);
+    }
 
     const [masterRes, reqRes] = await Promise.all([
       supabase
@@ -107,6 +123,44 @@ export default function ProfilePage() {
 
   const handleFieldChange = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  // Ambil descriptor wajah dari frame video (masih live), upload foto ke
+  // storage, lalu simpan path+descriptor lewat API route (bukan update
+  // langsung dari client — lihat komentar di app/api/profile/foto-referensi).
+  const handleCapturePhoto = async (blob, videoEl) => {
+    setPhotoError(null);
+    setPhotoSuccess(false);
+    setPhotoSaving(true);
+    try {
+      const descriptor = await getFaceDescriptor(videoEl);
+      if (!descriptor) {
+        throw new Error('Wajah tidak terdeteksi dengan jelas. Coba lagi dengan pencahayaan lebih baik dan posisi wajah lurus ke kamera.');
+      }
+
+      const path = `${employeeId}/reference.jpg`;
+      const { error: uploadError } = await supabase.storage
+        .from('employee-photos')
+        .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+      if (uploadError) throw uploadError;
+
+      const res = await fetch('/api/profile/foto-referensi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, descriptor }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Gagal menyimpan foto referensi.');
+
+      const { data: signed } = await supabase.storage.from('employee-photos').createSignedUrl(path, 60 * 60);
+      setPhotoUrl(signed?.signedUrl || null);
+      setPhotoSuccess(true);
+      setShowCamera(false);
+    } catch (err) {
+      setPhotoError(err.message || 'Gagal menyimpan foto referensi, coba lagi.');
+    } finally {
+      setPhotoSaving(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -205,6 +259,53 @@ export default function ProfilePage() {
         )}
         <p className="text-xs text-[#9A9A9A] mt-3">Gaji, tunjangan, dan status kontrak tidak bisa diajukan lewat halaman ini — hubungi superadmin.</p>
       </div>
+
+      {/* Foto referensi wajah — dipakai Absensi untuk verifikasi otomatis saat clock-in/out */}
+      <div className="bg-white border border-[#E0E0E0] p-5 mb-6">
+        <p className="text-xs font-semibold text-black tracking-[0.02em] mb-1">Foto Referensi Wajah</p>
+        <p className="text-xs text-[#6B6B6B] mb-4">
+          Dipakai untuk mencocokkan wajah secara otomatis saat kamu clock in/out di Absensi. Daftarkan atau ganti kapan saja.
+        </p>
+
+        <div className="flex items-center gap-4">
+          <div className="w-20 h-20 bg-[#F4F4F4] border border-[#E0E0E0] overflow-hidden shrink-0">
+            {photoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- signed URL sementara, next/image tidak perlu di sini
+              <img src={photoUrl} alt="Foto referensi wajah" className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-[#9A9A9A]">
+                <UserCircle size={32} />
+              </div>
+            )}
+          </div>
+          <div>
+            <button
+              onClick={() => setShowCamera(true)}
+              className="inline-flex items-center gap-2 border border-[#E0E0E0] px-4 py-2 text-xs font-medium tracking-[0.02em] text-black hover:border-madael-red transition-colors"
+            >
+              <Camera size={14} />
+              {photoUrl ? 'Ambil Ulang Foto' : 'Daftarkan Foto'}
+            </button>
+            {photoSuccess && (
+              <p className="flex items-center gap-1.5 text-xs text-green-700 mt-2">
+                <CheckCircle2 size={13} /> Foto referensi tersimpan.
+              </p>
+            )}
+            {photoError && <p className="text-xs text-red-600 mt-2 max-w-[320px]">{photoError}</p>}
+          </div>
+        </div>
+      </div>
+
+      <CameraCapture
+        open={showCamera}
+        title="Foto Referensi Wajah"
+        hint="Pastikan wajah terlihat jelas, pencahayaan cukup, dan lihat lurus ke kamera."
+        confirmLabel="Ambil & Simpan Foto"
+        processingLabel="Menyimpan..."
+        processing={photoSaving}
+        onCapture={handleCapturePhoto}
+        onClose={() => setShowCamera(false)}
+      />
 
       {/* Form pengajuan perubahan */}
       {master && (

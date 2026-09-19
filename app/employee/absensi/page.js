@@ -8,9 +8,12 @@ import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, X, FileEdit, Upload
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
+import { checkGeofence } from '@/lib/geofence';
+import { getFaceDescriptor, descriptorDistance, isFaceMatch, similarityPercent } from '@/lib/faceVerification';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import CameraCapture from '@/components/CameraCapture';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -65,27 +68,6 @@ function getPosition() {
   });
 }
 
-function captureFrame(videoEl) {
-  return new Promise((resolve, reject) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = videoEl.videoWidth;
-    canvas.height = videoEl.videoHeight;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      reject(new Error('Gagal membuat canvas untuk foto.'));
-      return;
-    }
-    ctx.drawImage(videoEl, 0, 0);
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        reject(new Error('Gagal mengambil foto dari kamera.'));
-        return;
-      }
-      resolve(blob);
-    }, 'image/jpeg', 0.85);
-  });
-}
-
 export default function AbsensiPage() {
   const supabase = createClient();
   const { status, employee } = useModuleAccess('absensi');
@@ -100,10 +82,14 @@ export default function AbsensiPage() {
   const [geoError, setGeoError] = useState(null);
   const [lastMode, setLastMode] = useState(null); // untuk tombol retry saat gagal simpan
 
-  const [cameraMode, setCameraMode] = useState(null); // 'in' | 'out' | null
-  const [cameraError, setCameraError] = useState(null);
-  const [cameraStream, setCameraStream] = useState(null);
-  const videoRef = useRef(null);
+  const [cameraMode, setCameraMode] = useState(null); // 'in' | 'out' | null — juga dipakai sbg "modal kamera terbuka?"
+
+  // Lokasi kerja terdaftar (kantor + klien) & descriptor wajah referensi —
+  // dimuat sekali di loadData(), dipakai untuk geofencing & verifikasi wajah
+  // otomatis saat clock-in/out. Keduanya opsional: kalau belum diisi/didaftarkan,
+  // absensi tetap jalan seperti biasa, cuma hasil verifikasinya null (belum bisa dicek).
+  const [workLocations, setWorkLocations] = useState([]);
+  const [referensiWajah, setReferensiWajah] = useState(null);
 
   // --- Pengajuan koreksi absensi mandiri ---
   const [myCorrections, setMyCorrections] = useState([]);
@@ -118,9 +104,6 @@ export default function AbsensiPage() {
     undefined,
     JSON.stringify(koreksiForm) !== JSON.stringify(koreksiFormBaselineRef.current) || !!koreksiFoto
   );
-  // Modal kamera cuma preview live buat ambil foto saat itu juga — tidak ada
-  // data yang keburu diisi/hilang, jadi aman langsung tutup tanpa konfirmasi.
-  const handleCameraModalBackdrop = useModalDismiss(!!cameraMode, () => closeCamera(), false);
   const [koreksiSaving, setKoreksiSaving] = useState(false);
   const [koreksiError, setKoreksiError] = useState(null);
   
@@ -130,7 +113,7 @@ export default function AbsensiPage() {
     setLoading(true);
     setLoadError(null);
 
-    const [schedRes, todayRes, histRes, yesterdayRes, correctionsRes] = await Promise.all([
+    const [schedRes, todayRes, histRes, yesterdayRes, correctionsRes, locRes, refRes] = await Promise.all([
       supabase.from('work_schedule').select('*').eq('employee_id', employee.id).maybeSingle(),
       supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', todayStr()).maybeSingle(),
       supabase
@@ -146,6 +129,10 @@ export default function AbsensiPage() {
         .eq('requested_by', employee.id)
         .order('created_at', { ascending: false })
         .limit(10),
+      // Lokasi kerja & foto referensi wajah — dua-duanya opsional (fitur baru).
+      // Error/kosong di sini TIDAK menggagalkan load data absensi utama.
+      supabase.from('work_locations').select('*').eq('aktif', true),
+      supabase.from('employees').select('foto_referensi_descriptor').eq('id', employee.id).maybeSingle(),
     ]);
 
     const firstError = schedRes.error || todayRes.error || histRes.error || yesterdayRes.error || correctionsRes.error;
@@ -161,6 +148,8 @@ export default function AbsensiPage() {
     const yRow = yesterdayRes.data || null;
     setForgotClockOut(yRow && yRow.clock_in && !yRow.clock_out ? yRow : null);
     setMyCorrections(correctionsRes.data || []);
+    setWorkLocations(locRes.error ? [] : locRes.data || []);
+    setReferensiWajah(refRes.error ? null : refRes.data?.foto_referensi_descriptor || null);
     setLoading(false);
   }, [supabase, employee]);
 
@@ -172,34 +161,10 @@ export default function AbsensiPage() {
     if (status === 'allowed') loadData();
   }, [status, loadData]);
 
-  const openCamera = async (mode) => {
+  const openCamera = (mode) => {
     setGeoError(null);
-    setCameraError(null);
     setLastMode(mode);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user' },
-        audio: false,
-      });
-      setCameraStream(stream);
-      setCameraMode(mode);
-    } catch (err) {
-      setCameraError('Tidak bisa mengakses kamera. Pastikan izin kamera diaktifkan di browser.');
-    }
-  };
-
-  // Video element baru mount setelah cameraMode diset, jadi stream baru
-  // di-attach setelah render berikutnya.
-  useEffect(() => {
-    if (cameraStream && videoRef.current) {
-      videoRef.current.srcObject = cameraStream;
-    }
-  }, [cameraStream, cameraMode]);
-
-  const closeCamera = () => {
-    cameraStream?.getTracks().forEach((t) => t.stop());
-    setCameraStream(null);
-    setCameraMode(null);
+    setCameraMode(mode);
   };
 
   const uploadFoto = async (blob, mode) => {
@@ -211,27 +176,57 @@ export default function AbsensiPage() {
     return path;
   };
 
-  const handleConfirmCapture = async () => {
+  // Gabungkan hasil verifikasi wajah clock-in & clock-out: kalau salah satu
+  // gagal cocok, hasil akhirnya dianggap gagal (perlu review) — bukan ditimpa
+  // jadi "berhasil" cuma karena yang satunya kebetulan cocok.
+  const combineWajahStatus = (a, b) => {
+    if (a === false || b === false) return false;
+    if (a === true || b === true) return true;
+    return null;
+  };
+
+  const handleCameraCapture = async (blob, videoEl) => {
     const mode = cameraMode;
+    setCameraMode(null); // tutup modal dulu, sisanya diproses di background (spinner di tombol utama)
     setActing(true);
     setGeoError(null);
 
+    // 1. Verifikasi wajah — dijalankan di frame video yang sama, sebelum
+    //    videoEl dilepas dari DOM. Kalau karyawan belum daftar foto referensi,
+    //    atau modelnya gagal dimuat/diproses, dianggap "belum bisa dicek" (null),
+    //    BUKAN alasan untuk membatalkan absensi.
+    let wajahTerverifikasi = null;
+    let wajahSimilarity = null;
+    if (referensiWajah) {
+      try {
+        const descriptor = await getFaceDescriptor(videoEl);
+        if (descriptor) {
+          const distance = descriptorDistance(descriptor, referensiWajah);
+          wajahSimilarity = distance;
+          wajahTerverifikasi = isFaceMatch(distance);
+        } else {
+          wajahTerverifikasi = false; // foto diambil tapi wajah tidak terdeteksi jelas
+        }
+      } catch (err) {
+        console.error('Verifikasi wajah gagal diproses:', err);
+      }
+    }
+
+    // 2. Upload foto bukti.
     let fotoPath = null;
-    let wajahOk = false;
     try {
-      const blob = await captureFrame(videoRef.current);
       fotoPath = await uploadFoto(blob, mode);
-      wajahOk = true;
     } catch (err) {
-      // Foto gagal diambil/diupload — tetap lanjut absen, tapi flag verifikasi
-      // ditandai gagal supaya bisa dicek manual nanti.
       setGeoError('Foto gagal disimpan, tapi absen tetap diproses. (' + (err.message || 'error kamera') + ')');
     }
-    closeCamera();
 
+    // 3. Ambil lokasi & cek geofence, lalu simpan absensi. Di luar radius atau
+    //    wajah tidak cocok TETAP diizinkan — cuma ditandai untuk direview admin
+    //    (tab "Perlu Review" di Kelola Absensi Tim).
     try {
       const pos = await getPosition();
       const now = new Date();
+      const geofence = checkGeofence(pos.coords.latitude, pos.coords.longitude, workLocations);
 
       if (mode === 'in') {
         const isLate = schedule ? timeStr(now) > schedule.jam_masuk : false;
@@ -243,9 +238,13 @@ export default function AbsensiPage() {
             clock_in: now.toISOString(),
             clock_in_lat: pos.coords.latitude,
             clock_in_lng: pos.coords.longitude,
+            clock_in_dalam_radius: geofence.dalamRadius,
+            clock_in_jarak_meter: geofence.jarakMeter,
+            clock_in_lokasi_nama: geofence.location?.nama || null,
             status_telat: isLate,
             foto_clock_in_url: fotoPath,
-            wajah_terverifikasi: wajahOk,
+            wajah_terverifikasi: wajahTerverifikasi,
+            wajah_similarity: wajahSimilarity,
           }])
           .select()
           .single();
@@ -260,8 +259,12 @@ export default function AbsensiPage() {
             clock_out: now.toISOString(),
             clock_out_lat: pos.coords.latitude,
             clock_out_lng: pos.coords.longitude,
+            clock_out_dalam_radius: geofence.dalamRadius,
+            clock_out_jarak_meter: geofence.jarakMeter,
+            clock_out_lokasi_nama: geofence.location?.nama || null,
             foto_clock_out_url: fotoPath,
-            wajah_terverifikasi: todayRow.wajah_terverifikasi || wajahOk,
+            wajah_terverifikasi: combineWajahStatus(todayRow.wajah_terverifikasi, wajahTerverifikasi),
+            wajah_similarity: wajahSimilarity ?? todayRow.wajah_similarity,
           })
           .eq('id', todayRow.id)
           .select()
@@ -420,6 +423,13 @@ export default function AbsensiPage() {
           Hari ini bukan hari kerja terjadwal kamu.
         </div>
       )}
+      {!referensiWajah && (
+        <div className="flex items-start gap-2 bg-[#F4F4F4] border border-[#E0E0E0] text-[#6B6B6B] text-xs px-4 py-3 mb-6">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          Kamu belum daftar foto wajah referensi, jadi absensi belum bisa diverifikasi otomatis.{' '}
+          <Link href="/employee/profile" className="underline font-medium hover:text-black">Daftarkan di halaman Profil</Link>.
+        </div>
+      )}
       {geoError && (
         <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-3 mb-6">
           <span className="flex items-start gap-2">
@@ -436,13 +446,6 @@ export default function AbsensiPage() {
           )}
         </div>
       )}
-      {cameraError && (
-        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-3 mb-6">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          {cameraError}
-        </div>
-      )}
-
       <div className="bg-white border border-[#E0E0E0] p-6 mb-8">
         {schedule && (
           <p className="text-xs text-[#9A9A9A] mb-4">
@@ -464,12 +467,28 @@ export default function AbsensiPage() {
           </>
         ) : (
           <div className="space-y-3">
-            <div className="flex items-center gap-2 text-sm text-black">
+            <div className="flex items-center gap-2 flex-wrap text-sm text-black">
               <CheckCircle2 size={16} className="text-madael-red" />
               Clock in pukul {formatWaktu(todayRow.clock_in)}
               {todayRow.status_telat && (
                 <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-red-100 text-red-700">
                   TELAT
+                </span>
+              )}
+              {todayRow.clock_in_dalam_radius === false && (
+                <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-amber-100 text-amber-800">
+                  DI LUAR RADIUS
+                </span>
+              )}
+              {todayRow.wajah_terverifikasi === false && (
+                <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-amber-100 text-amber-800">
+                  WAJAH PERLU REVIEW
+                  {todayRow.wajah_similarity != null ? ` (${similarityPercent(todayRow.wajah_similarity)}%)` : ''}
+                </span>
+              )}
+              {todayRow.wajah_terverifikasi === true && todayRow.wajah_similarity != null && (
+                <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-green-100 text-green-700">
+                  WAJAH COCOK ({similarityPercent(todayRow.wajah_similarity)}%)
                 </span>
               )}
             </div>
@@ -694,41 +713,16 @@ export default function AbsensiPage() {
         </div>
       )}
 
-      {cameraMode && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] px-6" onClick={handleCameraModalBackdrop}>
-          <div className="bg-white w-full max-w-[420px] p-6 relative" onClick={(e) => e.stopPropagation()}>
-            <button
-              onClick={closeCamera}
-              className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black"
-            >
-              <X size={18} />
-            </button>
-            <h2 className="text-sm font-medium text-black mb-4">
-              Foto {cameraMode === 'in' ? 'Clock In' : 'Clock Out'}
-            </h2>
-            <div className="bg-black mb-4 aspect-[3/4] overflow-hidden">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover scale-x-[-1]"
-              />
-            </div>
-            <p className="text-xs text-[#9A9A9A] mb-4">
-              Pastikan wajah kamu terlihat jelas di kamera sebelum ambil foto.
-            </p>
-            <button
-              onClick={handleConfirmCapture}
-              disabled={acting}
-              className="w-full flex items-center justify-center gap-2 bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
-            >
-              <Camera size={16} />
-              {acting ? 'Memproses...' : `Ambil Foto & ${cameraMode === 'in' ? 'Clock In' : 'Clock Out'}`}
-            </button>
-          </div>
-        </div>
-      )}
+      <CameraCapture
+        open={!!cameraMode}
+        title={`Foto ${cameraMode === 'in' ? 'Clock In' : 'Clock Out'}`}
+        hint="Pastikan wajah kamu terlihat jelas di kamera sebelum ambil foto."
+        confirmLabel={`Ambil Foto & ${cameraMode === 'in' ? 'Clock In' : 'Clock Out'}`}
+        processingLabel="Memproses..."
+        processing={acting}
+        onCapture={handleCameraCapture}
+        onClose={() => setCameraMode(null)}
+      />
     </div>
   );
 }
