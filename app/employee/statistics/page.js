@@ -4,13 +4,14 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
-  Eye, Users, Briefcase, FileText, Monitor, Smartphone, Tablet,
+  Eye, Users, Briefcase, FileText, Monitor, Smartphone, Tablet, Printer,
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer,
 } from 'recharts';
 import { createClient } from '@/lib/supabase-browser';
+import ExportCsvButton from '@/components/ExportCsvButton';
 
 const PERIODS = [
   { value: 'weekly', label: 'Mingguan' },
@@ -134,20 +135,28 @@ export default function StatisticsPage() {
             Data visitor website dan aktivitas recruitment.
           </p>
         </div>
-        <div className="flex border border-[#E0E0E0] bg-white">
-          {PERIODS.map((p) => (
-            <button
-              key={p.value}
-              onClick={() => setPeriod(p.value)}
-              className={`px-4 py-2 text-xs font-medium tracking-[0.04em] transition-colors ${
-                period === p.value
-                  ? 'bg-madael-red text-white'
-                  : 'text-[#6B6B6B] hover:text-black'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-4 print:hidden">
+          <button
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-[#6B6B6B] hover:text-black"
+          >
+            <Printer size={13} /> Export PDF
+          </button>
+          <div className="flex border border-[#E0E0E0] bg-white">
+            {PERIODS.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => setPeriod(p.value)}
+                className={`px-4 py-2 text-xs font-medium tracking-[0.04em] transition-colors ${
+                  period === p.value
+                    ? 'bg-madael-red text-white'
+                    : 'text-[#6B6B6B] hover:text-black'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -183,9 +192,16 @@ export default function StatisticsPage() {
 
       {/* Section 2 — Chart visitor per hari */}
       <div className="bg-white border border-[#E0E0E0] p-5 mb-6">
-        <p className="text-sm font-medium text-black mb-4">
-          Sessions {period === 'annually' || period === 'all' ? 'per Bulan' : 'per Hari'}
-        </p>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <p className="text-sm font-medium text-black">
+            Sessions {period === 'annually' || period === 'all' ? 'per Bulan' : 'per Hari'}
+          </p>
+          <ExportCsvButton
+            filename={`sessions-${period}`}
+            headers={[{ key: 'date', label: 'Tanggal/Bulan' }, { key: 'sessions', label: 'Sessions' }]}
+            rows={gaData?.sessionsPerDay || []}
+          />
+        </div>
         {gaLoading ? (
           <p className="text-xs text-[#6B6B6B]">Memuat chart...</p>
         ) : (
@@ -210,7 +226,14 @@ export default function StatisticsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Section 3 — Top halaman */}
         <div className="bg-white border border-[#E0E0E0] p-5">
-          <p className="text-sm font-medium text-black mb-4">Top Halaman</p>
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <p className="text-sm font-medium text-black">Top Halaman</p>
+            <ExportCsvButton
+              filename={`top-halaman-${period}`}
+              headers={[{ key: 'page', label: 'Halaman' }, { key: 'pageviews', label: 'Pageviews' }]}
+              rows={gaData?.topPages || []}
+            />
+          </div>
           {gaLoading ? (
             <p className="text-xs text-[#6B6B6B]">Memuat data...</p>
           ) : (
@@ -244,7 +267,14 @@ export default function StatisticsPage() {
 
         {/* Section 4 — Breakdown device */}
         <div className="bg-white border border-[#E0E0E0] p-5">
-          <p className="text-sm font-medium text-black mb-4">Breakdown Device</p>
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <p className="text-sm font-medium text-black">Breakdown Device</p>
+            <ExportCsvButton
+              filename={`breakdown-device-${period}`}
+              headers={[{ key: 'device', label: 'Device' }, { key: 'sessions', label: 'Sessions' }]}
+              rows={gaData?.deviceBreakdown || []}
+            />
+          </div>
           {gaLoading ? (
             <p className="text-xs text-[#6B6B6B]">Memuat chart...</p>
           ) : (
@@ -272,7 +302,14 @@ export default function StatisticsPage() {
       {/* Section 5 — Data internal recruitment */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white border border-[#E0E0E0] p-5">
-          <p className="text-sm font-medium text-black mb-4">Pelamar per Posisi</p>
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <p className="text-sm font-medium text-black">Pelamar per Posisi</p>
+            <ExportCsvButton
+              filename="pelamar-per-posisi"
+              headers={[{ key: 'posisi', label: 'Posisi' }, { key: 'jumlah', label: 'Jumlah Pelamar' }]}
+              rows={pelamarPerPosisi}
+            />
+          </div>
           {supabaseLoading ? (
             <p className="text-xs text-[#6B6B6B]">Memuat data...</p>
           ) : (
@@ -303,7 +340,14 @@ export default function StatisticsPage() {
         </div>
 
         <div className="bg-white border border-[#E0E0E0] p-5">
-          <p className="text-sm font-medium text-black mb-4">Apply per Bulan</p>
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <p className="text-sm font-medium text-black">Apply per Bulan</p>
+            <ExportCsvButton
+              filename="apply-per-bulan"
+              headers={[{ key: 'bulan', label: 'Bulan' }, { key: 'jumlah', label: 'Jumlah Apply' }]}
+              rows={applyPerBulan}
+            />
+          </div>
           {supabaseLoading ? (
             <p className="text-xs text-[#6B6B6B]">Memuat chart...</p>
           ) : (
