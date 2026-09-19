@@ -3,8 +3,9 @@
 import { useEffect, useState, useCallback, useMemo, Fragment } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { ArrowUp, ArrowDown, ArrowUpDown, CalendarClock, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { notifyEmployee } from '@/lib/notify';
 
 const STATUS_OPTIONS = ['Baru', 'Review', 'Interview', 'Ditolak', 'Diterima'];
 
@@ -77,6 +78,13 @@ export default function JobPortalCandidatesPage() {
   const [sortField, setSortField] = useState('tanggal');
   const [sortDir, setSortDir] = useState('desc');
 
+  // --- Jadwal interview ---
+  const [interviewers, setInterviewers] = useState([]); // karyawan pemegang akses modul job_portal
+  const [schedulingApp, setSchedulingApp] = useState(null); // application yang lagi dijadwalkan
+  const [scheduleForm, setScheduleForm] = useState({ interview_at: '', interview_interviewer_id: '', interview_location: '' });
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleError, setScheduleError] = useState(null);
+
   // Sinkronkan filter dengan query param ?posisi= (mis. dari klik jumlah pelamar di halaman Lowongan)
   useEffect(() => {
     setFilterJob(posisiParam);
@@ -88,7 +96,9 @@ export default function JobPortalCandidatesPage() {
 
     const { data, error } = await supabase
       .from('applications')
-      .select('id, created_at, nama, email, telepon, status, cv_drive_id, cv_filename, job_id, catatan, answers, job_listings ( title, slug )')
+      .select(
+        'id, created_at, nama, email, telepon, status, cv_drive_id, cv_filename, job_id, catatan, answers, interview_at, interview_interviewer_id, interview_location, job_listings ( title, slug ), interviewer:interview_interviewer_id ( nama )'
+      )
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -105,16 +115,49 @@ export default function JobPortalCandidatesPage() {
     setLoading(false);
   }, [supabase]);
 
+  // Daftar interviewer = karyawan pemegang akses modul job_portal + superadmin
+  // (superadmin selalu punya akses ke semua modul).
+  const fetchInterviewers = useCallback(async () => {
+    const [modsRes, adminsRes] = await Promise.all([
+      supabase.from('employee_modules').select('employee_id, employees:employee_id ( id, nama, status )').eq('module_name', 'job_portal'),
+      supabase.from('employees').select('id, nama, status').eq('is_superadmin', true),
+    ]);
+
+    const byId = new Map();
+    (modsRes.data || []).forEach((m) => {
+      const e = m.employees;
+      if (e && e.status === 'Aktif') byId.set(e.id, e.nama);
+    });
+    (adminsRes.data || []).forEach((a) => {
+      if (a.status === 'Aktif') byId.set(a.id, a.nama);
+    });
+
+    setInterviewers(Array.from(byId, ([id, nama]) => ({ id, nama })).sort((a, b) => a.nama.localeCompare(b.nama)));
+  }, [supabase]);
+
   useEffect(() => {
     fetchApplications();
-  }, [fetchApplications]);
+    fetchInterviewers();
+  }, [fetchApplications, fetchInterviewers]);
 
   const handleStatusChange = async (id, newStatus) => {
     setUpdatingId(id);
     const { error } = await supabase.from('applications').update({ status: newStatus }).eq('id', id);
 
     if (!error) {
-      setApplications((prev) => prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a)));
+      let updatedApp = null;
+      setApplications((prev) =>
+        prev.map((a) => {
+          if (a.id !== id) return a;
+          updatedApp = { ...a, status: newStatus };
+          return updatedApp;
+        })
+      );
+      // Begitu status masuk "Interview" dan belum ada jadwal, langsung buka
+      // form jadwal — memudahkan alur, tidak perlu klik "Jadwalkan" lagi.
+      if (newStatus === 'Interview' && updatedApp && !updatedApp.interview_at) {
+        openScheduleModal(updatedApp);
+      }
     } else {
       alert('Gagal update status: ' + error.message);
     }
@@ -135,6 +178,64 @@ export default function JobPortalCandidatesPage() {
       alert('Gagal menyimpan catatan: ' + error.message);
     }
     setSavingCatatanId(null);
+  };
+
+  const openScheduleModal = (app) => {
+    if (app.status !== 'Interview') return; // jaga-jaga — tombolnya sendiri sudah dikunci di UI
+    setScheduleError(null);
+    setSchedulingApp(app);
+    setScheduleForm({
+      // input datetime-local butuh format "YYYY-MM-DDTHH:mm" tanpa detik/timezone
+      interview_at: app.interview_at ? new Date(app.interview_at).toISOString().slice(0, 16) : '',
+      interview_interviewer_id: app.interview_interviewer_id || '',
+      interview_location: app.interview_location || '',
+    });
+  };
+
+  const handleSaveSchedule = async () => {
+    if (!schedulingApp) return;
+    if (!scheduleForm.interview_at || !scheduleForm.interview_interviewer_id) {
+      setScheduleError('Tanggal/jam dan interviewer wajib diisi.');
+      return;
+    }
+
+    setScheduleSaving(true);
+    setScheduleError(null);
+
+    const payload = {
+      interview_at: new Date(scheduleForm.interview_at).toISOString(),
+      interview_interviewer_id: scheduleForm.interview_interviewer_id,
+      interview_location: scheduleForm.interview_location || null,
+      // Otomatis pindahkan status ke "Interview" kalau belum, biar sinkron
+      // dengan jadwal yang baru diisi — bisa diubah manual lagi kalau perlu.
+      status: schedulingApp.status === 'Interview' ? schedulingApp.status : 'Interview',
+    };
+
+    const { data, error } = await supabase
+      .from('applications')
+      .update(payload)
+      .eq('id', schedulingApp.id)
+      .select('id, status, interview_at, interview_interviewer_id, interview_location, interviewer:interview_interviewer_id ( nama )')
+      .single();
+
+    if (error) {
+      setScheduleError(error.message || 'Gagal menyimpan jadwal interview.');
+      setScheduleSaving(false);
+      return;
+    }
+
+    setApplications((prev) => prev.map((a) => (a.id === data.id ? { ...a, ...data } : a)));
+
+    const interviewLabel = schedulingApp.job_listings?.title || 'CV Umum';
+    await notifyEmployee(supabase, {
+      userId: payload.interview_interviewer_id,
+      tipe: 'interview_dijadwalkan',
+      pesan: `Kamu dijadwalkan jadi interviewer untuk ${schedulingApp.nama} (${interviewLabel}) pada ${new Date(payload.interview_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}.`,
+      link: '/employee/job-portal/pelamar',
+    });
+
+    setScheduleSaving(false);
+    setSchedulingApp(null);
   };
 
   const filtered = useMemo(() => {
@@ -260,6 +361,7 @@ export default function JobPortalCandidatesPage() {
                 <th className="px-5 py-3 font-medium">Jawaban</th>
                 <th className="px-5 py-3 font-medium">Catatan</th>
                 <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <th className="px-5 py-3 font-medium">Interview</th>
               </tr>
             </thead>
             <tbody>
@@ -316,11 +418,48 @@ export default function JobPortalCandidatesPage() {
                           ))}
                         </select>
                       </td>
+                      <td className="px-5 py-3.5 min-w-[160px]">
+                        {a.interview_at ? (
+                          <div className="text-xs text-[#3D3D3D]">
+                            <div className="font-medium text-black">
+                              {new Date(a.interview_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
+                            </div>
+                            <div>{a.interviewer?.nama || '—'}</div>
+                            {a.interview_location && <div className="text-[#9A9A9A]">{a.interview_location}</div>}
+                            {a.status === 'Interview' ? (
+                              <button
+                                onClick={() => openScheduleModal(a)}
+                                className="text-madael-red hover:text-madael-dark font-medium mt-1"
+                              >
+                                Ubah jadwal
+                              </button>
+                            ) : (
+                              <span className="text-[#B0B0B0] mt-1 block">
+                                Terkunci — status sudah &quot;{a.status}&quot;
+                              </span>
+                            )}
+                          </div>
+                        ) : a.status === 'Interview' ? (
+                          <button
+                            onClick={() => openScheduleModal(a)}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-madael-red hover:text-madael-dark"
+                          >
+                            <CalendarClock size={13} /> Jadwalkan
+                          </button>
+                        ) : (
+                          <span
+                            title='Ubah status ke "Interview" dulu untuk bisa menjadwalkan'
+                            className="inline-flex items-center gap-1.5 text-xs text-[#C4C4C4] cursor-not-allowed"
+                          >
+                            <CalendarClock size={13} /> Jadwalkan
+                          </span>
+                        )}
+                      </td>
                     </tr>
 
                     {hasAnswers && (
                       <tr>
-                        <td colSpan={8} className="p-0 border-b border-[#F0F0F0] last:border-0">
+                        <td colSpan={9} className="p-0 border-b border-[#F0F0F0] last:border-0">
                           <div
                             className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
                               isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
@@ -347,6 +486,65 @@ export default function JobPortalCandidatesPage() {
           </table>
         )}
       </div>
+
+      {schedulingApp && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={() => setSchedulingApp(null)}>
+          <div className="bg-white w-full max-w-[420px] p-6 relative" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setSchedulingApp(null)} className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black">
+              <X size={18} />
+            </button>
+            <h2 className="text-sm font-medium text-black mb-1">Jadwalkan Interview</h2>
+            <p className="text-xs text-[#6B6B6B] mb-4">{schedulingApp.nama} — {schedulingApp.job_listings?.title || 'CV Umum'}</p>
+
+            {scheduleError && <p className="text-xs text-red-600 mb-3">{scheduleError}</p>}
+
+            <label className="flex flex-col gap-1 mb-3">
+              <span className="text-xs text-[#6B6B6B]">Tanggal & Jam</span>
+              <input
+                type="datetime-local"
+                value={scheduleForm.interview_at}
+                onChange={(e) => setScheduleForm((f) => ({ ...f, interview_at: e.target.value }))}
+                className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1 mb-3">
+              <span className="text-xs text-[#6B6B6B]">Interviewer</span>
+              <select
+                value={scheduleForm.interview_interviewer_id}
+                onChange={(e) => setScheduleForm((f) => ({ ...f, interview_interviewer_id: e.target.value }))}
+                className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+              >
+                <option value="">Pilih interviewer...</option>
+                {interviewers.map((i) => (
+                  <option key={i.id} value={i.id}>{i.nama}</option>
+                ))}
+              </select>
+              {interviewers.length === 0 && (
+                <span className="text-[11px] text-[#9A9A9A]">Belum ada karyawan dengan akses modul Job Portal.</span>
+              )}
+            </label>
+
+            <label className="flex flex-col gap-1 mb-5">
+              <span className="text-xs text-[#6B6B6B]">Lokasi / Link Meeting (opsional)</span>
+              <input
+                value={scheduleForm.interview_location}
+                onChange={(e) => setScheduleForm((f) => ({ ...f, interview_location: e.target.value }))}
+                placeholder="Kantor Pusat / link Zoom / Google Meet"
+                className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+              />
+            </label>
+
+            <button
+              onClick={handleSaveSchedule}
+              disabled={scheduleSaving}
+              className="w-full bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+            >
+              {scheduleSaving ? 'Menyimpan...' : 'Simpan Jadwal'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
