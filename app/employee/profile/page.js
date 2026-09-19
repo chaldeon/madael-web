@@ -12,6 +12,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import CameraCapture from '@/components/CameraCapture';
+import EmployeeDocumentsPanel from '@/components/EmployeeDocumentsPanel';
 
 function StatusBadge({ status }) {
   const map = {
@@ -306,6 +307,18 @@ export default function ProfilePage() {
         onCapture={handleCapturePhoto}
         onClose={() => setShowCamera(false)}
       />
+
+      {/* Dokumen pribadi — KTP, NPWP, Ijazah, Kontrak Kerja, dll */}
+      <div className="bg-white border border-[#E0E0E0] p-5 mb-6">
+        <p className="text-xs font-semibold text-black tracking-[0.02em] mb-1">Dokumen Pribadi</p>
+        <p className="text-xs text-[#6B6B6B] mb-4">
+          Simpan salinan KTP, ijazah, kontrak kerja, atau dokumen lain di sini supaya tidak tercecer.
+          Cuma kamu dan superadmin yang bisa melihatnya.
+        </p>
+        {employeeId && (
+          <EmployeeDocumentsPanel supabase={supabase} employeeId={employeeId} canUpload canDelete />
+        )}
+      </div>
 
       {/* Form pengajuan perubahan */}
       {master && (
