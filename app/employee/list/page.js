@@ -329,7 +329,7 @@ export default function EmployeeListPage() {
   const formBaselineRef = useRef(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
-  const [createdInfo, setCreatedInfo] = useState(null); // { email, tempPassword }
+  const [createdInfo, setCreatedInfo] = useState(null); // { email }
 
   // Notifikasi non-blocking (pengganti alert()) — { type: 'error'|'success', message }
   const [toast, setToast] = useState(null);
@@ -541,7 +541,7 @@ export default function EmployeeListPage() {
         return;
       }
 
-      setCreatedInfo({ email: form.email, tempPassword: data.tempPassword });
+      setCreatedInfo({ email: form.email });
       fetchEmployees();
     } catch (err) {
       setFormError('Terjadi kesalahan. Coba lagi.');
@@ -769,24 +769,6 @@ export default function EmployeeListPage() {
     setBulkSubmitting(false);
   };
 
-  // Download daftar password sementara hasil bulk import sebagai CSV, biar
-  // gampang dibagikan/diarsip — tidak perlu discroll & disalin manual satu-satu.
-  const downloadBulkPasswords = () => {
-    if (!bulkResult) return;
-    const success = bulkResult.results.filter((r) => r.status === 'success');
-    const header = 'Nama,Employee ID,Email,Password Sementara\n';
-    const body = success
-      .map((r) => `"${r.nama}","${r.employee_id}","${r.email}","${r.tempPassword}"`)
-      .join('\n');
-    const blob = new Blob([header + body], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'password-employee-baru.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const selectClass =
     'border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
   const inputClass =
@@ -996,12 +978,9 @@ export default function EmployeeListPage() {
 
             {createdInfo ? (
               <div>
-                <p className="text-sm text-black mb-4">
-                  Akun berhasil dibuat untuk <strong>{createdInfo.email}</strong>. Salin password sementara ini dan sampaikan ke employee secara aman:
+                <p className="text-sm text-black mb-6">
+                  Akun berhasil dibuat untuk <strong>{createdInfo.email}</strong>. Email undangan berisi link set password sudah dikirim ke alamat tersebut — employee tinggal membuka email itu untuk mengaktifkan akunnya.
                 </p>
-                <div className="bg-[#F4F4F4] border border-[#E0E0E0] px-4 py-3 text-sm font-mono text-black mb-6 select-all">
-                  {createdInfo.tempPassword}
-                </div>
                 <button
                   onClick={() => setShowAddModal(false)}
                   className="w-full bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
@@ -1292,13 +1271,9 @@ export default function EmployeeListPage() {
                 </p>
 
                 {bulkResult.successCount > 0 && (
-                  <button
-                    onClick={downloadBulkPasswords}
-                    className="flex items-center gap-2 border border-[#E0E0E0] text-black px-4 py-2.5 text-sm font-medium hover:border-madael-red hover:text-madael-red transition-colors mb-4"
-                  >
-                    <Download size={16} />
-                    Download Password Sementara (CSV)
-                  </button>
+                  <p className="text-sm text-[#6B6B6B] mb-4">
+                    Email undangan set-password sudah dikirim ke setiap employee yang berhasil ditambahkan.
+                  </p>
                 )}
 
                 <div className="border border-[#E0E0E0] max-h-[280px] overflow-y-auto mb-6">

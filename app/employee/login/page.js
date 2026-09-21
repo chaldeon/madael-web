@@ -17,6 +17,7 @@ function EmployeeLoginForm() {
   const [checkingSession, setCheckingSession] = useState(true);
   const { lang } = useLanguage();
   const resetSuccess = searchParams.get('reset') === 'success';
+  const activatedSuccess = searchParams.get('activated') === 'success';
 
   useEffect(() => {
     const checkSession = async () => {
@@ -92,6 +93,14 @@ function EmployeeLoginForm() {
             {lang === 'id'
               ? 'Password berhasil diubah. Silakan login dengan password baru kamu.'
               : 'Password changed successfully. Please log in with your new password.'}
+          </p>
+        )}
+
+        {activatedSuccess && (
+          <p className="text-sm text-green-600 text-center mb-4">
+            {lang === 'id'
+              ? 'Akun berhasil diaktifkan. Silakan login dengan password baru kamu.'
+              : 'Account activated successfully. Please log in with your new password.'}
           </p>
         )}
 
