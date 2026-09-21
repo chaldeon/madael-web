@@ -131,9 +131,9 @@ function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
 const TABS = [
   { key: 'jadwal', label: 'Jadwal Kerja' },
   { key: 'koreksi', label: 'Approval Koreksi' },
-  { key: 'rekap', label: 'Rekap Bulanan' },
   { key: 'review', label: 'Perlu Review' },
   { key: 'lokasi', label: 'Lokasi Kerja' },
+  { key: 'rekap', label: 'Rekap Bulanan' },
 ];
 
 export default function SemuaKaryawanPage() {

@@ -8,7 +8,7 @@ import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, X, FileEdit, Upload
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
-import { checkGeofence } from '@/lib/geofence';
+import { checkGeofence, resolveEmployeeLocations } from '@/lib/geofence';
 import { getFaceDescriptor, descriptorDistance, isFaceMatch, similarityPercent } from '@/lib/faceVerification';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -89,6 +89,11 @@ export default function AbsensiPage() {
   // otomatis saat clock-in/out. Keduanya opsional: kalau belum diisi/didaftarkan,
   // absensi tetap jalan seperti biasa, cuma hasil verifikasinya null (belum bisa dicek).
   const [workLocations, setWorkLocations] = useState([]);
+  // Lokasi spesifik yang di-assign admin untuk karyawan ini (tabel
+  // employee_work_locations). Kalau kosong, geofence dicek ke SEMUA lokasi
+  // aktif (lihat resolveEmployeeLocations) — jadi karyawan yang belum
+  // di-assign tetap bisa absen seperti biasa.
+  const [assignedLocationIds, setAssignedLocationIds] = useState([]);
   const [referensiWajah, setReferensiWajah] = useState(null);
 
   // --- Pengajuan koreksi absensi mandiri ---
@@ -113,7 +118,7 @@ export default function AbsensiPage() {
     setLoading(true);
     setLoadError(null);
 
-    const [schedRes, todayRes, histRes, yesterdayRes, correctionsRes, locRes, refRes] = await Promise.all([
+    const [schedRes, todayRes, histRes, yesterdayRes, correctionsRes, locRes, refRes, assignedLocRes] = await Promise.all([
       supabase.from('work_schedule').select('*').eq('employee_id', employee.id).maybeSingle(),
       supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', todayStr()).maybeSingle(),
       supabase
@@ -133,6 +138,9 @@ export default function AbsensiPage() {
       // Error/kosong di sini TIDAK menggagalkan load data absensi utama.
       supabase.from('work_locations').select('*').eq('aktif', true),
       supabase.from('employees').select('foto_referensi_descriptor').eq('id', employee.id).maybeSingle(),
+      // Lokasi yang di-assign khusus untuk karyawan ini (opsional). Kalau
+      // belum ada assignment, geofence fallback ke semua lokasi aktif.
+      supabase.from('employee_work_locations').select('work_location_id').eq('employee_id', employee.id),
     ]);
 
     const firstError = schedRes.error || todayRes.error || histRes.error || yesterdayRes.error || correctionsRes.error;
@@ -150,6 +158,9 @@ export default function AbsensiPage() {
     setMyCorrections(correctionsRes.data || []);
     setWorkLocations(locRes.error ? [] : locRes.data || []);
     setReferensiWajah(refRes.error ? null : refRes.data?.foto_referensi_descriptor || null);
+    setAssignedLocationIds(
+      assignedLocRes.error ? [] : (assignedLocRes.data || []).map((r) => r.work_location_id)
+    );
     setLoading(false);
   }, [supabase, employee]);
 
@@ -226,7 +237,11 @@ export default function AbsensiPage() {
     try {
       const pos = await getPosition();
       const now = new Date();
-      const geofence = checkGeofence(pos.coords.latitude, pos.coords.longitude, workLocations);
+      // Kalau karyawan sudah di-assign lokasi tertentu, geofence hanya dicek
+      // ke lokasi itu. Kalau belum di-assign sama sekali, fallback ke semua
+      // lokasi aktif (perilaku lama) — jadi absen tetap jalan, bukan diblokir.
+      const relevantLocations = resolveEmployeeLocations(workLocations, assignedLocationIds);
+      const geofence = checkGeofence(pos.coords.latitude, pos.coords.longitude, relevantLocations);
 
       if (mode === 'in') {
         const isLate = schedule ? timeStr(now) > schedule.jam_masuk : false;
