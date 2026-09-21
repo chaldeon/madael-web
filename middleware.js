@@ -38,6 +38,11 @@ export async function middleware(request) {
     '/employee/login',
     '/employee/forgot-password',
     '/employee/reset-password',
+    // Link undangan set-password (dari inviteUserByEmail) — token sesi ada
+    // di URL fragment, belum ke-refresh jadi cookie saat request pertama
+    // sampai middleware ini jalan, jadi path-nya wajib publik dulu supaya
+    // client-side JS sempat baca token dan bikin sesinya.
+    '/employee/set-password',
   ];
   const isEmployeeRoute =
     pathname.startsWith('/employee') && !PUBLIC_EMPLOYEE_PATHS.includes(pathname);

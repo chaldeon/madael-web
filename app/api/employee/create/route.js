@@ -61,14 +61,15 @@ export async function POST(request) {
       employee_id = nextEmployeeId((existing || []).map((e) => e.employee_id));
     }
 
-    // Password sementara — belum ada flow reset password di sprint ini,
-    // jadi password ini perlu disampaikan manual ke employee baru.
-    const tempPassword = Math.random().toString(36).slice(-10) + 'Aa1!';
-
-    const { data: authUser, error: authError } = await admin.auth.admin.createUser({
-      email,
-      password: tempPassword,
-      email_confirm: true,
+    // Undangan email — Supabase yang generate & kirim link set-password ke
+    // employee baru (via SMTP yang dikonfigurasi di project Supabase). Tidak
+    // ada password sementara yang perlu ditangani/ditampilkan admin lagi;
+    // employee klik link di email lalu diarahkan ke /employee/set-password
+    // untuk buat password sendiri. Lihat juga: middleware.js (path ini wajib
+    // masuk PUBLIC_EMPLOYEE_PATHS) dan app/employee/set-password/page.js.
+    const { data: authUser, error: authError } = await admin.auth.admin.inviteUserByEmail(email, {
+      redirectTo: `${request.nextUrl.origin}/employee/set-password`,
+      data: { nama, employee_id },
     });
 
     if (authError) {
@@ -153,7 +154,7 @@ export async function POST(request) {
     });
 
     return NextResponse.json(
-      { success: true, employee: empRow, tempPassword },
+      { success: true, employee: empRow, invited: true },
       { status: 200 }
     );
   } catch (err) {

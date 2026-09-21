@@ -86,6 +86,18 @@ export async function POST(request) {
     const existingEmails = new Set((existingEmployees || []).map((e) => (e.email || '').toLowerCase()));
     let runningMax = highestEmployeeNumber((existingEmployees || []).map((e) => e.employee_id));
 
+    // Semua baris dapat undangan email lewat link yang sama, arahnya ke
+    // halaman set-password (lihat catatan sama di /api/employee/create).
+    const inviteRedirectTo = `${request.nextUrl.origin}/employee/set-password`;
+
+    // Jeda kecil antar pengiriman invite — bulk import bisa berisi ratusan
+    // baris berturut-turut, dan banyak provider SMTP custom (Resend/SES/dll)
+    // punya rate limit per detik. Ini pengaman konservatif, bukan angka
+    // yang diukur presisi — turunkan/naikkan sesuai limit provider yang
+    // dipakai project ini.
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const INVITE_DELAY_MS = 250;
+
     const findOrCreateCompany = async (namaPerusahaan) => {
       const trimmed = (namaPerusahaan || '').trim();
       if (!trimmed) return null;
@@ -137,16 +149,21 @@ export async function POST(request) {
 
       const clientId = perusahaan ? await findOrCreateCompany(perusahaan) : null;
 
-      const tempPassword = Math.random().toString(36).slice(-10) + 'Aa1!';
-      const { data: authUser, error: authError } = await admin.auth.admin.createUser({
-        email,
-        password: tempPassword,
-        email_confirm: true,
+      const { data: authUser, error: authError } = await admin.auth.admin.inviteUserByEmail(email, {
+        redirectTo: inviteRedirectTo,
+        data: { nama, employee_id: employeeId },
       });
 
       if (authError) {
         results.push({ row: rowNum, email, status: 'error', error: 'Gagal buat akun: ' + authError.message });
         continue;
+      }
+
+      // Jeda setelah tiap pengiriman invite yang berhasil (lihat komentar
+      // INVITE_DELAY_MS di atas) — dilewati untuk baris yang gagal duluan
+      // di atas supaya baris error tidak ikut memperlambat proses.
+      if (i < rows.length - 1) {
+        await sleep(INVITE_DELAY_MS);
       }
 
       const { data: empRow, error: empError } = await admin
@@ -205,7 +222,6 @@ export async function POST(request) {
         status: 'success',
         nama,
         employee_id: employeeId,
-        tempPassword,
       });
     }
 
