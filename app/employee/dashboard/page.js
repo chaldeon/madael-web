@@ -4,10 +4,79 @@ import GlobalSearchBar from '@/components/GlobalSearchBar';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Lock } from 'lucide-react';
+import { Lock, Megaphone, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { MODULE_REGISTRY } from '@/lib/employeeModules';
 import EmployeeHeader from '@/components/EmployeeHeader';
+
+// Pengumuman aktif = belum ada expired_at, atau expired_at masih di masa
+// depan. Dicek ulang di RLS/insert admin, ini cuma filter tampilan.
+function isActive(row) {
+  return !row.expired_at || new Date(row.expired_at) > new Date();
+}
+
+// Widget banner pengumuman company-wide, tampil di atas grid modul untuk
+// semua karyawan aktif (termasuk superadmin). Hanya menampilkan pengumuman
+// yang belum ditandai "sudah dibaca" oleh employee yang sedang login.
+function AnnouncementBanner({ supabase, employeeId }) {
+  const [announcements, setAnnouncements] = useState([]);
+  const [readIds, setReadIds] = useState([]);
+  const [dismissing, setDismissing] = useState(null);
+
+  const loadData = useCallback(async () => {
+    if (!employeeId) return;
+
+    const [annRes, readRes] = await Promise.all([
+      supabase.from('announcements').select('*').order('created_at', { ascending: false }),
+      supabase.from('announcement_reads').select('announcement_id').eq('employee_id', employeeId),
+    ]);
+
+    setAnnouncements((annRes.data || []).filter(isActive));
+    setReadIds((readRes.data || []).map((r) => r.announcement_id));
+  }, [supabase, employeeId]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const handleDismiss = async (announcementId) => {
+    setDismissing(announcementId);
+    // Optimistic — langsung hilang dari daftar, insert dikirim di belakang.
+    setReadIds((prev) => [...prev, announcementId]);
+    const { error } = await supabase
+      .from('announcement_reads')
+      .insert([{ announcement_id: announcementId, employee_id: employeeId }]);
+    setDismissing(null);
+    if (error) {
+      // Kegagalan insert bukan hal fatal — pengumuman cuma akan muncul lagi
+      // di reload berikutnya, employee tetap bisa lanjut kerja.
+      console.error('Gagal menandai pengumuman sebagai dibaca:', error.message);
+    }
+  };
+
+  const unread = announcements.filter((a) => !readIds.includes(a.id));
+  if (unread.length === 0) return null;
+
+  return (
+    <div className="mb-8 space-y-3">
+      {unread.map((a) => (
+        <div key={a.id} className="border-l-4 border-madael-red bg-white p-4 flex items-start gap-3">
+          <Megaphone size={18} className="text-madael-red shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-black">{a.judul}</p>
+            <p className="text-xs text-[#6B6B6B] mt-1 whitespace-pre-wrap">{a.isi}</p>
+          </div>
+          <button
+            onClick={() => handleDismiss(a.id)}
+            disabled={dismissing === a.id}
+            className="text-[#9A9A9A] hover:text-black shrink-0 disabled:opacity-50"
+            title="Tandai sudah dibaca"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function EmployeeDashboardPage() {
   const router = useRouter();
@@ -125,6 +194,8 @@ export default function EmployeeDashboardPage() {
       />
 
       <div className="max-w-[1100px] mx-auto px-6 py-10">
+        <AnnouncementBanner supabase={supabase} employeeId={employee.id} />
+
         {employee?.is_superadmin ? (
           <>
             {/* Layer 1 — Dashboard Saya: superadmin tetap karyawan aktif, sama kayak yang lain */}
