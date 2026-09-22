@@ -8,8 +8,7 @@ import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, X, FileEdit, Upload
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
-import { checkGeofence, resolveEmployeeLocations } from '@/lib/geofence';
-import { getFaceDescriptor, descriptorDistance, isFaceMatch, similarityPercent } from '@/lib/faceVerification';
+import { getFaceDescriptor, similarityPercent } from '@/lib/faceVerification';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -84,17 +83,13 @@ export default function AbsensiPage() {
 
   const [cameraMode, setCameraMode] = useState(null); // 'in' | 'out' | null — juga dipakai sbg "modal kamera terbuka?"
 
-  // Lokasi kerja terdaftar (kantor + klien) & descriptor wajah referensi —
-  // dimuat sekali di loadData(), dipakai untuk geofencing & verifikasi wajah
-  // otomatis saat clock-in/out. Keduanya opsional: kalau belum diisi/didaftarkan,
-  // absensi tetap jalan seperti biasa, cuma hasil verifikasinya null (belum bisa dicek).
-  const [workLocations, setWorkLocations] = useState([]);
-  // Lokasi spesifik yang di-assign admin untuk karyawan ini (tabel
-  // employee_work_locations). Kalau kosong, geofence dicek ke SEMUA lokasi
-  // aktif (lihat resolveEmployeeLocations) — jadi karyawan yang belum
-  // di-assign tetap bisa absen seperti biasa.
-  const [assignedLocationIds, setAssignedLocationIds] = useState([]);
-  const [referensiWajah, setReferensiWajah] = useState(null);
+  // Geofence & verifikasi wajah sekarang dihitung server-side
+  // (app/api/attendance/clock/route.js) memakai data lokasi & descriptor
+  // referensi yang dibaca langsung oleh server — browser tidak pernah
+  // menerima descriptor referensi (supaya tidak bisa disalin balik untuk
+  // memalsukan kecocokan). Di sini cuma perlu tahu ADA/TIDAKNYA foto
+  // referensi, untuk hint UI "belum daftar foto referensi".
+  const [hasReferensiWajah, setHasReferensiWajah] = useState(false);
 
   // --- Pengajuan koreksi absensi mandiri ---
   const [myCorrections, setMyCorrections] = useState([]);
@@ -118,7 +113,7 @@ export default function AbsensiPage() {
     setLoading(true);
     setLoadError(null);
 
-    const [schedRes, todayRes, histRes, yesterdayRes, correctionsRes, locRes, refRes, assignedLocRes] = await Promise.all([
+    const [schedRes, todayRes, histRes, yesterdayRes, correctionsRes, refRes] = await Promise.all([
       supabase.from('work_schedule').select('*').eq('employee_id', employee.id).maybeSingle(),
       supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', todayStr()).maybeSingle(),
       supabase
@@ -134,13 +129,9 @@ export default function AbsensiPage() {
         .eq('requested_by', employee.id)
         .order('created_at', { ascending: false })
         .limit(10),
-      // Lokasi kerja & foto referensi wajah — dua-duanya opsional (fitur baru).
-      // Error/kosong di sini TIDAK menggagalkan load data absensi utama.
-      supabase.from('work_locations').select('*').eq('aktif', true),
-      supabase.from('employees').select('foto_referensi_descriptor').eq('id', employee.id).maybeSingle(),
-      // Lokasi yang di-assign khusus untuk karyawan ini (opsional). Kalau
-      // belum ada assignment, geofence fallback ke semua lokasi aktif.
-      supabase.from('employee_work_locations').select('work_location_id').eq('employee_id', employee.id),
+      // Hanya butuh tahu ADA/TIDAKNYA foto referensi, bukan descriptor
+      // mentahnya (lihat catatan di deklarasi state hasReferensiWajah).
+      supabase.from('employees').select('foto_referensi_url').eq('id', employee.id).maybeSingle(),
     ]);
 
     const firstError = schedRes.error || todayRes.error || histRes.error || yesterdayRes.error || correctionsRes.error;
@@ -156,11 +147,7 @@ export default function AbsensiPage() {
     const yRow = yesterdayRes.data || null;
     setForgotClockOut(yRow && yRow.clock_in && !yRow.clock_out ? yRow : null);
     setMyCorrections(correctionsRes.data || []);
-    setWorkLocations(locRes.error ? [] : locRes.data || []);
-    setReferensiWajah(refRes.error ? null : refRes.data?.foto_referensi_descriptor || null);
-    setAssignedLocationIds(
-      assignedLocRes.error ? [] : (assignedLocRes.data || []).map((r) => r.work_location_id)
-    );
+    setHasReferensiWajah(!refRes.error && !!refRes.data?.foto_referensi_url);
     setLoading(false);
   }, [supabase, employee]);
 
@@ -187,14 +174,6 @@ export default function AbsensiPage() {
     return path;
   };
 
-  // Gabungkan hasil verifikasi wajah clock-in & clock-out: kalau salah satu
-  // gagal cocok, hasil akhirnya dianggap gagal (perlu review) — bukan ditimpa
-  // jadi "berhasil" cuma karena yang satunya kebetulan cocok.
-  const combineWajahStatus = (a, b) => {
-    if (a === false || b === false) return false;
-    if (a === true || b === true) return true;
-    return null;
-  };
 
   const handleCameraCapture = async (blob, videoEl) => {
     const mode = cameraMode;
@@ -202,25 +181,17 @@ export default function AbsensiPage() {
     setActing(true);
     setGeoError(null);
 
-    // 1. Verifikasi wajah — dijalankan di frame video yang sama, sebelum
-    //    videoEl dilepas dari DOM. Kalau karyawan belum daftar foto referensi,
-    //    atau modelnya gagal dimuat/diproses, dianggap "belum bisa dicek" (null),
-    //    BUKAN alasan untuk membatalkan absensi.
-    let wajahTerverifikasi = null;
-    let wajahSimilarity = null;
-    if (referensiWajah) {
-      try {
-        const descriptor = await getFaceDescriptor(videoEl);
-        if (descriptor) {
-          const distance = descriptorDistance(descriptor, referensiWajah);
-          wajahSimilarity = distance;
-          wajahTerverifikasi = isFaceMatch(distance);
-        } else {
-          wajahTerverifikasi = false; // foto diambil tapi wajah tidak terdeteksi jelas
-        }
-      } catch (err) {
-        console.error('Verifikasi wajah gagal diproses:', err);
-      }
+    // 1. Coba deteksi wajah dari frame video yang sama, sebelum videoEl
+    //    dilepas dari DOM. HANYA ekstraksi (kemampuan browser via face-api.js)
+    //    — descriptor mentahnya (128 angka) dikirim apa adanya ke server;
+    //    server yang membandingkan ke foto referensi dan memutuskan cocok
+    //    atau tidak (lihat app/api/attendance/clock/route.js), supaya browser
+    //    tidak bisa mengklaim "wajah cocok" sendiri.
+    let descriptor; // array = terdeteksi, null = kamera jalan tapi wajah tak jelas, undefined = belum sempat dicoba
+    try {
+      descriptor = await getFaceDescriptor(videoEl);
+    } catch (err) {
+      console.error('Deteksi wajah gagal diproses:', err);
     }
 
     // 2. Upload foto bukti.
@@ -231,63 +202,32 @@ export default function AbsensiPage() {
       setGeoError('Foto gagal disimpan, tapi absen tetap diproses. (' + (err.message || 'error kamera') + ')');
     }
 
-    // 3. Ambil lokasi & cek geofence, lalu simpan absensi. Di luar radius atau
-    //    wajah tidak cocok TETAP diizinkan — cuma ditandai untuk direview admin
-    //    (tab "Perlu Review" di Kelola Absensi Tim).
+    // 3. Ambil lokasi, lalu kirim ke server. Jam, tanggal, jarak geofence,
+    //    dan status verifikasi wajah semuanya dihitung DI SERVER, bukan di
+    //    sini — lihat app/api/attendance/clock/route.js. Di luar radius atau
+    //    wajah tidak cocok TETAP diizinkan oleh server, cuma ditandai untuk
+    //    direview admin (tab "Perlu Review" di Kelola Absensi Tim).
     try {
       const pos = await getPosition();
-      const now = new Date();
-      // Kalau karyawan sudah di-assign lokasi tertentu, geofence hanya dicek
-      // ke lokasi itu. Kalau belum di-assign sama sekali, fallback ke semua
-      // lokasi aktif (perilaku lama) — jadi absen tetap jalan, bukan diblokir.
-      const relevantLocations = resolveEmployeeLocations(workLocations, assignedLocationIds);
-      const geofence = checkGeofence(pos.coords.latitude, pos.coords.longitude, relevantLocations);
+      const res = await fetch('/api/attendance/clock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode,
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          fotoPath,
+          descriptor,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Gagal menyimpan absensi.');
 
+      setTodayRow(json.data);
       if (mode === 'in') {
-        const isLate = schedule ? timeStr(now) > schedule.jam_masuk : false;
-        const { data, error } = await supabase
-          .from('attendance')
-          .insert([{
-            employee_id: employee.id,
-            tanggal: todayStr(),
-            clock_in: now.toISOString(),
-            clock_in_lat: pos.coords.latitude,
-            clock_in_lng: pos.coords.longitude,
-            clock_in_dalam_radius: geofence.dalamRadius,
-            clock_in_jarak_meter: geofence.jarakMeter,
-            clock_in_lokasi_nama: geofence.location?.nama || null,
-            status_telat: isLate,
-            foto_clock_in_url: fotoPath,
-            wajah_terverifikasi: wajahTerverifikasi,
-            wajah_similarity: wajahSimilarity,
-          }])
-          .select()
-          .single();
-
-        if (error) throw error;
-        setTodayRow(data);
-        setHistory((h) => [data, ...h.filter((r) => r.tanggal !== data.tanggal)].slice(0, 7));
+        setHistory((h) => [json.data, ...h.filter((r) => r.tanggal !== json.data.tanggal)].slice(0, 7));
       } else {
-        const { data, error } = await supabase
-          .from('attendance')
-          .update({
-            clock_out: now.toISOString(),
-            clock_out_lat: pos.coords.latitude,
-            clock_out_lng: pos.coords.longitude,
-            clock_out_dalam_radius: geofence.dalamRadius,
-            clock_out_jarak_meter: geofence.jarakMeter,
-            clock_out_lokasi_nama: geofence.location?.nama || null,
-            foto_clock_out_url: fotoPath,
-            wajah_terverifikasi: combineWajahStatus(todayRow.wajah_terverifikasi, wajahTerverifikasi),
-            wajah_similarity: wajahSimilarity ?? todayRow.wajah_similarity,
-          })
-          .eq('id', todayRow.id)
-          .select()
-          .single();
-
-        if (error) throw error;
-        setTodayRow(data);
-        setHistory((h) => h.map((r) => (r.id === data.id ? data : r)));
+        setHistory((h) => h.map((r) => (r.id === json.data.id ? json.data : r)));
       }
     } catch (err) {
       setGeoError(err.message || 'Gagal mengambil lokasi. Pastikan izin lokasi diaktifkan.');
@@ -438,7 +378,7 @@ export default function AbsensiPage() {
           Hari ini bukan hari kerja terjadwal kamu.
         </div>
       )}
-      {!referensiWajah && (
+      {!hasReferensiWajah && (
         <div className="flex items-start gap-2 bg-[#F4F4F4] border border-[#E0E0E0] text-[#6B6B6B] text-xs px-4 py-3 mb-6">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
           Kamu belum daftar foto wajah referensi, jadi absensi belum bisa diverifikasi otomatis.{' '}
