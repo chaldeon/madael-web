@@ -23,8 +23,9 @@ function StatusBadge({ status }) {
     pending: 'bg-amber-100 text-amber-800',
     approved: 'bg-green-100 text-green-700',
     rejected: 'bg-red-100 text-red-700',
+    cancelled: 'bg-[#F4F4F4] text-[#6B6B6B]',
   };
-  const label = { pending: 'MENUNGGU', approved: 'DISETUJUI', rejected: 'DITOLAK' };
+  const label = { pending: 'MENUNGGU', approved: 'DISETUJUI', rejected: 'DITOLAK', cancelled: 'DIBATALKAN' };
   return (
     <span className={`text-[10px] font-medium tracking-[0.04em] px-2 py-1 ${map[status] || 'bg-[#F4F4F4] text-[#6B6B6B]'}`}>
       {label[status] || status?.toUpperCase()}
@@ -49,6 +50,8 @@ export default function LeaveRequestPage() {
   const [formError, setFormError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [cancellingId, setCancellingId] = useState(null);
+  const [cancelError, setCancelError] = useState(null);
 
   const loadBalance = useCallback(async () => {
     setBalanceLoading(true);
@@ -160,6 +163,38 @@ export default function LeaveRequestPage() {
     });
   };
 
+  // Batalkan pengajuan yang masih pending. Validasi (milik sendiri + masih
+  // pending) dilakukan di server; kalau ternyata sudah diproses admin, server
+  // membalas 409 dan status di layar disinkronkan supaya tombolnya hilang.
+  const handleCancel = async (row) => {
+    const konfirmasi = window.confirm(
+      `Batalkan pengajuan cuti ${formatTanggal(row.tanggal_mulai)} — ${formatTanggal(row.tanggal_selesai)}?\n\nKalau masih ingin cuti, kamu perlu mengajukan ulang.`
+    );
+    if (!konfirmasi) return;
+
+    setCancelError(null);
+    setCancellingId(row.id);
+    try {
+      const res = await fetch(`/api/leave-requests/${row.id}/cancel`, { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (res.status === 409 && json.status) {
+          setRequests((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: json.status } : r)));
+          loadBalance(); // kalau baru disetujui, sisa kuota ikut berubah
+        }
+        setCancelError(json.error || 'Gagal membatalkan pengajuan cuti, coba lagi.');
+        return;
+      }
+
+      setRequests((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: 'cancelled' } : r)));
+    } catch {
+      setCancelError('Gagal membatalkan pengajuan cuti. Periksa koneksi internet kamu.');
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="max-w-[700px] mx-auto px-6 py-10">
@@ -262,6 +297,7 @@ export default function LeaveRequestPage() {
       </form>
 
       <h2 className="text-sm font-medium text-black mb-3">Riwayat Pengajuan</h2>
+      {cancelError && <p className="text-xs text-red-600 mb-3">{cancelError}</p>}
       {requests.length === 0 ? (
         <div className="bg-white border border-[#E0E0E0]">
           <EmptyState message="Belum ada pengajuan cuti." icon={CalendarDays} />
@@ -275,6 +311,7 @@ export default function LeaveRequestPage() {
                 <th className="px-4 py-3 font-medium">Hari Kerja</th>
                 <th className="px-4 py-3 font-medium">Alasan</th>
                 <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody>
@@ -286,6 +323,20 @@ export default function LeaveRequestPage() {
                   <td className="px-4 py-3 text-[#6B6B6B]">{hitungHariKerja(r.tanggal_mulai, r.tanggal_selesai, hariKerja)}</td>
                   <td className="px-4 py-3 text-[#6B6B6B] max-w-[220px] truncate" title={r.alasan}>{r.alasan}</td>
                   <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    {r.status === 'pending' ? (
+                      <button
+                        type="button"
+                        onClick={() => handleCancel(r)}
+                        disabled={cancellingId === r.id}
+                        className="text-xs font-medium text-madael-red hover:text-madael-dark disabled:opacity-50"
+                      >
+                        {cancellingId === r.id ? 'Membatalkan...' : 'Batalkan'}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-[#9A9A9A]">—</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

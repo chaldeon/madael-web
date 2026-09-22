@@ -26,8 +26,9 @@ function StatusBadge({ status }) {
     pending: 'bg-amber-100 text-amber-800',
     approved: 'bg-green-100 text-green-700',
     rejected: 'bg-red-100 text-red-700',
+    cancelled: 'bg-[#F4F4F4] text-[#6B6B6B]',
   };
-  const label = { pending: 'MENUNGGU', approved: 'DISETUJUI', rejected: 'DITOLAK' };
+  const label = { pending: 'MENUNGGU', approved: 'DISETUJUI', rejected: 'DITOLAK', cancelled: 'DIBATALKAN' };
   return (
     <span className={`text-[10px] font-medium tracking-[0.04em] px-2 py-1 ${map[status] || 'bg-[#F4F4F4] text-[#6B6B6B]'}`}>
       {label[status] || status?.toUpperCase()}
@@ -171,12 +172,19 @@ export default function LeaveRequestAdminPage() {
       .from('leave_requests')
       .update({ status: decision, approved_by: employee.id, updated_at: new Date().toISOString() })
       .eq('id', row.id)
+      .eq('status', 'pending') // jangan timpa pengajuan yang sudah dibatalkan karyawan / diproses admin lain
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) {
       setActingId(null);
       setActionError(error.message || 'Gagal memperbarui status pengajuan.');
+      return;
+    }
+    if (!data) {
+      setActingId(null);
+      setActionError('Pengajuan ini sudah tidak berstatus menunggu (mungkin dibatalkan karyawan atau sudah diproses). Daftar dimuat ulang.');
+      loadData();
       return;
     }
     setRequests((prev) => prev.map((r) => (r.id === data.id ? data : r)));
@@ -275,6 +283,7 @@ export default function LeaveRequestAdminPage() {
           <option value="pending">Menunggu</option>
           <option value="approved">Disetujui</option>
           <option value="rejected">Ditolak</option>
+          <option value="cancelled">Dibatalkan</option>
           <option value="all">Semua</option>
         </select>
       </div>

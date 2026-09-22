@@ -411,6 +411,20 @@ export default function SemuaKaryawanPage() {
     setProcessingId(row.id);
     setKoreksiError(null);
     try {
+      // Karyawan bisa membatalkan pengajuan pending kapan saja. Cek status
+      // terbaru dulu supaya pengajuan yang sudah dibatalkan tidak diterapkan.
+      const { data: fresh, error: freshError } = await supabase
+        .from('attendance_corrections')
+        .select('status')
+        .eq('id', row.id)
+        .maybeSingle();
+      if (freshError) throw freshError;
+      if (!fresh || fresh.status !== 'pending') {
+        loadKoreksi(); // loadKoreksi mengosongkan error, jadi set pesan SETELAH dipanggil
+        setKoreksiError('Pengajuan ini sudah tidak berstatus menunggu (mungkin dibatalkan karyawan atau sudah diproses). Daftar dimuat ulang.');
+        return;
+      }
+
       const schedule = schedules[row.employee_id];
       const statusTelat = computeStatusTelat(row.after_clock_in, schedule);
 
@@ -446,7 +460,7 @@ export default function SemuaKaryawanPage() {
         attendanceId = data.id;
       }
 
-      const { error: updateError } = await supabase
+      const { data: approvedRows, error: updateError } = await supabase
         .from('attendance_corrections')
         .update({
           status: 'approved',
@@ -455,8 +469,13 @@ export default function SemuaKaryawanPage() {
           corrected_by: employee.id,
           attendance_id: attendanceId,
         })
-        .eq('id', row.id);
+        .eq('id', row.id)
+        .eq('status', 'pending')
+        .select('id');
       if (updateError) throw updateError;
+      if (!approvedRows || approvedRows.length === 0) {
+        throw new Error('Pengajuan berubah status saat diproses (kemungkinan dibatalkan karyawan), padahal data absensi sudah terlanjur diperbarui. Cek data absensi karyawan ini.');
+      }
 
       setCorrections((prev) =>
         koreksiStatusFilter === 'all'
@@ -488,7 +507,7 @@ export default function SemuaKaryawanPage() {
     setProcessingId(rejectingRow.id);
     setKoreksiError(null);
     try {
-      const { error } = await supabase
+      const { data: rejectedRows, error } = await supabase
         .from('attendance_corrections')
         .update({
           status: 'rejected',
@@ -496,8 +515,16 @@ export default function SemuaKaryawanPage() {
           reviewed_at: new Date().toISOString(),
           catatan_reviewer: rejectCatatan.trim() || null,
         })
-        .eq('id', rejectingRow.id);
+        .eq('id', rejectingRow.id)
+        .eq('status', 'pending') // jangan timpa pengajuan yang sudah dibatalkan karyawan
+        .select('id');
       if (error) throw error;
+      if (!rejectedRows || rejectedRows.length === 0) {
+        setRejectingRow(null);
+        loadKoreksi();
+        setKoreksiError('Pengajuan ini sudah tidak berstatus menunggu (mungkin dibatalkan karyawan atau sudah diproses). Daftar dimuat ulang.');
+        return;
+      }
 
       setCorrections((prev) =>
         koreksiStatusFilter === 'all'
@@ -753,6 +780,7 @@ export default function SemuaKaryawanPage() {
                   <option value="pending">Menunggu Approval</option>
                   <option value="approved">Disetujui</option>
                   <option value="rejected">Ditolak</option>
+                  <option value="cancelled">Dibatalkan</option>
                   <option value="all">Semua</option>
                 </select>
               </div>
@@ -791,6 +819,11 @@ export default function SemuaKaryawanPage() {
                         {row.status === 'rejected' && (
                           <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-red-100 text-red-700 shrink-0">
                             DITOLAK
+                          </span>
+                        )}
+                        {row.status === 'cancelled' && (
+                          <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-[#F4F4F4] text-[#6B6B6B] shrink-0">
+                            DIBATALKAN
                           </span>
                         )}
                       </div>

@@ -20,6 +20,8 @@ const AKSI_LABEL = {
   koreksi_absensi_tambah: 'Tambah Record Absensi',
   approve_cuti: 'Approve Cuti',
   reject_cuti: 'Reject Cuti',
+  cancel_cuti: 'Batalkan Cuti (Karyawan)',
+  cancel_koreksi_absensi: 'Batalkan Koreksi Absensi (Karyawan)',
   ubah_status_payroll: 'Ubah Status Payroll',
   edit_struktur_gaji: 'Edit Struktur Gaji',
   tambah_employee_master: 'Tambah Employee Master',
