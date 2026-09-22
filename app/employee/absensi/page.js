@@ -91,6 +91,14 @@ export default function AbsensiPage() {
   // referensi, untuk hint UI "belum daftar foto referensi".
   const [hasReferensiWajah, setHasReferensiWajah] = useState(false);
 
+  // workLocations & assignedLocationIds di sini CUMA dipakai buat tampilan
+  // "lokasi kamu di-lock ke mana" sebelum clock in/out — bukan buat
+  // menghitung geofence (itu tetap dihitung server-side, lihat catatan di
+  // atas). Jadi aman: karyawan cuma melihat nama & radius lokasi, bukan data
+  // yang bisa dipalsukan untuk lolos pengecekan.
+  const [workLocations, setWorkLocations] = useState([]);
+  const [assignedLocationIds, setAssignedLocationIds] = useState([]);
+
   // --- Pengajuan koreksi absensi mandiri ---
   const [myCorrections, setMyCorrections] = useState([]);
   const [showKoreksiForm, setShowKoreksiForm] = useState(false);
@@ -115,7 +123,7 @@ export default function AbsensiPage() {
     setLoading(true);
     setLoadError(null);
 
-    const [schedRes, todayRes, histRes, yesterdayRes, correctionsRes, refRes] = await Promise.all([
+    const [schedRes, todayRes, histRes, yesterdayRes, correctionsRes, refRes, locRes, assignedLocRes] = await Promise.all([
       supabase.from('work_schedule').select('*').eq('employee_id', employee.id).maybeSingle(),
       supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', todayStr()).maybeSingle(),
       supabase
@@ -134,6 +142,12 @@ export default function AbsensiPage() {
       // Hanya butuh tahu ADA/TIDAKNYA foto referensi, bukan descriptor
       // mentahnya (lihat catatan di deklarasi state hasReferensiWajah).
       supabase.from('employees').select('foto_referensi_url').eq('id', employee.id).maybeSingle(),
+      // Lokasi kerja aktif & assignment lokasi karyawan ini — CUMA buat
+      // ditampilkan sebagai info "di-lock ke mana" (lihat catatan di state
+      // workLocations di atas). Opsional: gagal/kosong di sini tidak
+      // menggagalkan load data absensi utama.
+      supabase.from('work_locations').select('*').eq('aktif', true),
+      supabase.from('employee_work_locations').select('work_location_id').eq('employee_id', employee.id),
     ]);
 
     const firstError = schedRes.error || todayRes.error || histRes.error || yesterdayRes.error || correctionsRes.error;
@@ -150,6 +164,10 @@ export default function AbsensiPage() {
     setForgotClockOut(yRow && yRow.clock_in && !yRow.clock_out ? yRow : null);
     setMyCorrections(correctionsRes.data || []);
     setHasReferensiWajah(!refRes.error && !!refRes.data?.foto_referensi_url);
+    setWorkLocations(locRes.error ? [] : locRes.data || []);
+    setAssignedLocationIds(
+      assignedLocRes.error ? [] : (assignedLocRes.data || []).map((r) => r.work_location_id)
+    );
     setLoading(false);
   }, [supabase, employee]);
 
@@ -385,6 +403,10 @@ export default function AbsensiPage() {
   }
 
   const isWorkday = schedule?.hari_kerja?.includes(HARI_LABEL[new Date().getDay()]);
+  // Lokasi yang di-lock khusus buat karyawan ini (assignment dari admin di
+  // tab "Lokasi Kerja"). Kalau kosong, karyawan tidak di-lock ke lokasi
+  // manapun — geofence server-side dicek ke semua lokasi aktif.
+  const lockedLocations = workLocations.filter((l) => assignedLocationIds.includes(l.id));
 
   return (
     <div className="max-w-[700px] mx-auto px-6 py-10">
@@ -439,6 +461,22 @@ export default function AbsensiPage() {
             Jadwal: {formatJam(schedule.jam_masuk)} – {formatJam(schedule.jam_pulang)}
           </p>
         )}
+
+        <div className="flex items-start gap-2 text-xs text-[#6B6B6B] mb-4">
+          <MapPin size={13} className="mt-0.5 shrink-0" />
+          {lockedLocations.length > 0 ? (
+            <span>
+              Lokasi kamu di-lock ke{' '}
+              <span className="font-medium text-black">
+                {lockedLocations.map((l) => l.nama).join(', ')}
+              </span>
+              . Clock in/out cuma dicek jaraknya ke lokasi ini (radius{' '}
+              {lockedLocations.map((l) => `${l.radius_meter}m`).join(', ')}).
+            </span>
+          ) : (
+            <span>Lokasi kamu belum di-lock ke kantor/klien tertentu — clock in/out bisa dari lokasi manapun yang terdaftar.</span>
+          )}
+        </div>
 
         {!todayRow ? (
           <>
