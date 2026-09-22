@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Trash2, PowerOff, Megaphone } from 'lucide-react';
+import { Trash2, PowerOff, Megaphone, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { notifyAllActive } from '@/lib/notify';
@@ -20,6 +20,16 @@ function formatTanggalWaktu(value) {
   return new Date(value).toLocaleDateString('id-ID', {
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
+}
+
+// Format ISO timestamp (dari kolom expired_at) jadi string yang diterima
+// input type="datetime-local" ('YYYY-MM-DDTHH:mm'), dipakai buat isi ulang
+// form saat mode edit dibuka.
+function toDatetimeLocalValue(isoValue) {
+  if (!isoValue) return '';
+  const d = new Date(isoValue);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 // Pengumuman dianggap aktif kalau belum ada expired_at, atau expired_at-nya
@@ -38,6 +48,7 @@ export default function AnnouncementsAdminPage() {
   const [loadError, setLoadError] = useState(null);
 
   const [form, setForm] = useState(EMPTY_FORM);
+  const [editingId, setEditingId] = useState(null); // null = mode buat baru, isi = mode edit row itu
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState(null);
 
@@ -80,14 +91,46 @@ export default function AnnouncementsAdminPage() {
 
     setSaving(true);
 
+    const payload = {
+      judul: form.judul.trim(),
+      isi: form.isi.trim(),
+      expired_at: form.expired_at ? new Date(form.expired_at).toISOString() : null,
+    };
+
+    // Mode edit: update row yang sedang diedit, tidak broadcast notifikasi
+    // ulang (biar tidak spam tiap kali admin cuma benerin typo).
+    if (editingId) {
+      const { data, error } = await supabase
+        .from('announcements')
+        .update(payload)
+        .eq('id', editingId)
+        .select()
+        .single();
+
+      setSaving(false);
+      if (error) {
+        setFormError(error.message || 'Gagal menyimpan perubahan pengumuman.');
+        return;
+      }
+
+      setRows((prev) => prev.map((r) => (r.id === data.id ? data : r)));
+      setForm(EMPTY_FORM);
+      setEditingId(null);
+
+      logActivity(supabase, {
+        userId: employee.id,
+        aksi: 'edit_pengumuman',
+        targetTable: 'announcements',
+        targetId: data.id,
+        detail: { judul: data.judul },
+      });
+      return;
+    }
+
+    // Mode buat baru.
     const { data, error } = await supabase
       .from('announcements')
-      .insert([{
-        judul: form.judul.trim(),
-        isi: form.isi.trim(),
-        expired_at: form.expired_at ? new Date(form.expired_at).toISOString() : null,
-        created_by: employee.id,
-      }])
+      .insert([{ ...payload, created_by: employee.id }])
       .select()
       .single();
 
@@ -116,6 +159,23 @@ export default function AnnouncementsAdminPage() {
       targetId: data.id,
       detail: { judul: data.judul },
     });
+  };
+
+  const handleStartEdit = (row) => {
+    setFormError(null);
+    setEditingId(row.id);
+    setForm({
+      judul: row.judul,
+      isi: row.isi,
+      expired_at: toDatetimeLocalValue(row.expired_at),
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+    setFormError(null);
   };
 
   // "Nonaktifkan sekarang" — set expired_at ke waktu saat ini, tanpa hapus
@@ -163,6 +223,7 @@ export default function AnnouncementsAdminPage() {
       return;
     }
     setRows((prev) => prev.filter((r) => r.id !== row.id));
+    if (editingId === row.id) handleCancelEdit();
 
     logActivity(supabase, {
       userId: employee.id,
@@ -218,7 +279,7 @@ export default function AnnouncementsAdminPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="bg-white border border-[#E0E0E0] p-5 mb-8">
-        <p className="text-sm font-medium text-black mb-4">Buat Pengumuman Baru</p>
+        <p className="text-sm font-medium text-black mb-4">{editingId ? 'Edit Pengumuman' : 'Buat Pengumuman Baru'}</p>
 
         {formError && <p className="text-xs text-red-600 mb-3">{formError}</p>}
 
@@ -243,8 +304,18 @@ export default function AnnouncementsAdminPage() {
           disabled={saving}
           className="bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
         >
-          {saving ? 'Menyimpan...' : 'Terbitkan Pengumuman'}
+          {saving ? 'Menyimpan...' : editingId ? 'Simpan Perubahan' : 'Terbitkan Pengumuman'}
         </button>
+        {editingId && (
+          <button
+            type="button"
+            onClick={handleCancelEdit}
+            disabled={saving}
+            className="ml-3 text-sm font-medium tracking-[0.02em] text-[#6B6B6B] hover:text-black disabled:opacity-50"
+          >
+            Batal
+          </button>
+        )}
       </form>
 
       {actionError && <p className="text-xs text-red-600 mb-4">{actionError}</p>}
@@ -278,6 +349,13 @@ export default function AnnouncementsAdminPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
+                    <button
+                      onClick={() => handleStartEdit(row)}
+                      disabled={actingId === row.id}
+                      className="inline-flex items-center gap-1 text-xs text-[#6B6B6B] hover:text-black font-medium disabled:opacity-50"
+                    >
+                      <Pencil size={12} /> Edit
+                    </button>
                     {active && (
                       <button
                         onClick={() => handleExpireNow(row)}
