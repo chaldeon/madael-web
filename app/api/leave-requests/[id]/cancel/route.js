@@ -76,12 +76,13 @@ export async function POST(request, { params }) {
 
     if (updateError) {
       console.error('Batalkan cuti error:', updateError);
-      return NextResponse.json({ error: 'Gagal membatalkan pengajuan cuti.' }, { status: 500 });
+      return NextResponse.json(
+        { error: `Gagal membatalkan pengajuan cuti: ${updateError.message}` },
+        { status: 500 }
+      );
     }
 
     if (!updated) {
-      // Tidak ada baris yang berubah: bukan milik karyawan ini, tidak ada,
-      // atau statusnya sudah bukan pending (mis. baru saja disetujui admin).
       const { data: existing } = await admin
         .from('leave_requests')
         .select('status')
@@ -101,8 +102,6 @@ export async function POST(request, { params }) {
       );
     }
 
-    // Di-await (bukan fire-and-forget) karena di serverless proses bisa
-    // dihentikan begitu response terkirim. Keduanya sudah try/catch sendiri.
     await logActivity(admin, {
       userId: emp.id,
       aksi: 'cancel_cuti',
@@ -115,8 +114,6 @@ export async function POST(request, { params }) {
       },
     });
 
-    // Superadmin sudah diberi tahu saat pengajuan dibuat; beri tahu juga kalau
-    // dibatalkan supaya notifikasi lama tidak membingungkan.
     await notifySuperadmins(admin, {
       tipe: 'cuti_dibatalkan',
       pesan: `${emp.nama || 'Karyawan'} membatalkan pengajuan cuti ${formatTanggal(updated.tanggal_mulai)} – ${formatTanggal(updated.tanggal_selesai)}.`,

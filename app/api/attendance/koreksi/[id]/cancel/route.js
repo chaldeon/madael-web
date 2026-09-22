@@ -67,7 +67,10 @@ export async function POST(request, { params }) {
 
     if (updateError) {
       console.error('Batalkan koreksi absensi error:', updateError);
-      return NextResponse.json({ error: 'Gagal membatalkan pengajuan koreksi.' }, { status: 500 });
+      return NextResponse.json(
+        { error: `Gagal membatalkan pengajuan koreksi: ${updateError.message}` },
+        { status: 500 }
+      );
     }
 
     if (!updated) {
