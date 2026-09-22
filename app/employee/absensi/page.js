@@ -106,6 +106,8 @@ export default function AbsensiPage() {
   );
   const [koreksiSaving, setKoreksiSaving] = useState(false);
   const [koreksiError, setKoreksiError] = useState(null);
+  const [cancelingKoreksiId, setCancelingKoreksiId] = useState(null);
+  const [koreksiCancelError, setKoreksiCancelError] = useState(null);
   
 
   const loadData = useCallback(async () => {
@@ -318,6 +320,36 @@ export default function AbsensiPage() {
     }
   };
 
+  // Batalkan pengajuan koreksi yang masih pending. Validasi di server; kalau
+  // sudah diproses superadmin, server membalas 409 dan status disinkronkan.
+  const handleCancelKoreksi = async (row) => {
+    const konfirmasi = window.confirm(
+      `Batalkan pengajuan koreksi absensi tanggal ${formatTanggal(row.tanggal)}?\n\nKalau masih perlu dikoreksi, kamu harus mengajukan ulang dan mengunggah foto bukti lagi.`
+    );
+    if (!konfirmasi) return;
+
+    setKoreksiCancelError(null);
+    setCancelingKoreksiId(row.id);
+    try {
+      const res = await fetch(`/api/attendance/koreksi/${row.id}/cancel`, { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (res.status === 409 && json.status) {
+          setMyCorrections((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: json.status } : r)));
+        }
+        setKoreksiCancelError(json.error || 'Gagal membatalkan pengajuan koreksi, coba lagi.');
+        return;
+      }
+
+      setMyCorrections((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: 'cancelled' } : r)));
+    } catch {
+      setKoreksiCancelError('Gagal membatalkan pengajuan koreksi. Periksa koneksi internet kamu.');
+    } finally {
+      setCancelingKoreksiId(null);
+    }
+  };
+
   if (status === 'loading' || loading) {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
@@ -522,6 +554,7 @@ export default function AbsensiPage() {
       <p className="text-xs text-[#9A9A9A] mb-3">
         Kalau lupa clock in/out atau ada kesalahan, ajukan koreksi mandiri di sini lengkap dengan foto bukti. Superadmin akan mereview sebelum data absensi kamu ikut berubah.
       </p>
+      {koreksiCancelError && <p className="text-xs text-red-600 mb-3">{koreksiCancelError}</p>}
       <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -530,12 +563,13 @@ export default function AbsensiPage() {
               <th className="px-4 py-3 font-medium">Diajukan</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Bukti</th>
+              <th className="px-4 py-3 font-medium"></th>
             </tr>
           </thead>
           <tbody>
             {myCorrections.length === 0 ? (
               <tr>
-                <td colSpan={4} className="p-0">
+                <td colSpan={5} className="p-0">
                   <EmptyState message="Belum ada pengajuan koreksi." />
                 </td>
               </tr>
@@ -562,6 +596,11 @@ export default function AbsensiPage() {
                         DITOLAK
                       </span>
                     )}
+                    {row.status === 'cancelled' && (
+                      <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-[#F4F4F4] text-[#6B6B6B]">
+                        DIBATALKAN
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {row.foto_bukti_url ? (
@@ -575,6 +614,20 @@ export default function AbsensiPage() {
                       </a>
                     ) : (
                       '—'
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    {row.status === 'pending' ? (
+                      <button
+                        type="button"
+                        onClick={() => handleCancelKoreksi(row)}
+                        disabled={cancelingKoreksiId === row.id}
+                        className="text-xs font-medium text-madael-red hover:text-madael-dark disabled:opacity-50"
+                      >
+                        {cancelingKoreksiId === row.id ? 'Membatalkan...' : 'Batalkan'}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-[#9A9A9A]">—</span>
                     )}
                   </td>
                 </tr>
