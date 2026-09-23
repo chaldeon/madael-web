@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download, ShieldCheck, Power, Trash2, Search, MoreVertical, AlertCircle, CheckCircle2, FileText } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
@@ -318,6 +318,10 @@ export default function EmployeeListPage() {
   const [filterClientId, setFilterClientId] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  // Search di-debounce sebelum dipakai buat query server — supaya tiap
+  // ketikan tidak langsung nembak request baru ke Supabase.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [totalCount, setTotalCount] = useState(0); // jumlah employee yang cocok filter (dari server, bukan cuma 1 halaman)
 
   const [sortField, setSortField] = useState('nama');
   const [sortDir, setSortDir] = useState('asc');
@@ -359,8 +363,8 @@ export default function EmployeeListPage() {
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [bulkResult, setBulkResult] = useState(null); // { successCount, errorCount, results }
 
-  // Pagination tabel — murni render di client, data tetap di-fetch penuh
-  // (aman untuk skala saat ini).
+  // Pagination tabel — server-side: hanya baris di halaman aktif yang
+  // di-fetch (query pakai .range()), bukan seluruh employee sekaligus.
   const [pageSize, setPageSize] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -399,38 +403,93 @@ export default function EmployeeListPage() {
     setCompanies(data || []);
   }, [supabase]);
 
+  // Debounce search — tunggu jeda ketikan sebelum jadi query beneran ke server.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const [empRes, masterRes, scheduleRes] = await Promise.all([
-      supabase
-        .from('employees')
-        .select('id, nama, employee_id, email, client_id, companies:client_id ( id, nama_perusahaan ), status, is_superadmin, created_at')
-        .order('created_at', { ascending: false }),
+
+    const from = (currentPage - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    let query = supabase
+      .from('employees')
+      .select(
+        'id, nama, employee_id, email, client_id, companies:client_id ( id, nama_perusahaan ), status, is_superadmin, created_at',
+        { count: 'exact' }
+      );
+
+    if (filterClientId) query = query.eq('client_id', filterClientId);
+    if (filterStatus) query = query.eq('status', filterStatus);
+
+    if (debouncedSearch) {
+      // Filter .or() PostgREST dipisah koma — buang koma dari input pencarian
+      // biar tidak ikut memecah daftar kondisi (nama/ID/email nyaris tidak
+      // pernah butuh koma buat dicari).
+      const safeQ = debouncedSearch.replace(/,/g, '');
+      query = query.or(`nama.ilike.%${safeQ}%,employee_id.ilike.%${safeQ}%,email.ilike.%${safeQ}%`);
+    }
+
+    // Kolom "Perusahaan" sebenarnya kolom di tabel relasi (companies), jadi
+    // butuh opsi foreignTable — kolom lain sort langsung di tabel employees.
+    if (sortField === 'perusahaan') {
+      query = query.order('nama_perusahaan', { foreignTable: 'companies', ascending: sortDir === 'asc' });
+    } else {
+      query = query.order(SORT_COLUMNS[sortField] ? sortField : 'nama', { ascending: sortDir === 'asc' });
+    }
+
+    const { data, error, count } = await query.range(from, to);
+
+    if (error) {
+      setError(error.message);
+      setEmployees([]);
+      setTotalCount(0);
+      setMasterByEmployeeId({});
+      setScheduledIds(new Set());
+      setLoading(false);
+      return;
+    }
+
+    const rows = data || [];
+    setEmployees(rows);
+    setTotalCount(count || 0);
+
+    // Data kelengkapan (master + jadwal kerja) sekarang cukup diambil untuk
+    // baris di halaman aktif saja, bukan seluruh employee lagi.
+    const ids = rows.map((e) => e.id);
+    if (ids.length === 0) {
+      setMasterByEmployeeId({});
+      setScheduledIds(new Set());
+      setLoading(false);
+      return;
+    }
+
+    const [masterRes, scheduleRes] = await Promise.all([
       supabase
         .from('employees_master')
         .select('linked_employee_id, status_ptkp, npwp_status, jkk_rate, nama_rekening, no_rekening, alamat, kontak_darurat_nama, kontak_darurat_telepon')
-        .not('linked_employee_id', 'is', null),
-      supabase.from('work_schedule').select('employee_id'),
+        .in('linked_employee_id', ids),
+      supabase.from('work_schedule').select('employee_id').in('employee_id', ids),
     ]);
 
-    const { data, error } = empRes;
-    if (error) {
-      setError(error.message);
-    } else {
-      setEmployees(data || []);
-    }
     setMasterByEmployeeId(
       Object.fromEntries((masterRes.data || []).map((m) => [m.linked_employee_id, m]))
     );
     setScheduledIds(new Set((scheduleRes.data || []).map((r) => r.employee_id)));
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, currentPage, pageSize, filterClientId, filterStatus, debouncedSearch, sortField, sortDir]);
 
   useEffect(() => {
     fetchEmployees();
+  }, [fetchEmployees]);
+
+  useEffect(() => {
     fetchCompanies();
-  }, [fetchEmployees, fetchCompanies]);
+  }, [fetchCompanies]);
 
   const handleSort = (colKey) => {
     if (sortField === colKey) {
@@ -441,33 +500,7 @@ export default function EmployeeListPage() {
     }
   };
 
-  const filtered = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    const rows = employees.filter((e) => {
-      const matchPerusahaan = !filterClientId || e.client_id === filterClientId;
-      const matchStatus = !filterStatus || e.status === filterStatus;
-      const matchSearch =
-        !q ||
-        (e.nama || '').toLowerCase().includes(q) ||
-        (e.employee_id || '').toLowerCase().includes(q) ||
-        (e.email || '').toLowerCase().includes(q);
-      return matchPerusahaan && matchStatus && matchSearch;
-    });
-
-    const getValue = SORT_COLUMNS[sortField]?.get;
-    if (!getValue) return rows;
-
-    const sorted = [...rows].sort((a, b) => {
-      const va = getValue(a);
-      const vb = getValue(b);
-      if (va < vb) return -1;
-      if (va > vb) return 1;
-      return 0;
-    });
-    return sortDir === 'desc' ? sorted.reverse() : sorted;
-  }, [employees, filterClientId, filterStatus, searchQuery, sortField, sortDir]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   // Balikin ke halaman valid kalau halaman aktif jadi kosong — misalnya
   // setelah ganti filter, ganti page size, atau data berkurang (hapus/nonaktif).
@@ -475,16 +508,11 @@ export default function EmployeeListPage() {
     setCurrentPage((prev) => Math.min(prev, totalPages));
   }, [totalPages]);
 
-  // Ganti filter, search, atau page size → balik ke halaman 1 (biar nggak
-  // nyangkut di halaman yang tiba-tiba jadi nggak relevan).
+  // Ganti filter, search, page size, atau sort → balik ke halaman 1 (biar
+  // nggak nyangkut di halaman yang tiba-tiba jadi nggak relevan).
   useEffect(() => {
     setCurrentPage(1);
-  }, [filterClientId, filterStatus, searchQuery, pageSize]);
-
-  const paginated = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, currentPage, pageSize]);
+  }, [filterClientId, filterStatus, debouncedSearch, pageSize, sortField, sortDir]);
 
   // Tambah perusahaan baru langsung dari sini — nulis ke tabel `companies`
   // yang sama, jadi otomatis muncul juga di Payroll Manager/CRM/dll.
@@ -507,15 +535,25 @@ export default function EmployeeListPage() {
   // ---- Tambah Employee ----
 
   const openAddModal = () => {
-    // Employee ID disarankan otomatis (format MDL0001, urut, 4 digit) dari ID
-    // tertinggi yang sudah ada — superadmin masih bisa timpa manual kalau perlu.
-    const suggestedId = nextEmployeeId(employees.map((e) => e.employee_id));
-    const initial = { ...emptyForm, employee_id: suggestedId };
+    const initial = { ...emptyForm };
     formBaselineRef.current = initial;
     setForm(initial);
     setFormError(null);
     setCreatedInfo(null);
     setShowAddModal(true);
+
+    // Employee ID disarankan otomatis (format MDL0001, urut, 4 digit) dari ID
+    // tertinggi yang sudah ada. Sejak pagination server-side, state `employees`
+    // cuma berisi baris di halaman aktif — jadi ambil daftar employee_id
+    // lengkap lewat query ringan (1 kolom, tanpa join) khusus buat ini.
+    supabase
+      .from('employees')
+      .select('employee_id')
+      .then(({ data }) => {
+        const suggestedId = nextEmployeeId((data || []).map((e) => e.employee_id));
+        setForm((prev) => ({ ...prev, employee_id: suggestedId }));
+        formBaselineRef.current = { ...formBaselineRef.current, employee_id: suggestedId };
+      });
   };
 
   const handleFormChange = (field, value) => {
@@ -783,7 +821,7 @@ export default function EmployeeListPage() {
           <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
             Employee List
           </h1>
-          <p className="text-sm text-[#6B6B6B] mt-1">{employees.length} total employee</p>
+          <p className="text-sm text-[#6B6B6B] mt-1">{totalCount} total employee</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -845,7 +883,7 @@ export default function EmployeeListPage() {
           </>
         ) : error ? (
           <p className="text-sm text-madael-red p-6">Gagal memuat data: {error}</p>
-        ) : filtered.length === 0 ? (
+        ) : employees.length === 0 ? (
           <p className="text-sm text-[#6B6B6B] p-6">Tidak ada employee yang cocok dengan filter.</p>
         ) : (
           <table className="w-full text-sm">
@@ -862,7 +900,7 @@ export default function EmployeeListPage() {
               </tr>
             </thead>
             <tbody>
-              {paginated.map((emp) => (
+              {employees.map((emp) => (
                 <tr key={emp.id} className="border-b border-[#F0F0F0] last:border-0">
                   <td className="px-5 py-3.5 text-black">
                     <Link href={`/employee/list/${emp.id}`} className="hover:text-madael-red hover:underline underline-offset-2">
@@ -923,10 +961,10 @@ export default function EmployeeListPage() {
         )}
       </div>
 
-      {!loading && !error && filtered.length > 0 && (
+      {!loading && !error && totalCount > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 mt-4 text-sm text-[#6B6B6B]">
           <div>
-            Menampilkan {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, filtered.length)} dari {filtered.length} employee
+            Menampilkan {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, totalCount)} dari {totalCount} employee
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
