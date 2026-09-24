@@ -2,9 +2,9 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, X, FileEdit, Upload, ExternalLink } from 'lucide-react';
+import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, X, FileEdit, Upload, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
@@ -15,6 +15,7 @@ import EmptyState from '@/components/EmptyState';
 import CameraCapture from '@/components/CameraCapture';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
 import LateReasonBox from '@/components/LateReasonBox';
+import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -75,7 +76,14 @@ export default function AbsensiPage() {
 
   const [schedule, setSchedule] = useState(null);
   const [todayRow, setTodayRow] = useState(null);
-  const [history, setHistory] = useState([]);
+  // Riwayat bulanan (filter bulan). monthData menyimpan bulan asal barisnya
+  // supaya tidak pernah dipakai untuk bulan lain saat pengguna ganti bulan.
+  const [monthValue, setMonthValue] = useState(() => currentMonthValue());
+  const [monthData, setMonthData] = useState(() => ({ month: currentMonthValue(), rows: [] }));
+  const [monthLeaves, setMonthLeaves] = useState([]); // cuti approved yang beririsan dengan bulan terpilih
+  const [monthLoading, setMonthLoading] = useState(true);
+  const [monthError, setMonthError] = useState(null);
+  const monthReqRef = useRef(0); // abaikan respon lama kalau pengguna keburu ganti bulan
   const [forgotClockOut, setForgotClockOut] = useState(null); // record kemarin kalau clock in ada tapi clock out kosong
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -125,15 +133,9 @@ export default function AbsensiPage() {
     setLoading(true);
     setLoadError(null);
 
-    const [schedRes, todayRes, histRes, yesterdayRes, correctionsRes, refRes, locRes, assignedLocRes] = await Promise.all([
+    const [schedRes, todayRes, yesterdayRes, correctionsRes, refRes, locRes, assignedLocRes] = await Promise.all([
       supabase.from('work_schedule').select('*').eq('employee_id', employee.id).maybeSingle(),
       supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', todayStr()).maybeSingle(),
-      supabase
-        .from('attendance')
-        .select('*')
-        .eq('employee_id', employee.id)
-        .order('tanggal', { ascending: false })
-        .limit(7),
       supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', yesterdayStr()).maybeSingle(),
       supabase
         .from('attendance_corrections')
@@ -152,7 +154,7 @@ export default function AbsensiPage() {
       supabase.from('employee_work_locations').select('work_location_id').eq('employee_id', employee.id),
     ]);
 
-    const firstError = schedRes.error || todayRes.error || histRes.error || yesterdayRes.error || correctionsRes.error;
+    const firstError = schedRes.error || todayRes.error || yesterdayRes.error || correctionsRes.error;
     if (firstError) {
       setLoadError(firstError.message || 'Gagal memuat data absensi. Periksa koneksi internet kamu.');
       setLoading(false);
@@ -161,7 +163,6 @@ export default function AbsensiPage() {
 
     setSchedule(schedRes.data || null);
     setTodayRow(todayRes.data || null);
-    setHistory(histRes.data || []);
     const yRow = yesterdayRes.data || null;
     setForgotClockOut(yRow && yRow.clock_in && !yRow.clock_out ? yRow : null);
     setMyCorrections(correctionsRes.data || []);
@@ -180,6 +181,74 @@ export default function AbsensiPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (status === 'allowed') loadData();
   }, [status, loadData]);
+
+  // Data riwayat untuk bulan terpilih: baris absensi + cuti yang sudah disetujui.
+  // Cuti ikut diambil supaya hari cuti tidak salah tampil sebagai "Tanpa Kehadiran".
+  const loadMonth = useCallback(async () => {
+    if (!employee) return;
+    const reqId = ++monthReqRef.current;
+    setMonthLoading(true);
+    setMonthError(null);
+
+    const { firstDay, lastDay } = monthBounds(monthValue);
+    const [attRes, leaveRes] = await Promise.all([
+      supabase
+        .from('attendance')
+        .select('*')
+        .eq('employee_id', employee.id)
+        .gte('tanggal', firstDay)
+        .lte('tanggal', lastDay),
+      supabase
+        .from('leave_requests')
+        .select('tanggal_mulai, tanggal_selesai')
+        .eq('employee_id', employee.id)
+        .eq('status', 'approved')
+        .lte('tanggal_mulai', lastDay)
+        .gte('tanggal_selesai', firstDay),
+    ]);
+
+    if (reqId !== monthReqRef.current) return; // sudah ada request bulan yang lebih baru
+
+    const firstError = attRes.error || leaveRes.error;
+    if (firstError) {
+      setMonthError(firstError.message || 'Gagal memuat riwayat absensi. Periksa koneksi internet kamu.');
+      setMonthLoading(false);
+      return;
+    }
+
+    setMonthData({ month: monthValue, rows: attRes.data || [] });
+    setMonthLeaves(leaveRes.data || []);
+    setMonthLoading(false);
+  }, [supabase, employee, monthValue]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (status === 'allowed') loadMonth();
+  }, [status, loadMonth]);
+
+  // Perhitungan hari kerja / hadir / telat / tidak hadir dipakai ulang dari
+  // lib/attendanceSummary.js (aturan searah dengan Rekap Bulanan admin, dari
+  // work_schedule.hari_kerja). null selama data bulan terpilih belum siap.
+  const summary = useMemo(() => {
+    if (monthLoading || monthError || monthData.month !== monthValue) return null;
+    return summarizeMonth({
+      monthValue,
+      rows: monthData.rows,
+      leaves: monthLeaves,
+      hariKerja: schedule?.hari_kerja,
+      today: todayStr(),
+    });
+  }, [monthLoading, monthError, monthValue, monthData, monthLeaves, schedule]);
+
+  // Sinkronkan baris hasil clock in/out atau simpan alasan telat ke riwayat
+  // bulan yang sedang tampil (diabaikan kalau baris itu milik bulan lain).
+  const mergeMonthRow = (row) => {
+    setMonthData((prev) => {
+      if (!row?.tanggal || !row.tanggal.startsWith(prev.month)) return prev;
+      const rest = prev.rows.filter((r) => r.id !== row.id && r.tanggal !== row.tanggal);
+      return { ...prev, rows: [row, ...rest] };
+    });
+  };
 
   const openCamera = (mode) => {
     setGeoError(null);
@@ -246,11 +315,7 @@ export default function AbsensiPage() {
       if (!res.ok) throw new Error(json.error || 'Gagal menyimpan absensi.');
 
       setTodayRow(json.data);
-      if (mode === 'in') {
-        setHistory((h) => [json.data, ...h.filter((r) => r.tanggal !== json.data.tanggal)].slice(0, 7));
-      } else {
-        setHistory((h) => h.map((r) => (r.id === json.data.id ? json.data : r)));
-      }
+      mergeMonthRow(json.data);
     } catch (err) {
       setGeoError(err.message || 'Gagal mengambil lokasi. Pastikan izin lokasi diaktifkan.');
     } finally {
@@ -523,7 +588,7 @@ export default function AbsensiPage() {
                 row={todayRow}
                 onSaved={(updated) => {
                   setTodayRow(updated);
-                  setHistory((h) => h.map((r) => (r.id === updated.id ? updated : r)));
+                  mergeMonthRow(updated);
                 }}
               />
             )}
@@ -547,38 +612,113 @@ export default function AbsensiPage() {
         )}
       </div>
 
-      <h2 className="text-sm font-medium text-black mb-3">Riwayat 7 Hari Terakhir</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div>
+          <h2 className="text-sm font-medium text-black">Riwayat Absensi</h2>
+          <p className="text-xs text-[#9A9A9A] mt-0.5">{formatBulan(monthValue)}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setMonthValue((m) => shiftMonth(m, -1))}
+            aria-label="Bulan sebelumnya"
+            className="border border-[#E0E0E0] bg-white p-2 text-[#6B6B6B] hover:text-black hover:border-madael-red transition-colors"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <input
+            type="month"
+            value={monthValue}
+            max={currentMonthValue()}
+            onChange={(e) => {
+              if (e.target.value) setMonthValue(e.target.value);
+            }}
+            className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+          />
+          <button
+            type="button"
+            onClick={() => setMonthValue((m) => shiftMonth(m, 1))}
+            disabled={monthValue >= currentMonthValue()}
+            aria-label="Bulan berikutnya"
+            className="border border-[#E0E0E0] bg-white p-2 text-[#6B6B6B] hover:text-black hover:border-madael-red transition-colors disabled:opacity-40 disabled:hover:text-[#6B6B6B] disabled:hover:border-[#E0E0E0]"
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+
+      {summary && (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+            {[
+              ['Hadir', summary.totalHadir],
+              ['Telat', summary.totalTelat],
+              ['Tanpa Kehadiran', summary.totalTidakHadir ?? '—'],
+              ['Cuti', summary.cutiHari],
+            ].map(([label, value]) => (
+              <div key={label} className="bg-white border border-[#E0E0E0] px-4 py-3">
+                <p className="text-[11px] text-[#9A9A9A] mb-1">{label}</p>
+                <p className="text-lg text-black">{value}</p>
+              </div>
+            ))}
+          </div>
+          {summary.totalTidakHadir === null && (
+            <p className="text-xs text-[#9A9A9A] mb-3">
+              Jadwal kerja kamu belum diatur, jadi hari tanpa kehadiran belum bisa dihitung.
+            </p>
+          )}
+        </>
+      )}
+
       <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
-              <th className="px-4 py-3 font-medium">Tanggal</th>
-              <th className="px-4 py-3 font-medium">Clock In</th>
-              <th className="px-4 py-3 font-medium">Clock Out</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {history.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="p-0">
-                  <EmptyState message="Belum ada data absensi bulan ini." />
-                </td>
+        {monthError ? (
+          <ErrorState message={monthError} onRetry={loadMonth} />
+        ) : !summary ? (
+          <LoadingState label="Memuat riwayat absensi..." />
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
+                <th className="px-4 py-3 font-medium">Tanggal</th>
+                <th className="px-4 py-3 font-medium">Clock In</th>
+                <th className="px-4 py-3 font-medium">Clock Out</th>
+                <th className="px-4 py-3 font-medium">Status</th>
               </tr>
-            ) : (
-              history.map((row) => (
-                <tr key={row.id} className="border-b border-[#E0E0E0] last:border-0">
-                  <td className="px-4 py-3 text-black">{formatTanggal(row.tanggal)}</td>
-                  <td className="px-4 py-3 text-[#6B6B6B]">{formatWaktu(row.clock_in)}</td>
-                  <td className="px-4 py-3 text-[#6B6B6B]">{formatWaktu(row.clock_out)}</td>
-                  <td className="px-4 py-3">
-                    <AttendanceStatusBadge row={row} showNote />
+            </thead>
+            <tbody>
+              {summary.days.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="p-0">
+                    <EmptyState message="Belum ada data absensi di bulan ini." />
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                summary.days.map(({ tanggal, kind, row }) => (
+                  <tr key={tanggal} className="border-b border-[#E0E0E0] last:border-0">
+                    <td className="px-4 py-3 text-black">{formatTanggal(tanggal)}</td>
+                    <td className="px-4 py-3 text-[#6B6B6B]">{formatWaktu(row?.clock_in)}</td>
+                    <td className="px-4 py-3 text-[#6B6B6B]">{formatWaktu(row?.clock_out)}</td>
+                    <td className="px-4 py-3">
+                      {kind === 'tidak_hadir' && (
+                        <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-red-100 text-red-700">
+                          TANPA KEHADIRAN
+                        </span>
+                      )}
+                      {kind === 'cuti' && (
+                        <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-[#F4F4F4] text-[#6B6B6B]">
+                          CUTI
+                        </span>
+                      )}
+                      {(kind === 'tepat' || kind === 'telat') && (
+                        <AttendanceStatusBadge row={row} showNote />
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="flex items-center justify-between mt-10 mb-3">
