@@ -14,6 +14,7 @@ import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { menitTelatUntukPayroll } from '@/lib/attendanceStatus';
 
 const MONTH_NAMES = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -30,16 +31,6 @@ function previewNomorDokumen(lastNumber) {
   const tahun = new Date().getFullYear();
   const nomorPadded = String((lastNumber || 0) + 1).padStart(3, '0');
   return `INV/${tahun}/${nomorPadded}`;
-}
-
-// Sama persis dengan menitTelat() di employee/payroll — dipakai untuk hitung penalty keterlambatan
-function menitTelat(clockInIso, jamMasuk) {
-  if (!clockInIso || !jamMasuk) return 0;
-  const d = new Date(clockInIso);
-  const clockMinutes = d.getHours() * 60 + d.getMinutes();
-  const [jh, jm] = jamMasuk.split(':').map(Number);
-  const jamMasukMinutes = jh * 60 + jm;
-  return Math.max(0, clockMinutes - jamMasukMinutes);
 }
 
 // Distribusi pembulatan "largest remainder": memastikan total dari beberapa
@@ -296,7 +287,7 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
       const [{ data: rows }, { data: sched }] = await Promise.all([
         supabase
           .from('attendance')
-          .select('clock_in, status_telat')
+          .select('clock_in, status_telat, justified, toleransi_menit')
           .eq('employee_id', employeeId)
           .gte('tanggal', firstDay)
           .lte('tanggal', lastDay),
@@ -308,7 +299,7 @@ function PayslipFormModal({ form, setForm, employees, supabase, onClose, onSubmi
         return;
       }
 
-      const totalMenitTelat = (rows || []).reduce((sum, r) => sum + menitTelat(r.clock_in, sched.jam_masuk), 0);
+      const totalMenitTelat = (rows || []).reduce((sum, r) => sum + menitTelatUntukPayroll(r, sched.jam_masuk), 0);
       const penalty = hitungPenaltyTelat(totalMenitTelat);
       recalcFromPendapatan({ penalty });
     } finally {

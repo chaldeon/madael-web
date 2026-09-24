@@ -11,6 +11,7 @@ import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
 
 function currentMonthValue() {
   const d = new Date();
@@ -82,6 +83,8 @@ export default function RekapDetailPage() {
   const [photoUrls, setPhotoUrls] = useState({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [justifyingId, setJustifyingId] = useState(null);
+  const [justifyError, setJustifyError] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -132,6 +135,27 @@ export default function RekapDetailPage() {
 
     setLoading(false);
   }, [supabase, employeeId, monthValue]);
+
+  // Tandai keterlambatan Justified (true), tidak disetujui (false), atau reset (null).
+  // Lewat API server; data telat asli dan alasan karyawan tidak dihapus.
+  const handleJustify = async (row, justified) => {
+    setJustifyingId(row.id);
+    setJustifyError(null);
+    try {
+      const res = await fetch('/api/attendance/justify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attendanceId: row.id, justified }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Gagal menyimpan keputusan.');
+      setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, ...json.data } : r)));
+    } catch (err) {
+      setJustifyError(err.message || 'Gagal menyimpan keputusan. Periksa koneksi internet kamu.');
+    } finally {
+      setJustifyingId(null);
+    }
+  };
 
   useEffect(() => {
     if (status === 'allowed' && isSuperadmin) loadData();
@@ -194,6 +218,10 @@ export default function RekapDetailPage() {
         Foto dan lokasi di bawah dipakai untuk verifikasi manual — bukan hasil pencocokan wajah otomatis.
       </div>
 
+      {justifyError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-3 mb-6">{justifyError}</div>
+      )}
+
       {loading ? (
         <LoadingState label="Memuat log kehadiran..." />
       ) : (
@@ -235,14 +263,47 @@ export default function RekapDetailPage() {
                       />
                     </td>
                     <td className="px-4 py-3">
-                      {row.status_telat ? (
-                        <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-red-100 text-red-700">
-                          TELAT
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-green-100 text-green-700">
-                          TEPAT WAKTU
-                        </span>
+                      <AttendanceStatusBadge row={row} />
+                      {row.status_telat && (
+                        <div className="mt-2 max-w-[280px]">
+                          <p className="text-xs text-[#6B6B6B]">
+                            {row.alasan_telat ? (
+                              <>
+                                <span className="text-black font-medium">Alasan:</span> {row.alasan_telat}
+                              </>
+                            ) : (
+                              'Karyawan tidak mengisi alasan.'
+                            )}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 mt-2">
+                            <button
+                              type="button"
+                              disabled={justifyingId === row.id || row.justified === true}
+                              onClick={() => handleJustify(row, true)}
+                              className="px-2.5 py-1 text-[11px] border border-green-600 text-green-700 hover:bg-green-50 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+                            >
+                              Justified
+                            </button>
+                            <button
+                              type="button"
+                              disabled={justifyingId === row.id || row.justified === false}
+                              onClick={() => handleJustify(row, false)}
+                              className="px-2.5 py-1 text-[11px] border border-red-600 text-red-700 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+                            >
+                              Tidak Disetujui
+                            </button>
+                            {row.justified !== null && row.justified !== undefined && (
+                              <button
+                                type="button"
+                                disabled={justifyingId === row.id}
+                                onClick={() => handleJustify(row, null)}
+                                className="text-[11px] text-[#6B6B6B] hover:text-black underline disabled:opacity-40"
+                              >
+                                Reset
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       )}
                     </td>
                   </tr>

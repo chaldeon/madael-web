@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import { createClient } from '@/lib/supabase-browser';
 import ExportCsvButton from '@/components/ExportCsvButton';
+import { isTelatEfektif } from '@/lib/attendanceStatus';
 
 const PERIODS = [
   { value: 'weekly', label: 'Mingguan' },
@@ -106,7 +107,7 @@ function HrAnalyticsSection({ supabase }) {
     const [empRes, masterRes, attendanceRes, runsRes] = await Promise.all([
       supabase.from('employees').select('id, status, created_at'),
       supabase.from('employees_master').select('status, linked_employee_id'),
-      supabase.from('attendance').select('tanggal, status_telat').gte('tanggal', firstDay),
+      supabase.from('attendance').select('tanggal, status_telat, justified').gte('tanggal', firstDay),
       supabase.from('payroll_runs').select('id, periode').eq('status', 'Approved').gte('periode', months[0]),
     ]);
 
@@ -194,7 +195,7 @@ function HrAnalyticsSection({ supabase }) {
       const key = row.tanggal.slice(0, 7);
       if (!(key in totals)) return;
       totals[key].total += 1;
-      if (row.status_telat) totals[key].telat += 1;
+      if (isTelatEfektif(row)) totals[key].telat += 1; // Justified tidak dihitung telat
     });
     return months.map((m) => ({
       bulan: monthLabel(m),
