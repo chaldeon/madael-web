@@ -12,6 +12,8 @@ import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { logActivity } from '@/lib/activityLog';
+import { hitungStatusTelat, isTelatEfektif, MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
+import { jamJakarta } from '@/lib/serverTime';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -21,7 +23,15 @@ import AbsensiReviewPanel from '@/components/AbsensiReviewPanel';
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 const HARI_OPTIONS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
 const DEFAULT_HARI = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
-const EMPTY_JADWAL_FORM = { jam_masuk: '08:00', jam_pulang: '17:00', hari_kerja: DEFAULT_HARI };
+const EMPTY_JADWAL_FORM = { jam_masuk: '08:00', jam_pulang: '17:00', hari_kerja: DEFAULT_HARI, toleransi_menit: '0' };
+
+// Validasi input Toleransi (menit): bilangan bulat 0..MAX. Return angka, atau null kalau tidak valid.
+function parseToleransi(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  return n >= 0 && n <= MAX_TOLERANSI_MENIT ? n : null;
+}
 
 function currentMonthValue() {
   const d = new Date();
@@ -90,10 +100,16 @@ function downloadRekapCsv(rows, monthValue) {
 
 // Cocokkan jam clock-in (ISO) terhadap jadwal, untuk menentukan status telat
 // saat approve koreksi (jadwal employee mungkin belum di-load di tab lain).
+// Memakai aturan yang sama dengan API clock-in (jam masuk + toleransi_menit,
+// waktu Jakarta), supaya koreksi yang disetujui tidak menghasilkan status
+// telat yang berbeda dari clock-in biasa.
 function computeStatusTelat(afterClockInIso, schedule) {
   if (!schedule || !afterClockInIso) return false;
-  const t = new Date(afterClockInIso).toTimeString().slice(0, 8);
-  return t > schedule.jam_masuk;
+  return hitungStatusTelat({
+    jamClockIn: jamJakarta(new Date(afterClockInIso)),
+    jamMasuk: schedule.jam_masuk,
+    toleransiMenit: schedule.toleransi_menit,
+  });
 }
 
 const JADWAL_SORT_COLUMNS = {
@@ -101,6 +117,7 @@ const JADWAL_SORT_COLUMNS = {
   perusahaan: { label: 'Perusahaan', get: (r) => (r.emp.companies?.nama_perusahaan || '').toLowerCase() },
   jam_masuk: { label: 'Jam Masuk', get: (r) => r.sched?.jam_masuk || '' },
   jam_pulang: { label: 'Jam Pulang', get: (r) => r.sched?.jam_pulang || '' },
+  toleransi: { label: 'Toleransi', get: (r) => (r.sched ? Number(r.sched.toleransi_menit) || 0 : -1) },
 };
 
 const REKAP_SORT_COLUMNS = {
@@ -160,6 +177,9 @@ export default function SemuaKaryawanPage() {
   const [jadwalForm, setJadwalForm] = useState(EMPTY_JADWAL_FORM);
   const [jadwalSaving, setJadwalSaving] = useState(false);
   const [jadwalSaveError, setJadwalSaveError] = useState(null);
+  const [bulkToleransi, setBulkToleransi] = useState('0');
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState(null); // { type: 'ok' | 'error', text }
 
   // ---- Rekap Bulanan ----
   const [monthValue, setMonthValue] = useState(currentMonthValue());
@@ -242,7 +262,7 @@ export default function SemuaKaryawanPage() {
 
     const { data, error } = await supabase
       .from('attendance')
-      .select('employee_id, tanggal, clock_in, status_telat')
+      .select('employee_id, tanggal, clock_in, status_telat, justified')
       .gte('tanggal', firstDay)
       .lte('tanggal', lastDay);
 
@@ -327,9 +347,16 @@ export default function SemuaKaryawanPage() {
 
   const openEditJadwal = (emp) => {
     const existing = schedules[emp.id];
-    setJadwalForm(existing
-      ? { jam_masuk: formatJam(existing.jam_masuk), jam_pulang: formatJam(existing.jam_pulang), hari_kerja: existing.hari_kerja || DEFAULT_HARI }
-      : EMPTY_JADWAL_FORM);
+    const initial = existing
+      ? {
+          jam_masuk: formatJam(existing.jam_masuk),
+          jam_pulang: formatJam(existing.jam_pulang),
+          hari_kerja: existing.hari_kerja || DEFAULT_HARI,
+          toleransi_menit: String(existing.toleransi_menit ?? 0),
+        }
+      : EMPTY_JADWAL_FORM;
+    jadwalFormBaselineRef.current = initial;
+    setJadwalForm(initial);
     setJadwalSaveError(null);
     setEditingEmp(emp);
   };
@@ -344,6 +371,11 @@ export default function SemuaKaryawanPage() {
   };
 
   const handleSaveJadwal = async () => {
+    const toleransi = parseToleransi(jadwalForm.toleransi_menit);
+    if (toleransi === null) {
+      setJadwalSaveError(`Toleransi harus bilangan bulat 0–${MAX_TOLERANSI_MENIT} menit.`);
+      return;
+    }
     setJadwalSaving(true);
     setJadwalSaveError(null);
     const { data, error } = await supabase
@@ -354,6 +386,7 @@ export default function SemuaKaryawanPage() {
           jam_masuk: jadwalForm.jam_masuk,
           jam_pulang: jadwalForm.jam_pulang,
           hari_kerja: jadwalForm.hari_kerja,
+          toleransi_menit: toleransi,
         }],
         { onConflict: 'employee_id' }
       )
@@ -369,6 +402,54 @@ export default function SemuaKaryawanPage() {
     setEditingEmp(null);
   };
 
+  // Terapkan toleransi yang sama ke semua karyawan (yang sudah punya jadwal) di
+  // perusahaan yang sedang difilter. Hanya mengubah kolom toleransi_menit di baris
+  // jadwal yang sudah ada — tidak membuat jadwal baru, dan absensi lama tidak disentuh.
+  const handleBulkToleransi = async () => {
+    setBulkMsg(null);
+    const toleransi = parseToleransi(bulkToleransi);
+    if (toleransi === null) {
+      setBulkMsg({ type: 'error', text: `Toleransi harus bilangan bulat 0–${MAX_TOLERANSI_MENIT} menit.` });
+      return;
+    }
+    const targetIds = jadwalRows.filter((r) => r.sched).map((r) => r.emp.id);
+    const tanpaJadwal = jadwalRows.length - targetIds.length;
+    if (targetIds.length === 0) {
+      setBulkMsg({ type: 'error', text: 'Belum ada karyawan berjadwal di perusahaan ini.' });
+      return;
+    }
+    const namaPerusahaan = companies.find((c) => c.id === jadwalFilterClientId)?.nama || 'perusahaan ini';
+    if (!window.confirm(`Set toleransi ${toleransi} menit untuk ${targetIds.length} karyawan ${namaPerusahaan}?\n\nHanya berlaku untuk absensi baru ke depan.`)) return;
+
+    setBulkSaving(true);
+    const { data, error } = await supabase
+      .from('work_schedule')
+      .update({ toleransi_menit: toleransi })
+      .in('employee_id', targetIds)
+      .select();
+    setBulkSaving(false);
+
+    if (error) {
+      setBulkMsg({ type: 'error', text: error.message || 'Gagal menerapkan toleransi, coba lagi.' });
+      return;
+    }
+    setSchedules((prev) => {
+      const next = { ...prev };
+      (data || []).forEach((row) => { next[row.employee_id] = row; });
+      return next;
+    });
+    logActivity(supabase, {
+      userId: employee.id,
+      aksi: 'set_toleransi_telat_massal',
+      targetTable: 'work_schedule',
+      detail: { client_id: jadwalFilterClientId, toleransi_menit: toleransi, jumlah: (data || []).length },
+    });
+    setBulkMsg({
+      type: 'ok',
+      text: `Toleransi ${toleransi} menit diterapkan ke ${(data || []).length} karyawan.${tanpaJadwal > 0 ? ` ${tanpaJadwal} karyawan dilewati karena belum punya jadwal.` : ''}`,
+    });
+  };
+
   // ---- Rekap computed rows ----
   const rekapRows = useMemo(() => {
     const [year, month] = monthValue.split('-').map(Number);
@@ -382,7 +463,8 @@ export default function SemuaKaryawanPage() {
     const computed = list.map((emp) => {
       const empAtt = attendance.filter((a) => a.employee_id === emp.id);
       const totalHadir = empAtt.filter((a) => a.clock_in).length;
-      const totalTelat = empAtt.filter((a) => a.status_telat).length;
+      // Telat yang sudah di-Justified HR tidak dihitung sebagai telat.
+      const totalTelat = empAtt.filter(isTelatEfektif).length;
       const sched = schedules[emp.id];
       const scheduledWorkdays = sched
         ? countScheduledWorkdays(year, month, sched.hari_kerja, cutoffDate)
@@ -436,6 +518,7 @@ export default function SemuaKaryawanPage() {
             clock_in: row.after_clock_in,
             clock_out: row.after_clock_out,
             status_telat: statusTelat,
+            toleransi_menit: Number(schedule?.toleransi_menit) || 0,
             wajah_terverifikasi: true,
           })
           .eq('id', attendanceId)
@@ -452,6 +535,7 @@ export default function SemuaKaryawanPage() {
             clock_in: row.after_clock_in,
             clock_out: row.after_clock_out,
             status_telat: statusTelat,
+            toleransi_menit: Number(schedule?.toleransi_menit) || 0,
             wajah_terverifikasi: true,
           }])
           .select()
@@ -634,6 +718,35 @@ export default function SemuaKaryawanPage() {
                 </select>
               </div>
 
+              {jadwalFilterClientId && (
+                <div className="flex flex-wrap items-center gap-3 mb-6 bg-white border border-[#E0E0E0] px-4 py-3">
+                  <span className="text-xs text-[#6B6B6B]">Set toleransi semua karyawan perusahaan ini:</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max={MAX_TOLERANSI_MENIT}
+                    step="1"
+                    value={bulkToleransi}
+                    onChange={(e) => setBulkToleransi(e.target.value)}
+                    className={`${inputClass} w-24`}
+                  />
+                  <span className="text-xs text-[#6B6B6B]">menit</span>
+                  <button
+                    type="button"
+                    onClick={handleBulkToleransi}
+                    disabled={bulkSaving}
+                    className="bg-madael-red text-white px-4 py-2 text-xs font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+                  >
+                    {bulkSaving ? 'Menerapkan...' : 'Terapkan'}
+                  </button>
+                  {bulkMsg && (
+                    <span className={`text-xs ${bulkMsg.type === 'error' ? 'text-red-600' : 'text-green-700'}`}>
+                      {bulkMsg.text}
+                    </span>
+                  )}
+                </div>
+              )}
+
               {jadwalRows.length === 0 ? (
                 <div className="bg-white border border-[#E0E0E0]">
                   <EmptyState message="Tidak ada employee yang cocok dengan filter ini." />
@@ -647,6 +760,7 @@ export default function SemuaKaryawanPage() {
                         <SortableHeader colKey="perusahaan" label="Perusahaan" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
                         <SortableHeader colKey="jam_masuk" label="Jam Masuk" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
                         <SortableHeader colKey="jam_pulang" label="Jam Pulang" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+                        <SortableHeader colKey="toleransi" label="Toleransi (menit)" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
                         <th className="px-4 py-3 font-medium">Hari Kerja</th>
                         <th className="px-4 py-3 font-medium"></th>
                       </tr>
@@ -658,6 +772,7 @@ export default function SemuaKaryawanPage() {
                           <td className="px-4 py-3 text-[#6B6B6B]">{emp.companies?.nama_perusahaan || '—'}</td>
                           <td className="px-4 py-3 text-[#6B6B6B]">{sched ? formatJam(sched.jam_masuk) : '—'}</td>
                           <td className="px-4 py-3 text-[#6B6B6B]">{sched ? formatJam(sched.jam_pulang) : '—'}</td>
+                          <td className="px-4 py-3 text-[#6B6B6B]">{sched ? (sched.toleransi_menit ?? 0) : '—'}</td>
                           <td className="px-4 py-3 text-[#6B6B6B]">
                             {sched?.hari_kerja?.length ? sched.hari_kerja.join(', ') : 'Belum diatur'}
                           </td>
@@ -953,6 +1068,22 @@ export default function SemuaKaryawanPage() {
                 );
               })}
             </div>
+
+            <label className="flex flex-col gap-1 mb-6">
+              <span className="text-xs text-[#6B6B6B]">Toleransi (menit)</span>
+              <input
+                type="number"
+                min="0"
+                max={MAX_TOLERANSI_MENIT}
+                step="1"
+                value={jadwalForm.toleransi_menit}
+                onChange={(e) => setJadwalForm((f) => ({ ...f, toleransi_menit: e.target.value }))}
+                className={inputClass}
+              />
+              <span className="text-[11px] text-[#9A9A9A]">
+                0 = tanpa toleransi. Dianggap telat kalau clock-in lewat jam masuk + toleransi. Hanya berlaku untuk absensi baru.
+              </span>
+            </label>
 
             {jadwalSaveError && (
               <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 mb-3">

@@ -13,6 +13,8 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import CameraCapture from '@/components/CameraCapture';
+import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
+import LateReasonBox from '@/components/LateReasonBox';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -459,6 +461,7 @@ export default function AbsensiPage() {
         {schedule && (
           <p className="text-xs text-[#9A9A9A] mb-4">
             Jadwal: {formatJam(schedule.jam_masuk)} – {formatJam(schedule.jam_pulang)}
+            {schedule.toleransi_menit > 0 && ` · Toleransi keterlambatan ${schedule.toleransi_menit} menit`}
           </p>
         )}
 
@@ -495,11 +498,7 @@ export default function AbsensiPage() {
             <div className="flex items-center gap-2 flex-wrap text-sm text-black">
               <CheckCircle2 size={16} className="text-madael-red" />
               Clock in pukul {formatWaktu(todayRow.clock_in)}
-              {todayRow.status_telat && (
-                <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-red-100 text-red-700">
-                  TELAT
-                </span>
-              )}
+              {todayRow.status_telat && <AttendanceStatusBadge row={todayRow} />}
               {todayRow.clock_in_dalam_radius === false && (
                 <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-amber-100 text-amber-800">
                   DI LUAR RADIUS
@@ -517,6 +516,17 @@ export default function AbsensiPage() {
                 </span>
               )}
             </div>
+
+            {todayRow.status_telat && (
+              <LateReasonBox
+                key={`${todayRow.id}-${todayRow.justified}`}
+                row={todayRow}
+                onSaved={(updated) => {
+                  setTodayRow(updated);
+                  setHistory((h) => h.map((r) => (r.id === updated.id ? updated : r)));
+                }}
+              />
+            )}
 
             {!todayRow.clock_out ? (
               <button
@@ -562,15 +572,7 @@ export default function AbsensiPage() {
                   <td className="px-4 py-3 text-[#6B6B6B]">{formatWaktu(row.clock_in)}</td>
                   <td className="px-4 py-3 text-[#6B6B6B]">{formatWaktu(row.clock_out)}</td>
                   <td className="px-4 py-3">
-                    {row.status_telat ? (
-                      <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-red-100 text-red-700">
-                        TELAT
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-green-100 text-green-700">
-                        TEPAT WAKTU
-                      </span>
-                    )}
+                    <AttendanceStatusBadge row={row} showNote />
                   </td>
                 </tr>
               ))

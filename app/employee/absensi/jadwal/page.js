@@ -8,6 +8,7 @@ import { X, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
+import { MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -15,7 +16,7 @@ import EmptyState from '@/components/EmptyState';
 const HARI_OPTIONS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
 const DEFAULT_HARI = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
 
-const EMPTY_FORM = { jam_masuk: '08:00', jam_pulang: '17:00', hari_kerja: DEFAULT_HARI };
+const EMPTY_FORM = { jam_masuk: '08:00', jam_pulang: '17:00', hari_kerja: DEFAULT_HARI, toleransi_menit: '0' };
 
 function formatJam(value) {
   return value ? value.slice(0, 5) : '—';
@@ -78,7 +79,7 @@ export default function JadwalKerjaPage() {
   const openEdit = (emp) => {
     const existing = schedules[emp.id];
     const initial = existing
-      ? { jam_masuk: formatJam(existing.jam_masuk), jam_pulang: formatJam(existing.jam_pulang), hari_kerja: existing.hari_kerja || DEFAULT_HARI }
+      ? { jam_masuk: formatJam(existing.jam_masuk), jam_pulang: formatJam(existing.jam_pulang), hari_kerja: existing.hari_kerja || DEFAULT_HARI, toleransi_menit: String(existing.toleransi_menit ?? 0) }
       : EMPTY_FORM;
     formBaselineRef.current = initial;
     setForm(initial);
@@ -95,6 +96,12 @@ export default function JadwalKerjaPage() {
   };
 
   const handleSave = async () => {
+    const raw = String(form.toleransi_menit ?? '').trim();
+    const toleransi = /^\d+$/.test(raw) ? Number(raw) : null;
+    if (toleransi === null || toleransi > MAX_TOLERANSI_MENIT) {
+      setSaveError(`Toleransi harus bilangan bulat 0–${MAX_TOLERANSI_MENIT} menit.`);
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     const { data, error } = await supabase
@@ -105,6 +112,7 @@ export default function JadwalKerjaPage() {
           jam_masuk: form.jam_masuk,
           jam_pulang: form.jam_pulang,
           hari_kerja: form.hari_kerja,
+          toleransi_menit: toleransi,
         }],
         { onConflict: 'employee_id' }
       )
@@ -179,6 +187,7 @@ export default function JadwalKerjaPage() {
                 <th className="px-4 py-3 font-medium">Perusahaan</th>
                 <th className="px-4 py-3 font-medium">Jam Masuk</th>
                 <th className="px-4 py-3 font-medium">Jam Pulang</th>
+                <th className="px-4 py-3 font-medium">Toleransi (menit)</th>
                 <th className="px-4 py-3 font-medium">Hari Kerja</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
@@ -192,6 +201,7 @@ export default function JadwalKerjaPage() {
                     <td className="px-4 py-3 text-[#6B6B6B]">{emp.companies?.nama_perusahaan || '—'}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">{sched ? formatJam(sched.jam_masuk) : '—'}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">{sched ? formatJam(sched.jam_pulang) : '—'}</td>
+                    <td className="px-4 py-3 text-[#6B6B6B]">{sched ? (sched.toleransi_menit ?? 0) : '—'}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">
                       {sched?.hari_kerja?.length ? sched.hari_kerja.join(', ') : 'Belum diatur'}
                     </td>
@@ -264,6 +274,22 @@ export default function JadwalKerjaPage() {
                 );
               })}
             </div>
+
+            <label className="flex flex-col gap-1 mb-6">
+              <span className="text-xs text-[#6B6B6B]">Toleransi (menit)</span>
+              <input
+                type="number"
+                min="0"
+                max={MAX_TOLERANSI_MENIT}
+                step="1"
+                value={form.toleransi_menit}
+                onChange={(e) => setForm((f) => ({ ...f, toleransi_menit: e.target.value }))}
+                className={inputClass}
+              />
+              <span className="text-[11px] text-[#9A9A9A]">
+                0 = tanpa toleransi. Dianggap telat kalau clock-in lewat jam masuk + toleransi. Hanya berlaku untuk absensi baru.
+              </span>
+            </label>
 
             {saveError && (
               <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 mb-3">

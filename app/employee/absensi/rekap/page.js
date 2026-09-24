@@ -10,6 +10,7 @@ import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { isTelatEfektif } from '@/lib/attendanceStatus';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -98,7 +99,7 @@ export default function RekapAbsensiPage() {
       supabase.from('work_schedule').select('*'),
       supabase
         .from('attendance')
-        .select('employee_id, tanggal, clock_in, status_telat')
+        .select('employee_id, tanggal, clock_in, status_telat, justified')
         .gte('tanggal', firstDay)
         .lte('tanggal', lastDay),
     ]);
@@ -134,7 +135,7 @@ export default function RekapAbsensiPage() {
     return list.map((emp) => {
       const empAtt = attendance.filter((a) => a.employee_id === emp.id);
       const totalHadir = empAtt.filter((a) => a.clock_in).length;
-      const totalTelat = empAtt.filter((a) => a.status_telat).length;
+      const totalTelat = empAtt.filter(isTelatEfektif).length; // Justified tidak dihitung telat
 
       const sched = schedules[emp.id];
       const scheduledWorkdays = sched

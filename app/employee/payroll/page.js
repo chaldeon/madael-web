@@ -13,6 +13,7 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { hitungPPh21TER, hitungBPJS, hitungBrutoPPh21, hitungPenaltyTelat, PTKP_DATA, JKK_OPTIONS } from '@/lib/payroll/calculations';
 import { hitungSisaCuti } from '@/lib/leave';
+import { menitTelatUntukPayroll, isTelatEfektif } from '@/lib/attendanceStatus';
 
 const STATUS_OPTIONS = ['PHL', 'Tetap'];
 const NPWP_OPTIONS = [
@@ -32,18 +33,6 @@ const JKK_SELECT_OPTIONS = [
 function currentMonthValue() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-// Sama seperti timeStr() di app/employee/absensi/page.js — dibandingkan
-// sebagai string HH:MM:SS jam lokal (browser Indonesia = WIB), konsisten
-// dengan cara status_telat diset waktu clock in.
-function menitTelat(clockInIso, jamMasuk) {
-  if (!clockInIso || !jamMasuk) return 0;
-  const d = new Date(clockInIso);
-  const clockMinutes = d.getHours() * 60 + d.getMinutes();
-  const [jh, jm] = jamMasuk.split(':').map(Number);
-  const jamMasukMinutes = jh * 60 + jm;
-  return Math.max(0, clockMinutes - jamMasukMinutes);
 }
 
 const EMPTY_FORM = {
@@ -376,7 +365,7 @@ function HitungModal({ row, periode, onClose }) {
     Promise.all([
       supabase
         .from('attendance')
-        .select('clock_in, status_telat')
+        .select('clock_in, status_telat, justified, toleransi_menit')
         .eq('employee_id', row.linked_employee_id)
         .gte('tanggal', firstDay)
         .lte('tanggal', lastDay),
@@ -385,11 +374,11 @@ function HitungModal({ row, periode, onClose }) {
       if (cancelled) return;
       const rows = data || [];
       const totalMenitTelat = sched?.jam_masuk
-        ? rows.reduce((sum, r) => sum + menitTelat(r.clock_in, sched.jam_masuk), 0)
+        ? rows.reduce((sum, r) => sum + menitTelatUntukPayroll(r, sched.jam_masuk), 0)
         : 0;
       setAttSummary({
         totalHadir: rows.filter((r) => r.clock_in).length,
-        totalTelat: rows.filter((r) => r.status_telat).length,
+        totalTelat: rows.filter(isTelatEfektif).length,
         totalMenitTelat,
         adaJadwal: !!sched?.jam_masuk,
       });

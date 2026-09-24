@@ -13,6 +13,7 @@ import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
 
 function currentMonthValue() {
   const d = new Date();
@@ -482,15 +483,7 @@ export default function KoreksiAbsensiPage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {row.status_telat ? (
-                        <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-red-100 text-red-700">
-                          TELAT
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-green-100 text-green-700">
-                          TEPAT WAKTU
-                        </span>
-                      )}
+                      <AttendanceStatusBadge row={row} />
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button

@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase-admin';
 import { checkGeofence, resolveEmployeeLocations } from '@/lib/geofence';
 import { descriptorDistance, isFaceMatch } from '@/lib/faceVerification';
 import { todayJakarta, jamJakarta } from '@/lib/serverTime';
+import { hitungStatusTelat } from '@/lib/attendanceStatus';
 
 // Gabungkan hasil verifikasi wajah clock-in & clock-out: kalau salah satu
 // gagal cocok, hasil akhirnya dianggap gagal (perlu review) — bukan ditimpa
@@ -87,7 +88,7 @@ export async function POST(request) {
     const tanggal = todayJakarta(now);
 
     const [scheduleRes, locRes, assignedRes, refRes] = await Promise.all([
-      admin.from('work_schedule').select('jam_masuk').eq('employee_id', emp.id).maybeSingle(),
+      admin.from('work_schedule').select('jam_masuk, toleransi_menit').eq('employee_id', emp.id).maybeSingle(),
       admin.from('work_locations').select('*').eq('aktif', true),
       admin.from('employee_work_locations').select('work_location_id').eq('employee_id', emp.id),
       // Descriptor referensi dibaca DI SINI saja — tidak pernah dikirim ke
@@ -131,7 +132,19 @@ export async function POST(request) {
         return NextResponse.json({ error: 'Kamu sudah absen masuk hari ini.' }, { status: 409 });
       }
 
-      const isLate = scheduleRes.data ? jamJakarta(now) > scheduleRes.data.jam_masuk : false;
+      // Kalau jadwal gagal dibaca (mis. migrasi toleransi belum dijalankan),
+      // gagalkan clock-in daripada diam-diam mencatat status telat yang salah.
+      if (scheduleRes.error) throw scheduleRes.error;
+
+      // Telat = lewat jam masuk + toleransi_menit (0 = tanpa toleransi).
+      // Dihitung sekali saat clock-in; tidak pernah dihitung ulang ke data lama.
+      const isLate = scheduleRes.data
+        ? hitungStatusTelat({
+            jamClockIn: jamJakarta(now),
+            jamMasuk: scheduleRes.data.jam_masuk,
+            toleransiMenit: scheduleRes.data.toleransi_menit,
+          })
+        : false;
 
       const { data, error } = await admin
         .from('attendance')
@@ -145,6 +158,8 @@ export async function POST(request) {
           clock_in_jarak_meter: geofence.jarakMeter,
           clock_in_lokasi_nama: geofence.location?.nama || null,
           status_telat: isLate,
+          // Snapshot toleransi saat clock-in (null kalau belum punya jadwal).
+          toleransi_menit: scheduleRes.data ? Number(scheduleRes.data.toleransi_menit) || 0 : null,
           foto_clock_in_url: fotoPath,
           wajah_terverifikasi: wajahTerverifikasi,
           wajah_similarity: wajahSimilarity,
