@@ -19,6 +19,7 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import LokasiKerjaManager from '@/components/LokasiKerjaManager';
 import AbsensiReviewPanel from '@/components/AbsensiReviewPanel';
+import AbsensiSettingsPanel from '@/components/AbsensiSettingsPanel';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 const HARI_OPTIONS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
@@ -151,6 +152,7 @@ const TABS = [
   { key: 'review', label: 'Perlu Review' },
   { key: 'lokasi', label: 'Lokasi Kerja' },
   { key: 'rekap', label: 'Rekap Bulanan' },
+  { key: 'pengaturan', label: 'Pengaturan' },
 ];
 
 export default function SemuaKaryawanPage() {
@@ -1013,6 +1015,8 @@ export default function SemuaKaryawanPage() {
           {activeTab === 'review' && <AbsensiReviewPanel supabase={supabase} />}
 
           {activeTab === 'lokasi' && <LokasiKerjaManager supabase={supabase} />}
+
+          {activeTab === 'pengaturan' && <AbsensiSettingsPanel />}
         </>
       )}
 

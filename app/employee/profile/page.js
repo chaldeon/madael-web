@@ -13,6 +13,7 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import CameraCapture from '@/components/CameraCapture';
 import EmployeeDocumentsPanel from '@/components/EmployeeDocumentsPanel';
+import AttendancePreferenceCard from '@/components/AttendancePreferenceCard';
 
 function StatusBadge({ status }) {
   const map = {
@@ -307,6 +308,9 @@ export default function ProfilePage() {
         onCapture={handleCapturePhoto}
         onClose={() => setShowCamera(false)}
       />
+
+      {/* Preferensi absensi — tampil/lewati layar konfirmasi (menimpa default admin) */}
+      <AttendancePreferenceCard />
 
       {/* Dokumen pribadi — KTP, NPWP, Ijazah, Kontrak Kerja, dll */}
       <div className="bg-white border border-[#E0E0E0] p-5 mb-6">
