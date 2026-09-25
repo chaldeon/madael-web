@@ -8,6 +8,7 @@ import { Lock, Megaphone, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { MODULE_REGISTRY } from '@/lib/employeeModules';
 import EmployeeHeader from '@/components/EmployeeHeader';
+import QuickClockInCard from '@/components/QuickClockInCard';
 
 // Pengumuman aktif = belum ada expired_at, atau expired_at masih di masa
 // depan. Dicek ulang di RLS/insert admin, ini cuma filter tampilan.
@@ -203,6 +204,7 @@ export default function EmployeeDashboardPage() {
               Dashboard Saya
             </h1>
             <p className="text-sm text-[#6B6B6B] mb-8">Profil, absensi, cuti, dan payslip kamu.</p>
+            {hasAccess('absensi') && <QuickClockInCard employee={employee} />}
             <ModuleGrid
               modules={MODULE_REGISTRY.filter((m) => m.layer === 'personal')}
               hasAnyAccess={hasAnyAccess}
@@ -260,6 +262,7 @@ export default function EmployeeDashboardPage() {
               Dashboard Saya
             </h1>
             <p className="text-sm text-[#6B6B6B] mb-8">Profil, absensi, cuti, dan payslip kamu.</p>
+            {hasAccess('absensi') && <QuickClockInCard employee={employee} />}
             <ModuleGrid
               modules={MODULE_REGISTRY.filter((m) => m.layer === 'personal')}
               hasAnyAccess={hasAnyAccess}
