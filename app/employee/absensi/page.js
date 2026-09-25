@@ -16,6 +16,7 @@ import CameraCapture from '@/components/CameraCapture';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
 import LateReasonBox from '@/components/LateReasonBox';
 import AttendanceReviewScreen from '@/components/AttendanceReviewScreen';
+import LiveClock from '@/components/LiveClock';
 import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -640,6 +641,8 @@ export default function AbsensiPage() {
         </div>
       )}
       <div className="bg-white border border-[#E0E0E0] p-6 mb-8">
+        <LiveClock className="mb-4" />
+
         {schedule && (
           <p className="text-xs text-[#9A9A9A] mb-4">
             Jadwal: {formatJam(schedule.jam_masuk)} – {formatJam(schedule.jam_pulang)}
