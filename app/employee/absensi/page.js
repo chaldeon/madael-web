@@ -8,7 +8,8 @@ import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, X, FileEdit, Upload
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
-import { getFaceDescriptor, similarityPercent } from '@/lib/faceVerification';
+import { useAttendanceClock } from '@/lib/useAttendanceClock';
+import { similarityPercent } from '@/lib/faceVerification';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -59,25 +60,10 @@ function formatTanggal(value) {
   });
 }
 
-function getPosition() {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error('Browser ini tidak mendukung deteksi lokasi.'));
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: true,
-      timeout: 10000,
-    });
-  });
-}
-
 export default function AbsensiPage() {
   const supabase = createClient();
   const { status, employee } = useModuleAccess('absensi');
 
-  const [schedule, setSchedule] = useState(null);
-  const [todayRow, setTodayRow] = useState(null);
   // Riwayat bulanan (filter bulan). monthData menyimpan bulan asal barisnya
   // supaya tidak pernah dipakai untuk bulan lain saat pengguna ganti bulan.
   const [monthValue, setMonthValue] = useState(() => currentMonthValue());
@@ -86,40 +72,32 @@ export default function AbsensiPage() {
   const [monthLoading, setMonthLoading] = useState(true);
   const [monthError, setMonthError] = useState(null);
   const monthReqRef = useRef(0); // abaikan respon lama kalau pengguna keburu ganti bulan
-  const [forgotClockOut, setForgotClockOut] = useState(null); // record kemarin kalau clock in ada tapi clock out kosong
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
-  const [acting, setActing] = useState(false);
-  const [geoError, setGeoError] = useState(null);
-  const [lastMode, setLastMode] = useState(null); // untuk tombol retry saat gagal simpan
 
-  const [cameraMode, setCameraMode] = useState(null); // 'in' | 'out' | null — juga dipakai sbg "modal kamera terbuka?"
+  // Sinkronkan baris hasil clock in/out (atau simpan alasan telat) ke riwayat
+  // bulan yang sedang tampil (diabaikan kalau baris itu milik bulan lain).
+  // Deps kosong (functional setState) supaya identitasnya stabil antar render
+  // — dipakai sebagai onRowChange ke useAttendanceClock di bawah, dan kalau
+  // identitasnya berubah tiap render, reload data absensi ikut ter-trigger ulang.
+  const syncMonthRow = useCallback((row) => {
+    setMonthData((prev) => {
+      if (!row?.tanggal || !row.tanggal.startsWith(prev.month)) return prev;
+      const rest = prev.rows.filter((r) => r.id !== row.id && r.tanggal !== row.tanggal);
+      return { ...prev, rows: [row, ...rest] };
+    });
+  }, []);
 
-  // Geofence & verifikasi wajah sekarang dihitung server-side
-  // (app/api/attendance/clock/route.js) memakai data lokasi & descriptor
-  // referensi yang dibaca langsung oleh server — browser tidak pernah
-  // menerima descriptor referensi (supaya tidak bisa disalin balik untuk
-  // memalsukan kecocokan). Di sini cuma perlu tahu ADA/TIDAKNYA foto
-  // referensi, untuk hint UI "belum daftar foto referensi".
-  const [hasReferensiWajah, setHasReferensiWajah] = useState(false);
-
-  // --- Layar review + konfirmasi sebelum absensi tersimpan ---
-  // skipKonfirmasi = preferensi efektif dari server (override karyawan, kalau
-  // tidak ada ikut default admin). Kalau gagal dimuat, layar review TETAP tampil.
-  // review = { mode, blob, photoUrl, preview, token, expiresAt, fotoPath } | null
-  const [skipKonfirmasi, setSkipKonfirmasi] = useState(false);
-  const [review, setReview] = useState(null);
-  const [reviewConfirming, setReviewConfirming] = useState(false);
-  const [reviewError, setReviewError] = useState(null);
-  const [reviewFatal, setReviewFatal] = useState(false); // gagal yang tidak akan berhasil kalau dicoba lagi
-
-  // workLocations & assignedLocationIds di sini CUMA dipakai buat tampilan
-  // "lokasi kamu di-lock ke mana" sebelum clock in/out — bukan buat
-  // menghitung geofence (itu tetap dihitung server-side, lihat catatan di
-  // atas). Jadi aman: karyawan cuma melihat nama & radius lokasi, bukan data
-  // yang bisa dipalsukan untuk lolos pengecekan.
-  const [workLocations, setWorkLocations] = useState([]);
-  const [assignedLocationIds, setAssignedLocationIds] = useState([]);
+  // Status hari ini + alur clock in/out (kamera, lokasi, review, verifikasi
+  // wajah) — logic-nya dipakai bersama dengan widget "Absen Cepat" di
+  // dashboard, lihat lib/useAttendanceClock.js.
+  const {
+    loading, loadError,
+    schedule, todayRow, forgotClockOut, hasReferensiWajah, lockedLocations,
+    acting, geoError, lastMode, cameraMode,
+    review, reviewConfirming, reviewError, reviewFatal,
+    reload: loadClockData,
+    setTodayRow,
+    openCamera, closeCamera, handleCameraCapture, handleConfirmReview, closeReview, handleRetakeFromReview,
+  } = useAttendanceClock(employee, { onRowChange: syncMonthRow });
 
   // --- Pengajuan koreksi absensi mandiri ---
   const [myCorrections, setMyCorrections] = useState([]);
@@ -140,56 +118,17 @@ export default function AbsensiPage() {
   const [koreksiCancelError, setKoreksiCancelError] = useState(null);
   
 
-  const loadData = useCallback(async () => {
+  // Riwayat pengajuan koreksi absensi mandiri — data khusus halaman ini
+  // (bukan bagian dari alur clock in/out bersama di useAttendanceClock).
+  const loadCorrections = useCallback(async () => {
     if (!employee) return;
-    setLoading(true);
-    setLoadError(null);
-
-    const [schedRes, todayRes, yesterdayRes, correctionsRes, refRes, locRes, assignedLocRes, prefRes] = await Promise.all([
-      supabase.from('work_schedule').select('*').eq('employee_id', employee.id).maybeSingle(),
-      supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', todayStr()).maybeSingle(),
-      supabase.from('attendance').select('*').eq('employee_id', employee.id).eq('tanggal', yesterdayStr()).maybeSingle(),
-      supabase
-        .from('attendance_corrections')
-        .select('*')
-        .eq('requested_by', employee.id)
-        .order('created_at', { ascending: false })
-        .limit(10),
-      // Hanya butuh tahu ADA/TIDAKNYA foto referensi, bukan descriptor
-      // mentahnya (lihat catatan di deklarasi state hasReferensiWajah).
-      supabase.from('employees').select('foto_referensi_url').eq('id', employee.id).maybeSingle(),
-      // Lokasi kerja aktif & assignment lokasi karyawan ini — CUMA buat
-      // ditampilkan sebagai info "di-lock ke mana" (lihat catatan di state
-      // workLocations di atas). Opsional: gagal/kosong di sini tidak
-      // menggagalkan load data absensi utama.
-      supabase.from('work_locations').select('*').eq('aktif', true),
-      supabase.from('employee_work_locations').select('work_location_id').eq('employee_id', employee.id),
-      // Preferensi "Lewati layar konfirmasi" (efektif, sudah digabung default admin
-      // di server). Opsional: gagal/kosong = layar konfirmasi tetap tampil.
-      fetch('/api/attendance/preferences')
-        .then((r) => (r.ok ? r.json() : null))
-        .catch(() => null),
-    ]);
-
-    const firstError = schedRes.error || todayRes.error || yesterdayRes.error || correctionsRes.error;
-    if (firstError) {
-      setLoadError(firstError.message || 'Gagal memuat data absensi. Periksa koneksi internet kamu.');
-      setLoading(false);
-      return;
-    }
-
-    setSchedule(schedRes.data || null);
-    setTodayRow(todayRes.data || null);
-    const yRow = yesterdayRes.data || null;
-    setForgotClockOut(yRow && yRow.clock_in && !yRow.clock_out ? yRow : null);
-    setMyCorrections(correctionsRes.data || []);
-    setHasReferensiWajah(!refRes.error && !!refRes.data?.foto_referensi_url);
-    setSkipKonfirmasi(prefRes?.lewati === true);
-    setWorkLocations(locRes.error ? [] : locRes.data || []);
-    setAssignedLocationIds(
-      assignedLocRes.error ? [] : (assignedLocRes.data || []).map((r) => r.work_location_id)
-    );
-    setLoading(false);
+    const { data, error } = await supabase
+      .from('attendance_corrections')
+      .select('*')
+      .eq('requested_by', employee.id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (!error) setMyCorrections(data || []);
   }, [supabase, employee]);
 
   // Pola fetch-data standar (load saat status akses siap) — linter
@@ -197,8 +136,11 @@ export default function AbsensiPage() {
   // tapi ini bukan derived-state-in-render, cuma trigger fetch data awal.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (status === 'allowed') loadData();
-  }, [status, loadData]);
+    if (status === 'allowed') {
+      loadClockData();
+      loadCorrections();
+    }
+  }, [status, loadClockData, loadCorrections]);
 
   // Data riwayat untuk bulan terpilih: baris absensi + cuti yang sudah disetujui.
   // Cuti ikut diambil supaya hari cuti tidak salah tampil sebagai "Tanpa Kehadiran".
@@ -257,189 +199,6 @@ export default function AbsensiPage() {
       today: todayStr(),
     });
   }, [monthLoading, monthError, monthValue, monthData, monthLeaves, schedule]);
-
-  // Sinkronkan baris hasil clock in/out atau simpan alasan telat ke riwayat
-  // bulan yang sedang tampil (diabaikan kalau baris itu milik bulan lain).
-  const mergeMonthRow = (row) => {
-    setMonthData((prev) => {
-      if (!row?.tanggal || !row.tanggal.startsWith(prev.month)) return prev;
-      const rest = prev.rows.filter((r) => r.id !== row.id && r.tanggal !== row.tanggal);
-      return { ...prev, rows: [row, ...rest] };
-    });
-  };
-
-  const openCamera = (mode) => {
-    setGeoError(null);
-    setLastMode(mode);
-    setCameraMode(mode);
-  };
-
-  const uploadFoto = async (blob, mode) => {
-    const path = `${employee.id}/${todayStr()}-${mode}-${Date.now()}.jpg`;
-    const { error } = await supabase.storage.from('attendance-photos').upload(path, blob, {
-      contentType: 'image/jpeg',
-    });
-    if (error) throw error;
-    return path;
-  };
-
-
-  // Minta server menghitung ringkasan (TIDAK menyimpan), lalu tampilkan layar review.
-  const startReview = async (mode, blob, descriptor) => {
-    try {
-      const pos = await getPosition();
-      const res = await fetch('/api/attendance/clock/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mode,
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          descriptor,
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || 'Gagal menyiapkan ringkasan absensi.');
-
-      setReviewError(null);
-      setReviewFatal(false);
-      setReviewConfirming(false);
-      setReview({
-        mode,
-        blob,
-        photoUrl: URL.createObjectURL(blob),
-        preview: json.preview,
-        token: json.token,
-        expiresAt: json.expiresAt,
-        fotoPath: null,
-      });
-    } catch (err) {
-      setGeoError(err.message || 'Gagal mengambil lokasi. Pastikan izin lokasi diaktifkan.');
-    } finally {
-      setActing(false);
-    }
-  };
-
-  const closeReview = () => {
-    if (review?.photoUrl) URL.revokeObjectURL(review.photoUrl);
-    setReview(null);
-    setReviewError(null);
-    setReviewFatal(false);
-    setReviewConfirming(false);
-  };
-
-  const handleRetakeFromReview = () => {
-    const mode = review?.mode;
-    closeReview();
-    if (mode) openCamera(mode);
-  };
-
-  // Simpan hasil yang sudah dihitung server saat preview (token bertanda tangan):
-  // jam yang tercatat = jam saat foto diambil, bukan jam tombol ini ditekan.
-  const handleConfirmReview = async () => {
-    if (!review || reviewConfirming) return;
-    setReviewConfirming(true);
-    setReviewError(null);
-    try {
-      let fotoPath = review.fotoPath;
-      if (!fotoPath) {
-        try {
-          fotoPath = await uploadFoto(review.blob, review.mode);
-          // Simpan path-nya supaya "Coba Simpan Lagi" tidak mengupload foto dua kali.
-          setReview((r) => (r ? { ...r, fotoPath } : r));
-        } catch (err) {
-          setGeoError('Foto gagal disimpan, tapi absen tetap diproses. (' + (err.message || 'error kamera') + ')');
-        }
-      }
-
-      const res = await fetch('/api/attendance/clock/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: review.token, fotoPath: fotoPath || null }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setReviewFatal(!!json.fatal);
-        setReviewError(json.error || 'Gagal menyimpan absensi.');
-        return;
-      }
-
-      setTodayRow(json.data);
-      mergeMonthRow(json.data);
-      closeReview();
-    } catch {
-      setReviewError('Gagal menyimpan absensi. Periksa koneksi internet kamu lalu coba lagi.');
-    } finally {
-      setReviewConfirming(false);
-    }
-  };
-
-  const handleCameraCapture = async (blob, videoEl) => {
-    const mode = cameraMode;
-    setCameraMode(null); // tutup modal dulu, sisanya diproses di background (spinner di tombol utama)
-    setActing(true);
-    setGeoError(null);
-
-    // 1. Coba deteksi wajah dari frame video yang sama, sebelum videoEl
-    //    dilepas dari DOM. HANYA ekstraksi (kemampuan browser via face-api.js)
-    //    — descriptor mentahnya (128 angka) dikirim apa adanya ke server;
-    //    server yang membandingkan ke foto referensi dan memutuskan cocok
-    //    atau tidak (lihat app/api/attendance/clock/route.js), supaya browser
-    //    tidak bisa mengklaim "wajah cocok" sendiri.
-    let descriptor; // array = terdeteksi, null = kamera jalan tapi wajah tak jelas, undefined = belum sempat dicoba
-    try {
-      descriptor = await getFaceDescriptor(videoEl);
-    } catch (err) {
-      console.error('Deteksi wajah gagal diproses:', err);
-    }
-
-    // Layar review aktif (default): server menghitung semuanya tanpa menyimpan,
-    // lalu karyawan meninjau dan menekan konfirmasi. Foto baru diupload saat
-    // konfirmasi supaya pembatalan tidak meninggalkan file di storage.
-    if (!skipKonfirmasi) {
-      await startReview(mode, blob, descriptor);
-      return;
-    }
-
-    // ---- Jalur simpan langsung (layar konfirmasi dilewati) — tidak berubah ----
-
-    // 2. Upload foto bukti.
-    let fotoPath = null;
-    try {
-      fotoPath = await uploadFoto(blob, mode);
-    } catch (err) {
-      setGeoError('Foto gagal disimpan, tapi absen tetap diproses. (' + (err.message || 'error kamera') + ')');
-    }
-
-    // 3. Ambil lokasi, lalu kirim ke server. Jam, tanggal, jarak geofence,
-    //    dan status verifikasi wajah semuanya dihitung DI SERVER, bukan di
-    //    sini — lihat app/api/attendance/clock/route.js. Di luar radius atau
-    //    wajah tidak cocok TETAP diizinkan oleh server, cuma ditandai untuk
-    //    direview admin (tab "Perlu Review" di Kelola Absensi Tim).
-    try {
-      const pos = await getPosition();
-      const res = await fetch('/api/attendance/clock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mode,
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          fotoPath,
-          descriptor,
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || 'Gagal menyimpan absensi.');
-
-      setTodayRow(json.data);
-      mergeMonthRow(json.data);
-    } catch (err) {
-      setGeoError(err.message || 'Gagal mengambil lokasi. Pastikan izin lokasi diaktifkan.');
-    } finally {
-      setActing(false);
-    }
-  };
 
   const openKoreksiForm = () => {
     setKoreksiError(null);
@@ -581,17 +340,13 @@ export default function AbsensiPage() {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
         <div className="w-full max-w-[420px]">
-          <ErrorState message={loadError} onRetry={loadData} />
+          <ErrorState message={loadError} onRetry={loadClockData} />
         </div>
       </section>
     );
   }
 
   const isWorkday = schedule?.hari_kerja?.includes(HARI_LABEL[new Date().getDay()]);
-  // Lokasi yang di-lock khusus buat karyawan ini (assignment dari admin di
-  // tab "Lokasi Kerja"). Kalau kosong, karyawan tidak di-lock ke lokasi
-  // manapun — geofence server-side dicek ke semua lokasi aktif.
-  const lockedLocations = workLocations.filter((l) => assignedLocationIds.includes(l.id));
 
   return (
     <div className="max-w-[700px] mx-auto px-6 py-10">
@@ -706,10 +461,7 @@ export default function AbsensiPage() {
               <LateReasonBox
                 key={`${todayRow.id}-${todayRow.justified}`}
                 row={todayRow}
-                onSaved={(updated) => {
-                  setTodayRow(updated);
-                  mergeMonthRow(updated);
-                }}
+                onSaved={setTodayRow}
               />
             )}
 
@@ -1029,7 +781,7 @@ export default function AbsensiPage() {
         processingLabel="Memproses..."
         processing={acting}
         onCapture={handleCameraCapture}
-        onClose={() => setCameraMode(null)}
+        onClose={closeCamera}
       />
 
       <AttendanceReviewScreen
