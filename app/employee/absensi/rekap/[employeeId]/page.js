@@ -12,6 +12,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
+import { durasiIstirahatMenit, formatDurasi } from '@/lib/attendanceBreak';
 
 function currentMonthValue() {
   const d = new Date();
@@ -232,13 +233,14 @@ export default function RekapDetailPage() {
                 <th className="px-4 py-3 font-medium">Tanggal</th>
                 <th className="px-4 py-3 font-medium">Clock In</th>
                 <th className="px-4 py-3 font-medium">Clock Out</th>
+                <th className="px-4 py-3 font-medium">Istirahat</th>
                 <th className="px-4 py-3 font-medium">Status</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="p-0">
+                  <td colSpan={5} className="p-0">
                     <EmptyState message="Belum ada data absensi bulan ini." />
                   </td>
                 </tr>
@@ -261,6 +263,22 @@ export default function RekapDetailPage() {
                         lat={row.clock_out_lat}
                         lng={row.clock_out_lng}
                       />
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {row.break_start ? (
+                        <div className="text-sm text-black">
+                          {formatWaktu(row.break_start)} – {row.break_end ? formatWaktu(row.break_end) : '—'}
+                          {row.break_end ? (
+                            <span className="block text-xs text-[#6B6B6B]">
+                              {formatDurasi(durasiIstirahatMenit(row))}
+                            </span>
+                          ) : (
+                            <span className="block text-xs text-amber-700">Belum diselesaikan</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-[#9A9A9A]">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <AttendanceStatusBadge row={row} />

@@ -19,6 +19,8 @@ import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
 import LateReasonBox from '@/components/LateReasonBox';
 import AttendanceReviewScreen from '@/components/AttendanceReviewScreen';
 import LiveClock from '@/components/LiveClock';
+import BreakControl from '@/components/BreakControl';
+import { getBreakState, durasiIstirahatMenit, formatDurasi } from '@/lib/attendanceBreak';
 import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -95,10 +97,15 @@ export default function AbsensiPage() {
     schedule, todayRow, forgotClockOut, hasReferensiWajah, lockedLocations,
     acting, geoError, lastMode, cameraMode, qrMode, qrAvailable,
     review, reviewConfirming, reviewError, reviewFatal,
+    breaking, breakError,
     reload: loadClockData,
     setTodayRow,
     openCamera, closeCamera, retryLast, openQr, closeQr, handleQrScan, handleCameraCapture, handleConfirmReview, closeReview, handleRetakeFromReview,
+    handleBreak,
   } = useAttendanceClock(employee, { onRowChange: syncMonthRow });
+
+  // Clock out ditolak server selama istirahat belum diakhiri; tombolnya dikunci di sini.
+  const sedangIstirahat = getBreakState(todayRow) === 'sedang';
 
   // --- Pengajuan koreksi absensi mandiri ---
   const [myCorrections, setMyCorrections] = useState([]);
@@ -478,11 +485,18 @@ export default function AbsensiPage() {
               />
             )}
 
+            <BreakControl
+              row={todayRow}
+              breaking={breaking}
+              breakError={breakError}
+              onBreak={handleBreak}
+            />
+
             {!todayRow.clock_out ? (
               <div className="flex flex-wrap gap-3">
                 <button
                   onClick={() => openCamera('out')}
-                  disabled={acting}
+                  disabled={acting || sedangIstirahat}
                   className="flex items-center gap-2 bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
                 >
                   <Camera size={16} />
@@ -491,12 +505,15 @@ export default function AbsensiPage() {
                 {qrAvailable && (
                   <button
                     onClick={() => openQr('out')}
-                    disabled={acting}
+                    disabled={acting || sedangIstirahat}
                     className="flex items-center gap-2 border border-madael-red text-madael-red px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-red hover:text-white transition-colors disabled:opacity-50"
                   >
                     <QrCode size={16} />
                     Scan QR
                   </button>
+                )}
+                {sedangIstirahat && (
+                  <p className="w-full text-xs text-[#6B6B6B]">Selesaikan istirahat dulu sebelum clock out.</p>
                 )}
               </div>
             ) : (
@@ -579,13 +596,14 @@ export default function AbsensiPage() {
                 <th className="px-4 py-3 font-medium">Tanggal</th>
                 <th className="px-4 py-3 font-medium">Clock In</th>
                 <th className="px-4 py-3 font-medium">Clock Out</th>
+                <th className="px-4 py-3 font-medium">Istirahat</th>
                 <th className="px-4 py-3 font-medium">Status</th>
               </tr>
             </thead>
             <tbody>
               {summary.days.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="p-0">
+                  <td colSpan={5} className="p-0">
                     <EmptyState message="Belum ada data absensi di bulan ini." />
                   </td>
                 </tr>
@@ -595,6 +613,20 @@ export default function AbsensiPage() {
                     <td className="px-4 py-3 text-black">{formatTanggal(tanggal)}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">{formatWaktu(row?.clock_in)}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">{formatWaktu(row?.clock_out)}</td>
+                    <td className="px-4 py-3 text-[#6B6B6B] whitespace-nowrap">
+                      {row?.break_start ? (
+                        <>
+                          {formatWaktu(row.break_start)} – {row.break_end ? formatWaktu(row.break_end) : 'belum selesai'}
+                          {row.break_end && (
+                            <span className="block text-[11px] text-[#9A9A9A]">
+                              {formatDurasi(durasiIstirahatMenit(row))}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       {kind === 'tidak_hadir' && (
                         <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-red-100 text-red-700">
