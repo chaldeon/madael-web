@@ -20,11 +20,13 @@ import EmptyState from '@/components/EmptyState';
 import LokasiKerjaManager from '@/components/LokasiKerjaManager';
 import AbsensiReviewPanel from '@/components/AbsensiReviewPanel';
 import AbsensiSettingsPanel from '@/components/AbsensiSettingsPanel';
+import ShiftTemplateManager from '@/components/ShiftTemplateManager';
+import { durasiMenit, formatDurasi, scheduleFieldsFromTemplate, shiftLabel } from '@/lib/shifts';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 const HARI_OPTIONS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
 const DEFAULT_HARI = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
-const EMPTY_JADWAL_FORM = { jam_masuk: '08:00', jam_pulang: '17:00', hari_kerja: DEFAULT_HARI, toleransi_menit: '0' };
+const EMPTY_JADWAL_FORM = { jam_masuk: '08:00', jam_pulang: '17:00', hari_kerja: DEFAULT_HARI, toleransi_menit: '0', shift_template_id: '' };
 
 // Validasi input Toleransi (menit): bilangan bulat 0..MAX. Return angka, atau null kalau tidak valid.
 function parseToleransi(value) {
@@ -119,6 +121,7 @@ const JADWAL_SORT_COLUMNS = {
   jam_masuk: { label: 'Jam Masuk', get: (r) => r.sched?.jam_masuk || '' },
   jam_pulang: { label: 'Jam Pulang', get: (r) => r.sched?.jam_pulang || '' },
   toleransi: { label: 'Toleransi', get: (r) => (r.sched ? Number(r.sched.toleransi_menit) || 0 : -1) },
+  shift: { label: 'Shift', get: (r) => (r.sched ? r.shiftNama.toLowerCase() : '') },
 };
 
 const REKAP_SORT_COLUMNS = {
@@ -148,6 +151,7 @@ function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
 
 const TABS = [
   { key: 'jadwal', label: 'Jadwal Kerja' },
+  { key: 'shift', label: 'Template Shift' },
   { key: 'koreksi', label: 'Approval Koreksi' },
   { key: 'review', label: 'Perlu Review' },
   { key: 'lokasi', label: 'Lokasi Kerja' },
@@ -182,6 +186,16 @@ export default function SemuaKaryawanPage() {
   const [bulkToleransi, setBulkToleransi] = useState('0');
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkMsg, setBulkMsg] = useState(null); // { type: 'ok' | 'error', text }
+  // Template Shift + cabang (work_locations). Dimuat non-fatal: kalau migrasi shift belum
+  // dijalankan, tab Jadwal & Rekap tetap jalan seperti sebelumnya.
+  const [shiftTemplates, setShiftTemplates] = useState([]);
+  const [shiftUnavailable, setShiftUnavailable] = useState(null);
+  const [workLocations, setWorkLocations] = useState([]);
+  const [empLocations, setEmpLocations] = useState({}); // employee_id -> Set(work_location_id)
+  const [jadwalFilterLocationId, setJadwalFilterLocationId] = useState('');
+  const [bulkShiftId, setBulkShiftId] = useState('');
+  const [bulkShiftSaving, setBulkShiftSaving] = useState(false);
+  const [bulkShiftMsg, setBulkShiftMsg] = useState(null);
 
   // ---- Rekap Bulanan ----
   const [monthValue, setMonthValue] = useState(currentMonthValue());
@@ -219,13 +233,16 @@ export default function SemuaKaryawanPage() {
   const loadBase = useCallback(async () => {
     setLoadingBase(true);
     setLoadError(null);
-    const [empRes, schedRes] = await Promise.all([
+    const [empRes, schedRes, tplRes, locRes, empLocRes] = await Promise.all([
       supabase
         .from('employees')
         .select('id, nama, employee_id, status, client_id, companies:client_id ( nama_perusahaan )')
         .eq('status', 'Aktif')
         .order('nama'),
       supabase.from('work_schedule').select('*'),
+      supabase.from('shift_templates').select('*').order('nama'),
+      supabase.from('work_locations').select('id, nama, aktif').order('nama'),
+      supabase.from('employee_work_locations').select('employee_id, work_location_id'),
     ]);
 
     const firstError = empRes.error || schedRes.error;
@@ -234,6 +251,21 @@ export default function SemuaKaryawanPage() {
       setLoadingBase(false);
       return;
     }
+
+    if (tplRes.error) {
+      setShiftTemplates([]);
+      setShiftUnavailable('Template shift belum tersedia. Jalankan migrasi db/migrations/20260928_shift_templates.sql di Supabase terlebih dahulu.');
+    } else {
+      setShiftTemplates(tplRes.data || []);
+      setShiftUnavailable(null);
+    }
+    setWorkLocations(locRes.error ? [] : locRes.data || []);
+    const locMap = {};
+    (empLocRes.error ? [] : empLocRes.data || []).forEach((r) => {
+      if (!locMap[r.employee_id]) locMap[r.employee_id] = new Set();
+      locMap[r.employee_id].add(r.work_location_id);
+    });
+    setEmpLocations(locMap);
 
     setEmployees(empRes.data || []);
     const companyMap = new Map();
@@ -252,6 +284,39 @@ export default function SemuaKaryawanPage() {
   useEffect(() => {
     if (status === 'allowed' && isSuperadmin) loadBase();
   }, [status, isSuperadmin, loadBase]);
+
+  // Muat ulang template + jadwal tanpa memunculkan loading layar penuh (dipanggil setelah
+  // template diubah atau shift di-assign).
+  const refreshShiftData = useCallback(async () => {
+    const [tplRes, schedRes] = await Promise.all([
+      supabase.from('shift_templates').select('*').order('nama'),
+      supabase.from('work_schedule').select('*'),
+    ]);
+    if (!tplRes.error) setShiftTemplates(tplRes.data || []);
+    if (!schedRes.error) {
+      const byEmp = {};
+      (schedRes.data || []).forEach((s) => { byEmp[s.employee_id] = s; });
+      setSchedules(byEmp);
+    }
+  }, [supabase]);
+
+  const templatesById = useMemo(() => {
+    const map = {};
+    shiftTemplates.forEach((t) => { map[t.id] = t; });
+    return map;
+  }, [shiftTemplates]);
+
+  const linkedCounts = useMemo(() => {
+    const counts = {};
+    Object.values(schedules).forEach((s) => {
+      if (s.shift_template_id) counts[s.shift_template_id] = (counts[s.shift_template_id] || 0) + 1;
+    });
+    return counts;
+  }, [schedules]);
+
+  // Template yang boleh dipilih untuk assign baru: yang aktif, plus yang sedang dipakai
+  // karyawan yang dibuka (supaya template nonaktif tidak "hilang" dari dropdown-nya).
+  const selectableTemplates = (currentId) => shiftTemplates.filter((t) => t.aktif || t.id === currentId);
 
   // ---- Rekap: load per bulan, cuma saat tab rekap aktif ----
   const loadRekap = useCallback(async () => {
@@ -313,9 +378,18 @@ export default function SemuaKaryawanPage() {
 
   // ---- Jadwal handlers ----
   const jadwalRows = useMemo(() => {
-    let rows = employees.map((emp) => ({ emp, sched: schedules[emp.id] }));
+    let rows = employees.map((emp) => ({
+      emp,
+      sched: schedules[emp.id],
+      shiftNama: shiftLabel(schedules[emp.id], templatesById),
+    }));
     if (jadwalFilterClientId) {
       rows = rows.filter((r) => r.emp.client_id === jadwalFilterClientId);
+    }
+    if (jadwalFilterLocationId) {
+      // Hanya karyawan yang di-assign eksplisit ke cabang ini (yang belum di-assign ke
+      // cabang manapun tetap bisa absen di semua lokasi, tapi tidak masuk filter ini).
+      rows = rows.filter((r) => empLocations[r.emp.id]?.has(jadwalFilterLocationId));
     }
     const getValue = JADWAL_SORT_COLUMNS[jadwalSortField]?.get;
     if (!getValue) return rows;
@@ -327,7 +401,7 @@ export default function SemuaKaryawanPage() {
       return 0;
     });
     return jadwalSortDir === 'desc' ? sorted.reverse() : sorted;
-  }, [employees, schedules, jadwalFilterClientId, jadwalSortField, jadwalSortDir]);
+  }, [employees, schedules, templatesById, empLocations, jadwalFilterClientId, jadwalFilterLocationId, jadwalSortField, jadwalSortDir]);
 
   const handleJadwalSort = (colKey) => {
     if (jadwalSortField === colKey) {
@@ -355,6 +429,7 @@ export default function SemuaKaryawanPage() {
           jam_pulang: formatJam(existing.jam_pulang),
           hari_kerja: existing.hari_kerja || DEFAULT_HARI,
           toleransi_menit: String(existing.toleransi_menit ?? 0),
+          shift_template_id: existing.shift_template_id || '',
         }
       : EMPTY_JADWAL_FORM;
     jadwalFormBaselineRef.current = initial;
@@ -363,7 +438,25 @@ export default function SemuaKaryawanPage() {
     setEditingEmp(emp);
   };
 
+  // Pilih template: isi jam/hari/toleransi dari template (form dikunci). Pilih "Kustom":
+  // lepas tautan, nilai terakhir tetap dan bisa diedit manual.
+  const handlePilihShift = (templateId) => {
+    const tpl = templatesById[templateId];
+    if (!tpl) {
+      setJadwalForm((f) => ({ ...f, shift_template_id: '' }));
+      return;
+    }
+    setJadwalForm({
+      jam_masuk: tpl.jam_masuk.slice(0, 5),
+      jam_pulang: tpl.jam_pulang.slice(0, 5),
+      hari_kerja: tpl.hari_kerja,
+      toleransi_menit: String(tpl.toleransi_menit ?? 0),
+      shift_template_id: tpl.id,
+    });
+  };
+
   const toggleHari = (hari) => {
+    if (jadwalForm.shift_template_id) return;
     setJadwalForm((f) => ({
       ...f,
       hari_kerja: f.hari_kerja.includes(hari)
@@ -389,6 +482,9 @@ export default function SemuaKaryawanPage() {
           jam_pulang: jadwalForm.jam_pulang,
           hari_kerja: jadwalForm.hari_kerja,
           toleransi_menit: toleransi,
+          // Kolom baru: hanya dikirim kalau migrasi shift sudah jalan, supaya simpan jadwal
+          // biasa tidak rusak sebelum migrasi.
+          ...(shiftUnavailable ? {} : { shift_template_id: jadwalForm.shift_template_id || null }),
         }],
         { onConflict: 'employee_id' }
       )
@@ -414,10 +510,13 @@ export default function SemuaKaryawanPage() {
       setBulkMsg({ type: 'error', text: `Toleransi harus bilangan bulat 0–${MAX_TOLERANSI_MENIT} menit.` });
       return;
     }
-    const targetIds = jadwalRows.filter((r) => r.sched).map((r) => r.emp.id);
-    const tanpaJadwal = jadwalRows.length - targetIds.length;
+    // Karyawan yang jadwalnya berasal dari template shift dilewati: toleransi mereka
+    // diatur di template, supaya jadwal tidak menyimpang dari template-nya.
+    const targetIds = jadwalRows.filter((r) => r.sched && !r.sched.shift_template_id).map((r) => r.emp.id);
+    const tanpaJadwal = jadwalRows.filter((r) => !r.sched).length;
+    const pakaiTemplate = jadwalRows.filter((r) => r.sched?.shift_template_id).length;
     if (targetIds.length === 0) {
-      setBulkMsg({ type: 'error', text: 'Belum ada karyawan berjadwal di perusahaan ini.' });
+      setBulkMsg({ type: 'error', text: 'Tidak ada karyawan berjadwal kustom di perusahaan ini yang bisa diubah.' });
       return;
     }
     const namaPerusahaan = companies.find((c) => c.id === jadwalFilterClientId)?.nama || 'perusahaan ini';
@@ -448,8 +547,63 @@ export default function SemuaKaryawanPage() {
     });
     setBulkMsg({
       type: 'ok',
-      text: `Toleransi ${toleransi} menit diterapkan ke ${(data || []).length} karyawan.${tanpaJadwal > 0 ? ` ${tanpaJadwal} karyawan dilewati karena belum punya jadwal.` : ''}`,
+      text: `Toleransi ${toleransi} menit diterapkan ke ${(data || []).length} karyawan.${tanpaJadwal > 0 ? ` ${tanpaJadwal} karyawan dilewati karena belum punya jadwal.` : ''}${pakaiTemplate > 0 ? ` ${pakaiTemplate} karyawan dilewati karena memakai template shift (atur toleransinya di tab Template Shift).` : ''}`,
     });
+  };
+
+  // Pasang satu template ke semua karyawan yang sedang tampil (sesuai filter perusahaan/cabang).
+  // Berbeda dari bulk toleransi, karyawan yang belum punya jadwal DIBUATKAN jadwalnya —
+  // itu inti dari assign shift. Absensi lama tidak disentuh.
+  const handleBulkShift = async () => {
+    setBulkShiftMsg(null);
+    const tpl = templatesById[bulkShiftId];
+    if (!tpl) {
+      setBulkShiftMsg({ type: 'error', text: 'Pilih template shift dulu.' });
+      return;
+    }
+    const targets = jadwalRows.filter((r) => r.sched?.shift_template_id !== tpl.id);
+    if (targets.length === 0) {
+      setBulkShiftMsg({ type: 'ok', text: `Semua karyawan yang tampil sudah memakai "${tpl.nama}".` });
+      return;
+    }
+    const baru = targets.filter((r) => !r.sched).length;
+    const berubah = targets.length - baru;
+    if (!window.confirm(
+      `Pasang shift "${tpl.nama}" ke ${targets.length} karyawan?\n\n` +
+      `${berubah} akan berganti dari jadwal sebelumnya, ${baru} belum punya jadwal (dibuatkan baru).\n\n` +
+      'Hanya berlaku untuk absensi baru ke depan.'
+    )) return;
+
+    setBulkShiftSaving(true);
+    const fields = scheduleFieldsFromTemplate(tpl);
+    const { data, error } = await supabase
+      .from('work_schedule')
+      .upsert(targets.map((r) => ({ employee_id: r.emp.id, ...fields })), { onConflict: 'employee_id' })
+      .select();
+    setBulkShiftSaving(false);
+
+    if (error) {
+      setBulkShiftMsg({ type: 'error', text: error.message || 'Gagal memasang shift, coba lagi.' });
+      return;
+    }
+    setSchedules((prev) => {
+      const next = { ...prev };
+      (data || []).forEach((row) => { next[row.employee_id] = row; });
+      return next;
+    });
+    logActivity(supabase, {
+      userId: employee.id,
+      aksi: 'assign_shift_massal',
+      targetTable: 'work_schedule',
+      targetId: tpl.id,
+      detail: {
+        shift: tpl.nama,
+        client_id: jadwalFilterClientId || null,
+        work_location_id: jadwalFilterLocationId || null,
+        jumlah: (data || []).length,
+      },
+    });
+    setBulkShiftMsg({ type: 'ok', text: `Shift "${tpl.nama}" dipasang ke ${(data || []).length} karyawan.` });
   };
 
   // ---- Rekap computed rows ----
@@ -718,6 +872,18 @@ export default function SemuaKaryawanPage() {
                     <option key={c.id} value={c.id}>{c.nama}</option>
                   ))}
                 </select>
+                {workLocations.length > 0 && (
+                  <select
+                    value={jadwalFilterLocationId}
+                    onChange={(e) => setJadwalFilterLocationId(e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="">Semua Cabang</option>
+                    {workLocations.map((l) => (
+                      <option key={l.id} value={l.id}>{l.nama}{l.aktif ? '' : ' (nonaktif)'}</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {jadwalFilterClientId && (
@@ -749,6 +915,33 @@ export default function SemuaKaryawanPage() {
                 </div>
               )}
 
+              {(jadwalFilterClientId || jadwalFilterLocationId) && !shiftUnavailable && shiftTemplates.some((t) => t.aktif) && (
+                <div className="flex flex-wrap items-center gap-3 mb-6 bg-white border border-[#E0E0E0] px-4 py-3">
+                  <span className="text-xs text-[#6B6B6B]">Pasang shift ke {jadwalRows.length} karyawan yang tampil:</span>
+                  <select value={bulkShiftId} onChange={(e) => setBulkShiftId(e.target.value)} className={selectClass}>
+                    <option value="">Pilih template shift…</option>
+                    {shiftTemplates.filter((t) => t.aktif).map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.nama} ({t.jam_masuk.slice(0, 5)}–{t.jam_pulang.slice(0, 5)})
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleBulkShift}
+                    disabled={bulkShiftSaving || !bulkShiftId}
+                    className="bg-madael-red text-white px-4 py-2 text-xs font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+                  >
+                    {bulkShiftSaving ? 'Memasang...' : 'Pasang Shift'}
+                  </button>
+                  {bulkShiftMsg && (
+                    <span className={`text-xs ${bulkShiftMsg.type === 'error' ? 'text-red-600' : 'text-green-700'}`}>
+                      {bulkShiftMsg.text}
+                    </span>
+                  )}
+                </div>
+              )}
+
               {jadwalRows.length === 0 ? (
                 <div className="bg-white border border-[#E0E0E0]">
                   <EmptyState message="Tidak ada employee yang cocok dengan filter ini." />
@@ -760,6 +953,7 @@ export default function SemuaKaryawanPage() {
                       <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
                         <SortableHeader colKey="nama" label="Nama" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
                         <SortableHeader colKey="perusahaan" label="Perusahaan" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+                        <SortableHeader colKey="shift" label="Shift" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
                         <SortableHeader colKey="jam_masuk" label="Jam Masuk" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
                         <SortableHeader colKey="jam_pulang" label="Jam Pulang" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
                         <SortableHeader colKey="toleransi" label="Toleransi (menit)" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
@@ -768,10 +962,11 @@ export default function SemuaKaryawanPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {jadwalRows.map(({ emp, sched }) => (
+                      {jadwalRows.map(({ emp, sched, shiftNama }) => (
                         <tr key={emp.id} className="border-b border-[#E0E0E0] last:border-0">
                           <td className="px-4 py-3 text-black">{emp.nama}</td>
                           <td className="px-4 py-3 text-[#6B6B6B]">{emp.companies?.nama_perusahaan || '—'}</td>
+                          <td className="px-4 py-3 text-[#6B6B6B]">{shiftNama}</td>
                           <td className="px-4 py-3 text-[#6B6B6B]">{sched ? formatJam(sched.jam_masuk) : '—'}</td>
                           <td className="px-4 py-3 text-[#6B6B6B]">{sched ? formatJam(sched.jam_pulang) : '—'}</td>
                           <td className="px-4 py-3 text-[#6B6B6B]">{sched ? (sched.toleransi_menit ?? 0) : '—'}</td>
@@ -1014,6 +1209,17 @@ export default function SemuaKaryawanPage() {
 
           {activeTab === 'review' && <AbsensiReviewPanel supabase={supabase} />}
 
+          {activeTab === 'shift' && (
+            <ShiftTemplateManager
+              supabase={supabase}
+              userId={employee.id}
+              templates={shiftTemplates}
+              linkedCounts={linkedCounts}
+              unavailable={shiftUnavailable}
+              onChanged={refreshShiftData}
+            />
+          )}
+
           {activeTab === 'lokasi' && <LokasiKerjaManager supabase={supabase} />}
 
           {activeTab === 'pengaturan' && <AbsensiSettingsPanel />}
@@ -1031,12 +1237,36 @@ export default function SemuaKaryawanPage() {
             </button>
             <h2 className="text-sm font-medium text-black mb-4">Jadwal — {editingEmp.nama}</h2>
 
+            {!shiftUnavailable && (
+              <label className="flex flex-col gap-1 mb-4">
+                <span className="text-xs text-[#6B6B6B]">Shift</span>
+                <select
+                  value={jadwalForm.shift_template_id}
+                  onChange={(e) => handlePilihShift(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Kustom (atur manual)</option>
+                  {selectableTemplates(jadwalForm.shift_template_id).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nama} — {t.jam_masuk.slice(0, 5)}–{t.jam_pulang.slice(0, 5)} ({formatDurasi(durasiMenit(t.jam_masuk, t.jam_pulang))}){t.aktif ? '' : ' (nonaktif)'}
+                    </option>
+                  ))}
+                </select>
+                {jadwalForm.shift_template_id && (
+                  <span className="text-[11px] text-[#9A9A9A]">
+                    Jam, hari kerja, dan toleransi mengikuti template. Ubah lewat tab Template Shift, atau pilih Kustom untuk mengatur manual.
+                  </span>
+                )}
+              </label>
+            )}
+
             <div className="grid grid-cols-2 gap-3 mb-4">
               <label className="flex flex-col gap-1">
                 <span className="text-xs text-[#6B6B6B]">Jam Masuk</span>
                 <input
                   type="time"
                   value={jadwalForm.jam_masuk}
+                  disabled={!!jadwalForm.shift_template_id}
                   onChange={(e) => setJadwalForm((f) => ({ ...f, jam_masuk: e.target.value }))}
                   className={inputClass}
                 />
@@ -1046,6 +1276,7 @@ export default function SemuaKaryawanPage() {
                 <input
                   type="time"
                   value={jadwalForm.jam_pulang}
+                  disabled={!!jadwalForm.shift_template_id}
                   onChange={(e) => setJadwalForm((f) => ({ ...f, jam_pulang: e.target.value }))}
                   className={inputClass}
                 />
@@ -1061,7 +1292,8 @@ export default function SemuaKaryawanPage() {
                     key={hari}
                     type="button"
                     onClick={() => toggleHari(hari)}
-                    className={`px-3 py-1.5 text-xs border transition-colors ${
+                    disabled={!!jadwalForm.shift_template_id}
+                    className={`px-3 py-1.5 text-xs border transition-colors disabled:cursor-not-allowed ${
                       active
                         ? 'bg-madael-red text-white border-madael-red'
                         : 'bg-white text-[#6B6B6B] border-[#E0E0E0]'
@@ -1081,6 +1313,7 @@ export default function SemuaKaryawanPage() {
                 max={MAX_TOLERANSI_MENIT}
                 step="1"
                 value={jadwalForm.toleransi_menit}
+                disabled={!!jadwalForm.shift_template_id}
                 onChange={(e) => setJadwalForm((f) => ({ ...f, toleransi_menit: e.target.value }))}
                 className={inputClass}
               />
