@@ -5,8 +5,8 @@
 // hanya menampilkan. Peringatan tidak pernah memblokir tombol simpan; kasus di
 // luar radius / wajah tidak cocok tetap ditangkap tab "Perlu Review" admin.
 //
-// review: { mode: 'in'|'out', photoUrl, preview, expiresAt }
-import { AlertTriangle, Info, MapPin, ExternalLink, Camera } from 'lucide-react';
+// review: { mode: 'in'|'out', metode?: 'foto'|'qr', photoUrl, preview, expiresAt }
+import { AlertTriangle, Info, MapPin, ExternalLink, Camera, QrCode } from 'lucide-react';
 import {
   MODE_LABEL, buildReviewWarnings, formatJarak, formatDurasi, osmEmbedUrl, osmLinkUrl,
 } from '@/lib/attendanceReview';
@@ -54,6 +54,7 @@ export default function AttendanceReviewScreen({
   const { jadwal, wajah, lokasi } = preview;
   const badge = WAJAH_BADGE[wajah.status] || WAJAH_BADGE.belum_dicek;
   const durasi = mode === 'out' ? formatDurasi(preview.clockInAt, preview.waktu.iso) : null;
+  const viaQr = preview.metode === 'qr';
 
   return (
     <div
@@ -132,6 +133,22 @@ export default function AttendanceReviewScreen({
             )}
           </div>
 
+          {viaQr ? (
+            <div>
+              <SectionTitle>Metode Absen</SectionTitle>
+              <div className="flex items-start gap-4">
+                <div className="w-24 h-24 bg-[#F4F4F4] border border-[#E0E0E0] flex items-center justify-center text-[#6B6B6B] shrink-0">
+                  <QrCode size={28} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="inline-block text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-green-100 text-green-700">QR TERVERIFIKASI</span>
+                  <p className="text-xs text-[#6B6B6B] mt-3">
+                    {lokasi.nama ? `QR lokasi ${lokasi.nama} berhasil dipindai.` : 'QR lokasi berhasil dipindai.'} Foto dan verifikasi wajah tidak dipakai pada metode ini.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
           <div>
             <SectionTitle>Foto &amp; Verifikasi Wajah</SectionTitle>
             <div className="flex items-start gap-4">
@@ -165,6 +182,7 @@ export default function AttendanceReviewScreen({
               </div>
             </div>
           </div>
+          )}
 
           <div>
             <SectionTitle>Lokasi</SectionTitle>
@@ -239,13 +257,13 @@ export default function AttendanceReviewScreen({
                 onClick={onRetake}
                 className="w-full bg-madael-red text-white px-6 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
               >
-                Ambil Foto Ulang
+                {viaQr ? 'Scan QR Ulang' : 'Ambil Foto Ulang'}
               </button>
             )}
             <div className="flex items-center justify-center gap-6 text-xs">
               {!fatal && (
                 <button type="button" onClick={onRetake} disabled={confirming} className="text-[#6B6B6B] hover:text-black disabled:opacity-50">
-                  Ambil Foto Ulang
+                  {viaQr ? 'Scan QR Ulang' : 'Ambil Foto Ulang'}
                 </button>
               )}
               <button type="button" onClick={onCancel} disabled={confirming} className="text-[#6B6B6B] hover:text-black disabled:opacity-50">

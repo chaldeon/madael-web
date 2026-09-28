@@ -24,6 +24,8 @@ import { evaluateClock, saveClock, toGeo } from '@/lib/attendanceClock';
 //     - array   : wajah terdeteksi di frame, ini descriptor-nya
 //     - null    : kamera sempat jalan tapi wajah tidak terdeteksi jelas
 //     - (absen) : deteksi tidak sempat dicoba (model gagal dimuat, dll)
+//   qr: string | undefined
+//     - kalau ada, absen dilakukan via QR lokasi (fotoPath & descriptor diabaikan)
 // }
 export async function POST(request) {
   try {
@@ -31,7 +33,9 @@ export async function POST(request) {
     if (!body) {
       return NextResponse.json({ error: 'Data tidak valid.' }, { status: 400 });
     }
-    const { mode, lat, lng, fotoPath = null, descriptor } = body;
+    const { mode, lat, lng, descriptor } = body;
+    const qr = typeof body.qr === 'string' && body.qr ? body.qr : null;
+    const fotoPath = qr ? null : (body.fotoPath ?? null);
 
     if (mode !== 'in' && mode !== 'out') {
       return NextResponse.json({ error: 'mode harus "in" atau "out".' }, { status: 400 });
@@ -53,7 +57,10 @@ export async function POST(request) {
     const now = new Date();
     const tanggal = todayJakarta(now);
 
-    const ev = await evaluateClock(admin, { empId: emp.id, lat, lng, descriptor });
+    const ev = await evaluateClock(admin, { empId: emp.id, lat, lng, descriptor, qr });
+    if (ev.fail) {
+      return NextResponse.json({ error: ev.fail.error }, { status: ev.fail.status });
+    }
     const result = await saveClock(admin, {
       empId: emp.id,
       mode,
@@ -66,6 +73,7 @@ export async function POST(request) {
       wajah: ev.wajah,
       schedule: ev.schedule,
       scheduleError: ev.scheduleError,
+      metode: ev.metode,
     });
 
     if (result.fail) {

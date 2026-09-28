@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, X, FileEdit, Upload, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MapPin, Clock, CheckCircle2, AlertTriangle, Camera, QrCode, X, FileEdit, Upload, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
@@ -14,6 +14,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import CameraCapture from '@/components/CameraCapture';
+import QrScanner from '@/components/QrScanner';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
 import LateReasonBox from '@/components/LateReasonBox';
 import AttendanceReviewScreen from '@/components/AttendanceReviewScreen';
@@ -92,11 +93,11 @@ export default function AbsensiPage() {
   const {
     loading, loadError,
     schedule, todayRow, forgotClockOut, hasReferensiWajah, lockedLocations,
-    acting, geoError, lastMode, cameraMode,
+    acting, geoError, lastMode, cameraMode, qrMode, qrAvailable,
     review, reviewConfirming, reviewError, reviewFatal,
     reload: loadClockData,
     setTodayRow,
-    openCamera, closeCamera, handleCameraCapture, handleConfirmReview, closeReview, handleRetakeFromReview,
+    openCamera, closeCamera, retryLast, openQr, closeQr, handleQrScan, handleCameraCapture, handleConfirmReview, closeReview, handleRetakeFromReview,
   } = useAttendanceClock(employee, { onRowChange: syncMonthRow });
 
   // --- Pengajuan koreksi absensi mandiri ---
@@ -387,7 +388,7 @@ export default function AbsensiPage() {
           </span>
           {lastMode && (
             <button
-              onClick={() => openCamera(lastMode)}
+              onClick={retryLast}
               className="shrink-0 underline font-medium hover:text-red-900"
             >
               Coba Lagi
@@ -424,14 +425,26 @@ export default function AbsensiPage() {
         {!todayRow ? (
           <>
             <p className="text-sm text-black mb-4">Kamu belum clock in hari ini.</p>
-            <button
-              onClick={() => openCamera('in')}
-              disabled={acting}
-              className="flex items-center gap-2 bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
-            >
-              <Camera size={16} />
-              {acting ? 'Memproses...' : 'Clock In'}
-            </button>
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={() => openCamera('in')}
+                disabled={acting}
+                className="flex items-center gap-2 bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+              >
+                <Camera size={16} />
+                {acting ? 'Memproses...' : 'Clock In'}
+              </button>
+              {qrAvailable && (
+                <button
+                  onClick={() => openQr('in')}
+                  disabled={acting}
+                  className="flex items-center gap-2 border border-madael-red text-madael-red px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-red hover:text-white transition-colors disabled:opacity-50"
+                >
+                  <QrCode size={16} />
+                  Scan QR
+                </button>
+              )}
+            </div>
           </>
         ) : (
           <div className="space-y-3">
@@ -466,14 +479,26 @@ export default function AbsensiPage() {
             )}
 
             {!todayRow.clock_out ? (
-              <button
-                onClick={() => openCamera('out')}
-                disabled={acting}
-                className="flex items-center gap-2 bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
-              >
-                <Camera size={16} />
-                {acting ? 'Memproses...' : 'Clock Out'}
-              </button>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => openCamera('out')}
+                  disabled={acting}
+                  className="flex items-center gap-2 bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+                >
+                  <Camera size={16} />
+                  {acting ? 'Memproses...' : 'Clock Out'}
+                </button>
+                {qrAvailable && (
+                  <button
+                    onClick={() => openQr('out')}
+                    disabled={acting}
+                    className="flex items-center gap-2 border border-madael-red text-madael-red px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-red hover:text-white transition-colors disabled:opacity-50"
+                  >
+                    <QrCode size={16} />
+                    Scan QR
+                  </button>
+                )}
+              </div>
             ) : (
               <div className="flex items-center gap-2 text-sm text-black">
                 <Clock size={16} className="text-[#9A9A9A]" />
@@ -782,6 +807,14 @@ export default function AbsensiPage() {
         processing={acting}
         onCapture={handleCameraCapture}
         onClose={closeCamera}
+      />
+
+      <QrScanner
+        open={!!qrMode}
+        title={`Scan QR ${qrMode === 'in' ? 'Clock In' : 'Clock Out'}`}
+        hint="Arahkan kamera ke QR absensi di lokasi kerja."
+        onScan={handleQrScan}
+        onClose={closeQr}
       />
 
       <AttendanceReviewScreen
