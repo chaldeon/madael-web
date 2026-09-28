@@ -17,8 +17,9 @@ import { signConfirmToken } from '@/lib/attendanceConfirmToken';
 // peringatan di layar review; kasusnya tetap ditangkap tab "Perlu Review" admin
 // setelah disimpan, sama seperti jalur simpan langsung.
 //
-// body: { mode: 'in' | 'out', lat, lng, descriptor }  (tanpa fotoPath: foto baru
+// body: { mode: 'in' | 'out', lat, lng, descriptor, qr? }  (tanpa fotoPath: foto baru
 // diupload saat konfirmasi, jadi karyawan yang membatalkan tidak meninggalkan file).
+// `qr` (teks hasil scan) -> absen via QR: tidak ada foto/wajah, lokasi mengikuti QR.
 export async function POST(request) {
   try {
     const body = await request.json().catch(() => null);
@@ -26,6 +27,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Data tidak valid.' }, { status: 400 });
     }
     const { mode, lat, lng, descriptor } = body;
+    const qr = typeof body.qr === 'string' && body.qr ? body.qr : null;
 
     if (mode !== 'in' && mode !== 'out') {
       return NextResponse.json({ error: 'mode harus "in" atau "out".' }, { status: 400 });
@@ -47,7 +49,10 @@ export async function POST(request) {
     const now = new Date();
     const tanggal = todayJakarta(now);
 
-    const ev = await evaluateClock(admin, { empId: emp.id, lat, lng, descriptor });
+    const ev = await evaluateClock(admin, { empId: emp.id, lat, lng, descriptor, qr });
+    if (ev.fail) {
+      return NextResponse.json({ error: ev.fail.error }, { status: ev.fail.status });
+    }
 
     // Gagal lebih awal kalau pasti tidak bisa disimpan (sudah absen, belum absen
     // masuk, dst), supaya karyawan tidak diajak mengonfirmasi sesuatu yang gagal.
@@ -65,6 +70,7 @@ export async function POST(request) {
       emp: emp.id,
       mode,
       t: now.getTime(),
+      metode: ev.metode,
       tanggal,
       lat,
       lng,
@@ -86,6 +92,7 @@ export async function POST(request) {
         lat,
         lng,
         clockInAt: mode === 'out' ? pre.todayRow?.clock_in || null : null,
+        metode: ev.metode,
       }),
     });
   } catch (err) {

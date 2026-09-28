@@ -5,10 +5,11 @@
 // di app/employee/absensi/karyawan/page.js.
 
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Pencil, Trash2, X, MapPin, LocateFixed, Users } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, MapPin, LocateFixed, Users, QrCode } from 'lucide-react';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import LokasiQrDialog from '@/components/LokasiQrDialog';
 
 const EMPTY_FORM = { nama: '', latitude: '', longitude: '', radius_meter: 150, aktif: true };
 
@@ -26,6 +27,7 @@ export default function LokasiKerjaManager({ supabase }) {
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [locatingMe, setLocatingMe] = useState(false);
+  const [qrLoc, setQrLoc] = useState(null); // lokasi yang dialog QR-nya sedang dibuka
 
   // Assignment lokasi -> karyawan. Karyawan yang belum di-assign ke lokasi
   // manapun tetap bisa absen (dicek ke semua lokasi aktif) — assignment cuma
@@ -251,6 +253,7 @@ export default function LokasiKerjaManager({ supabase }) {
                 <th className="px-4 py-3 font-medium">Radius</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Karyawan</th>
+                <th className="px-4 py-3 font-medium">QR</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
@@ -280,6 +283,17 @@ export default function LokasiKerjaManager({ supabase }) {
                     </button>
                   </td>
                   <td className="px-4 py-3">
+                    <button
+                      onClick={() => setQrLoc(loc)}
+                      className={`inline-flex items-center gap-1.5 text-xs ${
+                        loc.qr_enabled ? 'text-green-700 hover:text-green-900' : 'text-[#6B6B6B] hover:text-black'
+                      }`}
+                    >
+                      <QrCode size={13} />
+                      {loc.qr_enabled ? 'Aktif' : 'Atur QR'}
+                    </button>
+                  </td>
+                  <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-3">
                       <button onClick={() => openEdit(loc)} className="text-[#6B6B6B] hover:text-black">
                         <Pencil size={14} />
@@ -295,6 +309,8 @@ export default function LokasiKerjaManager({ supabase }) {
           </table>
         </div>
       )}
+
+      {qrLoc && <LokasiQrDialog loc={qrLoc} onClose={() => setQrLoc(null)} onChanged={loadLocations} />}
 
       {showForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={() => setShowForm(false)}>

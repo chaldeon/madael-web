@@ -24,7 +24,7 @@ export async function POST(request) {
     if (!body || typeof body.token !== 'string') {
       return NextResponse.json({ error: 'Data tidak valid.' }, { status: 400 });
     }
-    const fotoPath = body.fotoPath ?? null;
+    const fotoPathBody = body.fotoPath ?? null;
 
     const session = await getSessionEmployee('id, status');
     if (session.error) {
@@ -36,12 +36,12 @@ export async function POST(request) {
     if (!verified.ok) {
       if (verified.reason === 'expired') {
         return NextResponse.json(
-          { error: 'Sesi konfirmasi sudah kedaluwarsa. Ambil foto ulang untuk absen.', fatal: true },
+          { error: 'Sesi konfirmasi sudah kedaluwarsa. Ulangi proses absen.', fatal: true },
           { status: 410 }
         );
       }
       return NextResponse.json(
-        { error: 'Sesi konfirmasi tidak valid. Ambil foto ulang untuk absen.', fatal: true },
+        { error: 'Sesi konfirmasi tidak valid. Ulangi proses absen.', fatal: true },
         { status: 400 }
       );
     }
@@ -57,10 +57,14 @@ export async function POST(request) {
       p.geo && typeof p.geo === 'object' && p.wajah && typeof p.wajah === 'object';
     if (!bentukValid) {
       return NextResponse.json(
-        { error: 'Sesi konfirmasi tidak valid. Ambil foto ulang untuk absen.', fatal: true },
+        { error: 'Sesi konfirmasi tidak valid. Ulangi proses absen.', fatal: true },
         { status: 400 }
       );
     }
+
+    // Token lama (sebelum fitur QR) tidak punya `metode` -> dianggap foto.
+    const metode = p.metode === 'qr' ? 'qr' : 'foto';
+    const fotoPath = metode === 'qr' ? null : fotoPathBody;
 
     if (!isValidFotoPath(fotoPath, emp.id)) {
       return NextResponse.json({ error: 'Path foto tidak valid.' }, { status: 400 });
@@ -92,6 +96,7 @@ export async function POST(request) {
       wajah: { ok: p.wajah.ok ?? null, distance: p.wajah.distance ?? null },
       schedule: scheduleRes.data,
       scheduleError: scheduleRes.error,
+      metode,
     });
 
     if (result.fail) {

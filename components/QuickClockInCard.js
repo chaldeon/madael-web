@@ -13,9 +13,10 @@
 
 import { useEffect } from 'react';
 import Link from 'next/link';
-import { Camera, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
+import { Camera, CheckCircle2, Clock, AlertTriangle, QrCode } from 'lucide-react';
 import { useAttendanceClock } from '@/lib/useAttendanceClock';
 import CameraCapture from '@/components/CameraCapture';
+import QrScanner from '@/components/QrScanner';
 import AttendanceReviewScreen from '@/components/AttendanceReviewScreen';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
 
@@ -27,10 +28,10 @@ function formatWaktu(iso) {
 export default function QuickClockInCard({ employee }) {
   const {
     loading, loadError, todayRow, hasReferensiWajah,
-    acting, geoError, lastMode, cameraMode,
+    acting, geoError, lastMode, cameraMode, qrMode, qrAvailable,
     review, reviewConfirming, reviewError, reviewFatal,
     reload,
-    openCamera, closeCamera, handleCameraCapture, handleConfirmReview, closeReview, handleRetakeFromReview,
+    openCamera, closeCamera, retryLast, openQr, closeQr, handleQrScan, handleCameraCapture, handleConfirmReview, closeReview, handleRetakeFromReview,
   } = useAttendanceClock(employee);
 
   // Beda dengan halaman Absensi (yang men-trigger loadClockData lewat effect
@@ -72,7 +73,7 @@ export default function QuickClockInCard({ employee }) {
                 {geoError}
               </span>
               {lastMode && (
-                <button onClick={() => openCamera(lastMode)} className="shrink-0 underline font-medium hover:text-red-900">
+                <button onClick={retryLast} className="shrink-0 underline font-medium hover:text-red-900">
                   Coba Lagi
                 </button>
               )}
@@ -82,6 +83,7 @@ export default function QuickClockInCard({ employee }) {
           {!todayRow ? (
             <>
               <p className="text-sm text-black mb-3">Kamu belum clock in hari ini.</p>
+              <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => openCamera('in')}
                 disabled={acting}
@@ -90,6 +92,17 @@ export default function QuickClockInCard({ employee }) {
                 <Camera size={15} />
                 {acting ? 'Memproses...' : 'Clock In'}
               </button>
+              {qrAvailable && (
+                <button
+                  onClick={() => openQr('in')}
+                  disabled={acting}
+                  className="flex items-center gap-2 border border-madael-red text-madael-red px-5 py-2 text-sm font-medium tracking-[0.04em] hover:bg-madael-red hover:text-white transition-colors disabled:opacity-50"
+                >
+                  <QrCode size={15} />
+                  Scan QR
+                </button>
+              )}
+              </div>
             </>
           ) : (
             <div className="space-y-2.5">
@@ -100,14 +113,26 @@ export default function QuickClockInCard({ employee }) {
               </div>
 
               {!todayRow.clock_out ? (
-                <button
-                  onClick={() => openCamera('out')}
-                  disabled={acting}
-                  className="flex items-center gap-2 bg-madael-red text-white px-5 py-2 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
-                >
-                  <Camera size={15} />
-                  {acting ? 'Memproses...' : 'Clock Out'}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => openCamera('out')}
+                    disabled={acting}
+                    className="flex items-center gap-2 bg-madael-red text-white px-5 py-2 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+                  >
+                    <Camera size={15} />
+                    {acting ? 'Memproses...' : 'Clock Out'}
+                  </button>
+                  {qrAvailable && (
+                    <button
+                      onClick={() => openQr('out')}
+                      disabled={acting}
+                      className="flex items-center gap-2 border border-madael-red text-madael-red px-5 py-2 text-sm font-medium tracking-[0.04em] hover:bg-madael-red hover:text-white transition-colors disabled:opacity-50"
+                    >
+                      <QrCode size={15} />
+                      Scan QR
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div className="flex items-center gap-2 text-sm text-black">
                   <Clock size={15} className="text-[#9A9A9A]" />
@@ -128,6 +153,14 @@ export default function QuickClockInCard({ employee }) {
         processing={acting}
         onCapture={handleCameraCapture}
         onClose={closeCamera}
+      />
+
+      <QrScanner
+        open={!!qrMode}
+        title={`Scan QR ${qrMode === 'in' ? 'Clock In' : 'Clock Out'}`}
+        hint="Arahkan kamera ke QR absensi di lokasi kerja."
+        onScan={handleQrScan}
+        onClose={closeQr}
       />
 
       <AttendanceReviewScreen
