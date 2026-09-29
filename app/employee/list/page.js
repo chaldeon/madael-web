@@ -14,6 +14,7 @@ import SkeletonRows from '@/components/employee-list/SkeletonRows';
 import CompletenessBadge from '@/components/employee-list/CompletenessBadge';
 import SortableHeader from '@/components/SortableHeader';
 import { emptyForm, TEMPLATE_URL, MODULE_GROUPS, PAGE_SIZE_OPTIONS, SORT_COLUMNS } from '@/lib/employeeListConfig';
+import { EXPLICIT_ONLY_MODULES } from '@/lib/employeeModules';
 
 export default function EmployeeListPage() {
   const supabase = createClient();
@@ -826,15 +827,16 @@ export default function EmployeeListPage() {
             </div>
             <p className="text-sm text-[#6B6B6B] mb-6">{accessEmployee.nama}</p>
 
-            {accessEmployee.is_superadmin ? (
-              <p className="text-sm text-black bg-[#F4F4F4] border border-[#E0E0E0] px-4 py-3">
-                Employee ini superadmin — otomatis punya akses ke semua modul.
+            {accessEmployee.is_superadmin && (
+              <p className="text-sm text-black bg-[#F4F4F4] border border-[#E0E0E0] px-4 py-3 mb-4">
+                Employee ini superadmin — otomatis punya akses ke semua modul, kecuali akses khusus di bawah yang harus di-assign manual.
               </p>
-            ) : accessLoading ? (
+            )}
+            {accessLoading ? (
               <p className="text-sm text-[#6B6B6B]">Memuat...</p>
             ) : (
               <div className="space-y-0.5">
-                {MODULE_GROUPS.map((mod) => {
+                {MODULE_GROUPS.filter((mod) => !accessEmployee.is_superadmin || EXPLICIT_ONLY_MODULES.includes(mod.key)).map((mod) => {
                   const checked = accessModules.includes(mod.key);
                   const saving = accessSavingKey === mod.key;
                   return (
