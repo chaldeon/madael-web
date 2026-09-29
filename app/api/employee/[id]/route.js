@@ -247,6 +247,8 @@ export async function DELETE(request, { params }) {
       { label: 'slip gaji (payslip)', table: 'payslips', column: 'employee_id' },
       { label: 'dokumen yang pernah dibuat', table: 'documents', column: 'created_by' },
       { label: 'dokumen pribadi (kontrak, dll)', table: 'employee_documents', column: 'employee_id' },
+      { label: 'tiket feedback (Pusat Bantuan)', table: 'feedback_tickets', column: 'employee_id' },
+      { label: 'pesan/balasan tiket feedback', table: 'feedback_messages', column: 'author_id' },
     ];
 
     const blockingReasons = [];
