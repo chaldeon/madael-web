@@ -20,7 +20,7 @@ export async function GET() {
     const admin = createAdminClient();
     const { data, error } = await admin
       .from('feedback_tickets')
-      .select('id, ticket_no, jenis, modul_label, ringkasan, status, last_staff_nama, last_staff_at, created_at, updated_at, closed_at')
+      .select('id, ticket_no, jenis, modul_label, ringkasan, status, last_staff_nama, last_staff_at, user_unread, created_at, updated_at, closed_at')
       .eq('employee_id', session.emp.id)
       .order('updated_at', { ascending: false })
       .limit(200);

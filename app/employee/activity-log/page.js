@@ -25,6 +25,7 @@ const AKSI_LABEL = {
   ubah_status_payroll: 'Ubah Status Payroll',
   edit_struktur_gaji: 'Edit Struktur Gaji',
   tambah_employee_master: 'Tambah Employee Master',
+  ubah_status_tiket_feedback: 'Ubah Status Tiket Feedback',
 };
 
 function formatWaktu(value) {

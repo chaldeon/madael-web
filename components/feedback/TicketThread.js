@@ -1,19 +1,21 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Paperclip, Send } from 'lucide-react';
+import { CheckCircle2, Paperclip, Send } from 'lucide-react';
 import { FEEDBACK_JENIS_LABEL, FEEDBACK_MAX_TEXT } from '@/lib/feedbackConfig';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import { api, formatWaktu, inputClass, StatusBadge, AttachmentPicker } from './parts';
 
-export default function TicketThread({ id }) {
+export default function TicketThread({ id, onRead }) {
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState('');
   const [isi, setIsi] = useState('');
   const [file, setFile] = useState(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
+  const [confirmingClose, setConfirmingClose] = useState(false);
+  const [closing, setClosing] = useState(false);
   const endRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -24,10 +26,13 @@ export default function TicketThread({ id }) {
       return;
     }
     setData(res.data);
-  }, [id]);
+    // Membuka tiket menandai balasan sebagai dibaca di server -> segarkan badge.
+    if (res.data.marked_read) onRead?.();
+  }, [id, onRead]);
 
   useEffect(() => {
     setData(null);
+    setConfirmingClose(false);
     load();
   }, [load]);
 
@@ -60,6 +65,24 @@ export default function TicketThread({ id }) {
     load();
   };
 
+  const handleClose = async () => {
+    if (closing) return;
+    setClosing(true);
+    setSendError('');
+    const res = await api(`/api/feedback/tickets/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'selesai' }),
+    });
+    setClosing(false);
+    setConfirmingClose(false);
+    if (!res.ok) {
+      setSendError(res.error);
+      return;
+    }
+    load();
+  };
+
   if (loadError) return <div className="p-4"><ErrorState message={loadError} onRetry={load} /></div>;
   if (!data) return <LoadingState label="Memuat tiket..." />;
 
@@ -67,11 +90,60 @@ export default function TicketThread({ id }) {
 
   return (
     <div className="flex flex-col">
-      <div className="px-4 py-3 border-b border-[#E0E0E0] flex items-center justify-between gap-2">
-        <span className="text-xs text-[#6B6B6B]">
-          #{ticket.ticket_no} · {FEEDBACK_JENIS_LABEL[ticket.jenis] || ticket.jenis} · {ticket.modul_label}
-        </span>
-        <StatusBadge status={ticket.status} />
+      <div className="px-4 py-3 border-b border-[#E0E0E0] space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-[#6B6B6B]">
+            #{ticket.ticket_no} · {FEEDBACK_JENIS_LABEL[ticket.jenis] || ticket.jenis} · {ticket.modul_label}
+          </span>
+          <StatusBadge status={ticket.status} />
+        </div>
+
+        {ticket.status === 'selesai' && ticket.closed_by_nama && (
+          <p className="text-[11px] text-[#6B6B6B]">
+            Ditandai selesai oleh {ticket.closed_by_self ? 'Anda' : ticket.closed_by_nama}
+            {ticket.closed_at ? ` · ${formatWaktu(ticket.closed_at)}` : ''}
+          </p>
+        )}
+
+        {ticket.can_close && !confirmingClose && (
+          <button
+            onClick={() => setConfirmingClose(true)}
+            className="flex items-center gap-1.5 border border-[#E0E0E0] px-3 py-1.5 text-xs text-[#3D3D3D] hover:border-madael-red hover:text-madael-red transition-colors"
+          >
+            <CheckCircle2 size={13} />
+            Tandai Selesai
+          </button>
+        )}
+
+        {ticket.can_close && confirmingClose && (
+          <div className="bg-[#F4F4F4] border border-[#E0E0E0] p-3 space-y-2">
+            <p className="text-xs text-black">
+              Pindahkan tiket ini ke Riwayat? Percakapan tetap tersimpan, dan tiket terbuka lagi kalau Anda mengirim pesan baru.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleClose}
+                disabled={closing}
+                className="bg-madael-red text-white px-3 py-1.5 text-xs font-medium hover:bg-madael-dark transition-colors disabled:opacity-60"
+              >
+                {closing ? 'Menyimpan...' : 'Ya, Selesai'}
+              </button>
+              <button
+                onClick={() => setConfirmingClose(false)}
+                disabled={closing}
+                className="border border-[#E0E0E0] bg-white px-3 py-1.5 text-xs text-[#3D3D3D] hover:border-madael-red"
+              >
+                Batal
+              </button>
+            </div>
+          </div>
+        )}
+
+        {ticket.status !== 'selesai' && !ticket.can_close && (
+          <p className="text-[11px] text-[#9A9A9A]">
+            Tombol &quot;Tandai Selesai&quot; muncul setelah tim support menjawab.
+          </p>
+        )}
       </div>
 
       <div className="px-4 py-3 space-y-3">
