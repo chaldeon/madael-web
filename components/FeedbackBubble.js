@@ -63,7 +63,7 @@ export default function FeedbackBubble() {
         <div
           role="dialog"
           aria-label="Pusat Bantuan"
-          className="print:hidden fixed right-4 sm:right-7 bottom-[156px] z-[1000] w-[380px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-180px)] flex flex-col bg-white border border-[#E0E0E0] border-t-4 border-t-madael-red shadow-[0_8px_30px_rgba(0,0,0,0.15)]"
+          className="print:hidden fixed right-4 sm:right-7 bottom-[92px] z-[1000] w-[380px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-116px)] flex flex-col bg-white border border-[#E0E0E0] border-t-4 border-t-madael-red shadow-[0_8px_30px_rgba(0,0,0,0.15)]"
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-[#E0E0E0]">
             {view === 'thread' ? (
@@ -107,7 +107,7 @@ export default function FeedbackBubble() {
         onClick={() => setOpen((o) => !o)}
         aria-label="Buka Pusat Bantuan"
         title="Bantuan & Feedback"
-        className="print:hidden fixed bottom-[92px] right-4 sm:right-7 w-[52px] h-[52px] bg-madael-red text-white rounded-full flex items-center justify-center shadow-[0_4px_16px_rgba(193,39,45,0.35)] cursor-pointer z-[998] transition-transform hover:scale-[1.08] hover:bg-madael-dark"
+        className="print:hidden fixed bottom-7 right-4 sm:right-7 w-[52px] h-[52px] bg-madael-red text-white rounded-full flex items-center justify-center shadow-[0_4px_16px_rgba(193,39,45,0.35)] cursor-pointer z-[998] transition-transform hover:scale-[1.08] hover:bg-madael-dark"
       >
         {open ? <X size={22} /> : <LifeBuoy size={24} />}
       </button>

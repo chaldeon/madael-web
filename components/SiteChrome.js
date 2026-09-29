@@ -25,7 +25,9 @@ export default function SiteChrome({ children }) {
       {!isEmployeeApp && <Navbar />}
       <main className="flex-1">{children}</main>
       <Footer />
-      <WAButton />
+      {/* Tombol konsultasi WhatsApp hanya untuk pengunjung publik; di area
+          employee posisinya dipakai bubble feedback (FeedbackBubble). */}
+      {!isEmployeeApp && <WAButton />}
     </>
   );
 }
