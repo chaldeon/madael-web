@@ -11,13 +11,9 @@ import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { formatRupiahOrDash } from '@/lib/format';
 
 const DOKUMEN_OPTIONS = ['KTP', 'PKWT', 'Ijazah', 'Lainnya'];
-
-function formatRupiah(value) {
-  if (value === null || value === undefined || value === '') return '-';
-  return 'Rp ' + Math.round(value).toLocaleString('id-ID');
-}
 
 function formatDate(value) {
   if (!value) return '-';
@@ -233,8 +229,8 @@ export default function EmployeeDetailPage() {
           <Field label="Status">{empMaster.status || '-'}</Field>
           <Field label="Klien">{clientName}</Field>
           <Field label="Posisi">{empMaster.posisi || '-'}</Field>
-          <Field label="Gaji Pokok">{formatRupiah(empMaster.gaji_pokok)}</Field>
-          <Field label="Total Tunjangan">{formatRupiah(totalTunjangan(empMaster))}</Field>
+          <Field label="Gaji Pokok">{formatRupiahOrDash(empMaster.gaji_pokok)}</Field>
+          <Field label="Total Tunjangan">{formatRupiahOrDash(totalTunjangan(empMaster))}</Field>
           <Field label="Jatah Cuti Tahunan">{empMaster.jatah_cuti_tahunan ?? 12} hari</Field>
           <Field label="Nama Rekening">{empMaster.nama_rekening || '-'}</Field>
           <Field label="No Rekening">{empMaster.no_rekening || '-'}</Field>

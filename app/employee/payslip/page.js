@@ -8,10 +8,7 @@ import { Receipt, ChevronRight } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
-
-function formatRupiah(value) {
-  return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
-}
+import { formatRupiah } from '@/lib/format';
 
 function calculateTHP(p) {
   const pendapatanTunai =

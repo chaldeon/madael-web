@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase-browser';
 import ExportCsvButton from '@/components/ExportCsvButton';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
+import { formatRupiah } from '@/lib/format';
 
 const MADAEL_RED = '#C1272D';
 const STATUS_COLOR = { Draft: '#9CA3AF', Review: '#F59E0B', Approved: '#16A34A' };
@@ -32,10 +33,6 @@ function last6Months() {
     out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
   }
   return out;
-}
-
-function formatRupiah(value) {
-  return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
 }
 
 function StatCard({ icon: Icon, label, value, subtext }) {

@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, AlertTriangle, CheckCircle2, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { hitungBPJS, hitungBrutoPPh21, hitungPPh21TER } from '@/lib/payroll/calculations';
 import { useModuleAccess } from '@/lib/useModuleAccess';
@@ -15,99 +15,9 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { computeSnapshot } from '@/lib/payroll/runSnapshot';
-
-const STATUS_OPTIONS = ['Draft', 'Review', 'Approved'];
-const STATUS_STYLE = {
-  Draft: 'bg-[#F3F4F6] text-[#4B5563]',
-  Review: 'bg-amber-100 text-amber-800',
-  Approved: 'bg-[#DCFCE7] text-[#166534]',
-};
-
-// Kolom yang bisa disortir. Overtime/Insentif/Kompensasi sengaja tidak
-// masuk karena kolom itu input aktif yang sedang diedit per baris.
-const SORT_COLUMNS = {
-  nama: { get: (i) => (i.employees_master?.nama || '').toLowerCase() },
-  posisi: { get: (i) => (i.employees_master?.posisi || '').toLowerCase() },
-  gaji_pokok: { get: (i) => Number(i.gaji_pokok) || 0 },
-  allowance: { get: (i) => Number(i.allowance) || 0 },
-  penalty: { get: (i) => Number(i.penalty) || 0 },
-  pph21: { get: (i) => Number(i.pph21) || 0 },
-  thp: { get: (i) => Number(i.take_home_pay) || 0 },
-};
-
-function SortableHeader({ colKey, label, sortField, sortDir, onSort, align }) {
-  const active = sortField === colKey;
-  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
-  return (
-    <th className={`px-4 py-3 font-medium ${align === 'right' ? 'text-right' : ''}`}>
-      <button
-        type="button"
-        onClick={() => onSort(colKey)}
-        className={`flex items-center gap-1.5 hover:text-black transition-colors ${align === 'right' ? 'ml-auto' : ''} ${active ? 'text-black' : ''}`}
-      >
-        {align === 'right' && <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />}
-        {label}
-        {align !== 'right' && <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />}
-      </button>
-    </th>
-  );
-}
-
-const MONTH_NAMES = [
-  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
-];
-
-function periodeLabel(periode) {
-  const [year, month] = (periode || '').split('-').map(Number);
-  const nama = MONTH_NAMES[(month || 1) - 1];
-  return nama ? `${nama} ${year}` : periode;
-}
-
-function formatRupiah(value) {
-  return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
-}
-
-// Sama seperti di employee/payroll (NumberField) — dipakai buat tampilkan
-// pemisah ribuan titik di input Overtime/Insentif/Kompensasi.
-function formatNumberDisplay(value) {
-  if (value === '' || value === null || value === undefined) return '';
-  const num = Number(value);
-  if (Number.isNaN(num)) return '';
-  return num.toLocaleString('id-ID');
-}
-
-// CSV manual, sama pendekatannya dengan Export rekap absensi (Task 12) — tanpa
-// dependency tambahan. Kolom generik dulu (nama rekening, no rekening,
-// nominal); format detail perlu dikonfirmasi Daniel sesuai bank tujuan.
-function toCsvValue(value) {
-  const str = String(value ?? '');
-  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
-  return str;
-}
-
-function downloadTransferCsv(items, periode) {
-  const header = ['Nama Karyawan', 'Nama Rekening', 'No Rekening', 'Nominal'];
-  const lines = [header.map(toCsvValue).join(',')];
-  items.forEach((item) => {
-    lines.push([
-      item.employees_master?.nama || '',
-      item.employees_master?.nama_rekening || '',
-      item.employees_master?.no_rekening || '',
-      item.take_home_pay,
-    ].map(toCsvValue).join(','));
-  });
-  const csvContent = '\uFEFF' + lines.join('\r\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `transfer-payroll-${periode}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
+import RunItemsTable from '@/components/payroll-run/RunItemsTable';
+import { STATUS_OPTIONS, STATUS_STYLE, SORT_COLUMNS, periodeLabel, downloadTransferCsv } from '@/lib/payrollRunConfig';
+import { formatRupiah } from '@/lib/format';
 
 export default function PayrollRunDetailPage() {
   const { runId } = useParams();
@@ -565,90 +475,17 @@ export default function PayrollRunDetailPage() {
           <EmptyState message="Belum ada item di payroll run ini." />
         </div>
       ) : (
-        <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
-          <p className="text-xs text-[#6B6B6B] px-4 pt-3">
-            Isi Overtime/Insentif/Kompensasi per employee lalu klik "Hitung Ulang" untuk update PPh21 & THP — sama seperti di Kelola Slip Gaji.
-          </p>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
-                <SortableHeader colKey="nama" label="Nama" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
-                <SortableHeader colKey="posisi" label="Posisi" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
-                <SortableHeader colKey="gaji_pokok" label="Gaji Pokok" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
-                <SortableHeader colKey="allowance" label="Allowance" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
-                <th className="px-4 py-3 font-medium text-right">Overtime</th>
-                <th className="px-4 py-3 font-medium text-right">Insentif</th>
-                <th className="px-4 py-3 font-medium text-right">Kompensasi</th>
-                <SortableHeader colKey="penalty" label="Penalty" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
-                <SortableHeader colKey="pph21" label="PPh21" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
-                <SortableHeader colKey="thp" label="THP" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
-                <th className="px-4 py-3 font-medium">Slip</th>
-                <th className="px-4 py-3 font-medium">Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedItems.map((item) => (
-                <tr key={item.id} className="border-b border-[#E0E0E0] last:border-0">
-                  <td className="px-4 py-3 text-black">{item.employees_master?.nama || '—'}</td>
-                  <td className="px-4 py-3 text-[#6B6B6B]">{item.employees_master?.posisi || '—'}</td>
-                  <td className="px-4 py-3 text-right text-[#6B6B6B]">{formatRupiah(item.gaji_pokok)}</td>
-                  <td className="px-4 py-3 text-right text-[#6B6B6B]">{formatRupiah(item.allowance)}</td>
-                  <td className="px-2 py-2 text-right">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      disabled={statusDraft === 'Approved'}
-                      value={formatNumberDisplay(getEditValue(item, 'overtime'))}
-                      onChange={(e) => setEditValue(item.id, 'overtime', e.target.value.replace(/[^\d]/g, ''))}
-                      className="w-24 border border-[#E0E0E0] px-2 py-1 text-right text-sm text-black disabled:bg-[#F4F4F4] disabled:text-[#9A9A9A]"
-                    />
-                  </td>
-                  <td className="px-2 py-2 text-right">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      disabled={statusDraft === 'Approved'}
-                      value={formatNumberDisplay(getEditValue(item, 'insentif'))}
-                      onChange={(e) => setEditValue(item.id, 'insentif', e.target.value.replace(/[^\d]/g, ''))}
-                      className="w-24 border border-[#E0E0E0] px-2 py-1 text-right text-sm text-black disabled:bg-[#F4F4F4] disabled:text-[#9A9A9A]"
-                    />
-                  </td>
-                  <td className="px-2 py-2 text-right">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      disabled={statusDraft === 'Approved'}
-                      value={formatNumberDisplay(getEditValue(item, 'kompensasi'))}
-                      onChange={(e) => setEditValue(item.id, 'kompensasi', e.target.value.replace(/[^\d]/g, ''))}
-                      className="w-24 border border-[#E0E0E0] px-2 py-1 text-right text-sm text-black disabled:bg-[#F4F4F4] disabled:text-[#9A9A9A]"
-                    />
-                  </td>
-                  <td className="px-4 py-3 text-right text-[#6B6B6B]">{formatRupiah(item.penalty)}</td>
-                  <td className="px-4 py-3 text-right text-[#6B6B6B]">{formatRupiah(item.pph21)}</td>
-                  <td className="px-4 py-3 text-right text-black font-medium">{formatRupiah(item.take_home_pay)}</td>
-                  <td className="px-4 py-3">
-                    {item.payslip_id ? (
-                      <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-[#DCFCE7] text-[#166534]">
-                        SUDAH ADA
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-[#9A9A9A]">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      disabled={statusDraft === 'Approved' || recalcSaving === item.id}
-                      onClick={() => recalcAndSaveItem(item)}
-                      className="text-xs text-madael-red hover:text-madael-dark font-medium disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
-                    >
-                      {recalcSaving === item.id ? 'Menghitung...' : 'Hitung Ulang'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <RunItemsTable
+          items={sortedItems}
+          sortField={sortField}
+          sortDir={sortDir}
+          onSort={handleSort}
+          locked={statusDraft === 'Approved'}
+          getEditValue={getEditValue}
+          setEditValue={setEditValue}
+          recalcSaving={recalcSaving}
+          onRecalc={recalcAndSaveItem}
+        />
       )}
 
       {items.some((i) => i.incomplete) && (

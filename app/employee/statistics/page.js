@@ -14,6 +14,7 @@ import {
 import { createClient } from '@/lib/supabase-browser';
 import ExportCsvButton from '@/components/ExportCsvButton';
 import { isTelatEfektif } from '@/lib/attendanceStatus';
+import { formatRupiah } from '@/lib/format';
 
 const PERIODS = [
   { value: 'weekly', label: 'Mingguan' },
@@ -55,10 +56,6 @@ function monthLabel(monthValue) {
     month: 'short',
     year: '2-digit',
   });
-}
-
-function formatRupiah(value) {
-  return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
 }
 
 function SummaryCard({ icon: Icon, label, value }) {

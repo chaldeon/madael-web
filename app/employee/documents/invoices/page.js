@@ -10,6 +10,7 @@ import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { formatRupiah } from '@/lib/format';
 
 const STATUS_OPTIONS = ['draft', 'terkirim', 'lunas'];
 const STATUS_LABEL = { draft: 'Draft', terkirim: 'Terkirim', lunas: 'Lunas' };
@@ -18,10 +19,6 @@ const STATUS_STYLES = {
   terkirim: 'bg-[#FEF3C7] text-[#92700C]',
   lunas: 'bg-[#DCFCE7] text-[#166534]',
 };
-
-function formatRupiah(value) {
-  return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
-}
 
 function formatTanggal(value) {
   if (!value) return '—';
