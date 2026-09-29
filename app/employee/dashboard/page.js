@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Lock, Megaphone, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { MODULE_REGISTRY } from '@/lib/employeeModules';
+import { MODULE_REGISTRY, EXPLICIT_ONLY_MODULES, isModuleGranted } from '@/lib/employeeModules';
 import EmployeeHeader from '@/components/EmployeeHeader';
 import QuickClockInCard from '@/components/QuickClockInCard';
 
@@ -131,13 +131,15 @@ export default function EmployeeDashboardPage() {
 
     setEmployee({ ...emp, companyName });
 
-    if (!emp.is_superadmin) {
-      const { data: mods } = await supabase
-        .from('employee_modules')
-        .select('module_name')
-        .eq('employee_id', emp.id);
-      setModuleKeys((mods || []).map((m) => m.module_name));
-    }
+    // Superadmin bypass semua modul kecuali EXPLICIT_ONLY_MODULES, jadi untuk
+    // mereka cukup ambil baris explicit-only saja.
+    let modsQuery = supabase
+      .from('employee_modules')
+      .select('module_name')
+      .eq('employee_id', emp.id);
+    if (emp.is_superadmin) modsQuery = modsQuery.in('module_name', EXPLICIT_ONLY_MODULES);
+    const { data: mods } = await modsQuery;
+    setModuleKeys((mods || []).map((m) => m.module_name));
 
     setLoading(false);
   }, [supabase, router]);
@@ -152,7 +154,7 @@ export default function EmployeeDashboardPage() {
     router.refresh();
   };
 
-  const hasAccess = (key) => employee?.is_superadmin || moduleKeys.includes(key);
+  const hasAccess = (key) => isModuleGranted({ isSuperadmin: !!employee?.is_superadmin, moduleKeys, key });
   const hasAnyAccess = (mod) => hasAccess(mod.key) || (mod.altKeys || []).some(hasAccess);
 
   if (loading) {
