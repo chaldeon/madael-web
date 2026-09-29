@@ -1,0 +1,1042 @@
+From 92d671f338d40f13a2068049b918be4c72cc2e80 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 29 Sep 2026 03:36:33 +0000
+Subject: [PATCH 3/3] refactor(employee): pecah list/page.js dan
+ absensi/karyawan/page.js (komponen, helper, konfigurasi dipindah ke modul
+ sendiri)
+
+---
+ app/employee/absensi/karyawan/page.js         | 169 +---------
+ app/employee/list/page.js                     | 302 +-----------------
+ components/SortableHeader.js                  |  23 ++
+ components/employee-list/CompanySelect.js     |  72 +++++
+ components/employee-list/CompletenessBadge.js |  25 ++
+ components/employee-list/RowActionsMenu.js    |  84 +++++
+ components/employee-list/SkeletonRows.js      |  23 ++
+ components/employee-list/Toast.js             |  42 +++
+ lib/absensiKaryawanConfig.js                  | 127 ++++++++
+ lib/employeeListConfig.js                     |  43 +++
+ 10 files changed, 463 insertions(+), 447 deletions(-)
+ create mode 100644 components/SortableHeader.js
+ create mode 100644 components/employee-list/CompanySelect.js
+ create mode 100644 components/employee-list/CompletenessBadge.js
+ create mode 100644 components/employee-list/RowActionsMenu.js
+ create mode 100644 components/employee-list/SkeletonRows.js
+ create mode 100644 components/employee-list/Toast.js
+ create mode 100644 lib/absensiKaryawanConfig.js
+ create mode 100644 lib/employeeListConfig.js
+
+diff --git a/app/employee/absensi/karyawan/page.js b/app/employee/absensi/karyawan/page.js
+index a337a42..a797679 100644
+--- a/app/employee/absensi/karyawan/page.js
++++ b/app/employee/absensi/karyawan/page.js
+@@ -4,16 +4,13 @@ export const dynamic = 'force-dynamic';
+ 
+ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+ import Link from 'next/link';
+-import {
+-  ArrowUp, ArrowDown, ArrowUpDown, Pencil, X, AlertTriangle,
+-  ExternalLink, Check, XCircle,
+-} from 'lucide-react';
++import { Pencil, X, AlertTriangle, ExternalLink, Check, XCircle } from 'lucide-react';
+ import { createClient } from '@/lib/supabase-browser';
+ import { useModuleAccess } from '@/lib/useModuleAccess';
+ import { useModalDismiss } from '@/lib/useModalDismiss';
+ import { logActivity } from '@/lib/activityLog';
+-import { hitungStatusTelat, isTelatEfektif, MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
+-import { jamJakarta } from '@/lib/serverTime';
++import { isTelatEfektif, MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
++
+ import LoadingState from '@/components/LoadingState';
+ import ErrorState from '@/components/ErrorState';
+ import EmptyState from '@/components/EmptyState';
+@@ -21,144 +18,10 @@ import LokasiKerjaManager from '@/components/LokasiKerjaManager';
+ import AbsensiReviewPanel from '@/components/AbsensiReviewPanel';
+ import AbsensiSettingsPanel from '@/components/AbsensiSettingsPanel';
+ import ShiftTemplateManager from '@/components/ShiftTemplateManager';
++import SortableHeader from '@/components/SortableHeader';
++import { parseToleransi, currentMonthValue, formatJam, formatTanggal, formatWaktu, countScheduledWorkdays, downloadRekapCsv, computeStatusTelat, HARI_OPTIONS, DEFAULT_HARI, EMPTY_JADWAL_FORM, JADWAL_SORT_COLUMNS, REKAP_SORT_COLUMNS, TABS } from '@/lib/absensiKaryawanConfig';
+ import { durasiMenit, formatDurasi, scheduleFieldsFromTemplate, shiftLabel } from '@/lib/shifts';
+ 
+-const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+-const HARI_OPTIONS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+-const DEFAULT_HARI = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
+-const EMPTY_JADWAL_FORM = { jam_masuk: '08:00', jam_pulang: '17:00', hari_kerja: DEFAULT_HARI, toleransi_menit: '0', shift_template_id: '' };
+-
+-// Validasi input Toleransi (menit): bilangan bulat 0..MAX. Return angka, atau null kalau tidak valid.
+-function parseToleransi(value) {
+-  const raw = String(value ?? '').trim();
+-  if (!/^\d+$/.test(raw)) return null;
+-  const n = Number(raw);
+-  return n >= 0 && n <= MAX_TOLERANSI_MENIT ? n : null;
+-}
+-
+-function currentMonthValue() {
+-  const d = new Date();
+-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+-}
+-
+-function formatJam(value) {
+-  return value ? value.slice(0, 5) : '—';
+-}
+-
+-function formatTanggal(value) {
+-  if (!value) return '—';
+-  return new Date(value + 'T00:00:00').toLocaleDateString('id-ID', {
+-    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+-  });
+-}
+-
+-function formatWaktu(iso) {
+-  if (!iso) return '—';
+-  return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+-}
+-
+-// Hitung jumlah hari kerja terjadwal dalam sebuah bulan, dibatasi sampai
+-// tanggal cutoff (hari ini, kalau bulan yang dipilih adalah bulan berjalan).
+-function countScheduledWorkdays(year, month, hariKerja, cutoffDate) {
+-  if (!hariKerja?.length) return 0;
+-  const lastDay = new Date(year, month, 0).getDate();
+-  const cutoff = cutoffDate < lastDay ? cutoffDate : lastDay;
+-  let count = 0;
+-  for (let day = 1; day <= cutoff; day++) {
+-    const date = new Date(year, month - 1, day);
+-    if (hariKerja.includes(HARI_LABEL[date.getDay()])) count++;
+-  }
+-  return count;
+-}
+-
+-function toCsvValue(value) {
+-  const str = String(value ?? '');
+-  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+-  return str;
+-}
+-
+-function downloadRekapCsv(rows, monthValue) {
+-  const header = ['Nama', 'Perusahaan', 'Total Hadir', 'Total Telat', 'Tidak Hadir'];
+-  const lines = [header.map(toCsvValue).join(',')];
+-  rows.forEach(({ emp, totalHadir, totalTelat, totalTidakHadir }) => {
+-    lines.push([
+-      emp.nama,
+-      emp.companies?.nama_perusahaan || '',
+-      totalHadir,
+-      totalTelat,
+-      totalTidakHadir === null ? '' : totalTidakHadir,
+-    ].map(toCsvValue).join(','));
+-  });
+-  const csvContent = '\uFEFF' + lines.join('\r\n');
+-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+-  const url = URL.createObjectURL(blob);
+-  const a = document.createElement('a');
+-  a.href = url;
+-  a.download = `rekap-absensi-${monthValue}.csv`;
+-  document.body.appendChild(a);
+-  a.click();
+-  document.body.removeChild(a);
+-  URL.revokeObjectURL(url);
+-}
+-
+-// Cocokkan jam clock-in (ISO) terhadap jadwal, untuk menentukan status telat
+-// saat approve koreksi (jadwal employee mungkin belum di-load di tab lain).
+-// Memakai aturan yang sama dengan API clock-in (jam masuk + toleransi_menit,
+-// waktu Jakarta), supaya koreksi yang disetujui tidak menghasilkan status
+-// telat yang berbeda dari clock-in biasa.
+-function computeStatusTelat(afterClockInIso, schedule) {
+-  if (!schedule || !afterClockInIso) return false;
+-  return hitungStatusTelat({
+-    jamClockIn: jamJakarta(new Date(afterClockInIso)),
+-    jamMasuk: schedule.jam_masuk,
+-    toleransiMenit: schedule.toleransi_menit,
+-  });
+-}
+-
+-const JADWAL_SORT_COLUMNS = {
+-  nama: { label: 'Nama', get: (r) => (r.emp.nama || '').toLowerCase() },
+-  perusahaan: { label: 'Perusahaan', get: (r) => (r.emp.companies?.nama_perusahaan || '').toLowerCase() },
+-  jam_masuk: { label: 'Jam Masuk', get: (r) => r.sched?.jam_masuk || '' },
+-  jam_pulang: { label: 'Jam Pulang', get: (r) => r.sched?.jam_pulang || '' },
+-  toleransi: { label: 'Toleransi', get: (r) => (r.sched ? Number(r.sched.toleransi_menit) || 0 : -1) },
+-  shift: { label: 'Shift', get: (r) => (r.sched ? r.shiftNama.toLowerCase() : '') },
+-};
+-
+-const REKAP_SORT_COLUMNS = {
+-  nama: { label: 'Nama', get: (r) => (r.emp.nama || '').toLowerCase() },
+-  perusahaan: { label: 'Perusahaan', get: (r) => (r.emp.companies?.nama_perusahaan || '').toLowerCase() },
+-  hadir: { label: 'Total Hadir', get: (r) => r.totalHadir },
+-  telat: { label: 'Total Telat', get: (r) => r.totalTelat },
+-  tidak_hadir: { label: 'Tidak Hadir', get: (r) => (r.totalTidakHadir === null ? -1 : r.totalTidakHadir) },
+-};
+-
+-function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
+-  const active = sortField === colKey;
+-  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+-  return (
+-    <th className="px-4 py-3 font-medium">
+-      <button
+-        type="button"
+-        onClick={() => onSort(colKey)}
+-        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
+-      >
+-        {label}
+-        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />
+-      </button>
+-    </th>
+-  );
+-}
+-
+-const TABS = [
+-  { key: 'jadwal', label: 'Jadwal Kerja' },
+-  { key: 'shift', label: 'Template Shift' },
+-  { key: 'koreksi', label: 'Approval Koreksi' },
+-  { key: 'review', label: 'Perlu Review' },
+-  { key: 'lokasi', label: 'Lokasi Kerja' },
+-  { key: 'rekap', label: 'Rekap Bulanan' },
+-  { key: 'pengaturan', label: 'Pengaturan' },
+-];
+-
+ export default function SemuaKaryawanPage() {
+   const supabase = createClient();
+   const { status, employee } = useModuleAccess('absensi_admin');
+@@ -951,12 +814,12 @@ export default function SemuaKaryawanPage() {
+                   <table className="w-full text-sm">
+                     <thead>
+                       <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
+-                        <SortableHeader colKey="nama" label="Nama" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+-                        <SortableHeader colKey="perusahaan" label="Perusahaan" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+-                        <SortableHeader colKey="shift" label="Shift" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+-                        <SortableHeader colKey="jam_masuk" label="Jam Masuk" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+-                        <SortableHeader colKey="jam_pulang" label="Jam Pulang" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+-                        <SortableHeader colKey="toleransi" label="Toleransi (menit)" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
++                        <SortableHeader className="px-4 py-3" colKey="nama" label="Nama" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
++                        <SortableHeader className="px-4 py-3" colKey="perusahaan" label="Perusahaan" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
++                        <SortableHeader className="px-4 py-3" colKey="shift" label="Shift" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
++                        <SortableHeader className="px-4 py-3" colKey="jam_masuk" label="Jam Masuk" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
++                        <SortableHeader className="px-4 py-3" colKey="jam_pulang" label="Jam Pulang" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
++                        <SortableHeader className="px-4 py-3" colKey="toleransi" label="Toleransi (menit)" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+                         <th className="px-4 py-3 font-medium">Hari Kerja</th>
+                         <th className="px-4 py-3 font-medium"></th>
+                       </tr>
+@@ -1038,11 +901,11 @@ export default function SemuaKaryawanPage() {
+                   <table className="w-full text-sm">
+                     <thead>
+                       <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
+-                        <SortableHeader colKey="nama" label="Nama" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+-                        <SortableHeader colKey="perusahaan" label="Perusahaan" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+-                        <SortableHeader colKey="hadir" label="Total Hadir" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+-                        <SortableHeader colKey="telat" label="Total Telat" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+-                        <SortableHeader colKey="tidak_hadir" label="Tidak Hadir" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
++                        <SortableHeader className="px-4 py-3" colKey="nama" label="Nama" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
++                        <SortableHeader className="px-4 py-3" colKey="perusahaan" label="Perusahaan" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
++                        <SortableHeader className="px-4 py-3" colKey="hadir" label="Total Hadir" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
++                        <SortableHeader className="px-4 py-3" colKey="telat" label="Total Telat" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
++                        <SortableHeader className="px-4 py-3" colKey="tidak_hadir" label="Tidak Hadir" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+                         <th className="px-4 py-3 font-medium"></th>
+                       </tr>
+                     </thead>
+diff --git a/app/employee/list/page.js b/app/employee/list/page.js
+index a643c94..a1c16be 100644
+--- a/app/employee/list/page.js
++++ b/app/employee/list/page.js
+@@ -2,304 +2,18 @@
+ 
+ import { useEffect, useState, useCallback, useRef } from 'react';
+ import Link from 'next/link';
+-import { X, ArrowUp, ArrowDown, ArrowUpDown, Upload, Download, ShieldCheck, Power, Trash2, Search, MoreVertical, AlertCircle, CheckCircle2, FileText } from 'lucide-react';
++import { X, Upload, Download, Power, Search } from 'lucide-react';
+ import { createClient } from '@/lib/supabase-browser';
+-import { getCompletenessInfo } from '@/lib/dataCompleteness';
+-import { MODULE_OPTIONS } from '@/lib/employeeModules';
+ import { nextEmployeeId } from '@/lib/employeeId';
+ import { useModuleAccess } from '@/lib/useModuleAccess';
+ import { useModalDismiss } from '@/lib/useModalDismiss';
+-
+-const emptyForm = {
+-  nama: '',
+-  employee_id: '',
+-  email: '',
+-  client_id: '',
+-  status: 'Aktif',
+-  is_superadmin: false,
+-};
+-
+-const TEMPLATE_URL = '/templates/template-bulk-employee.xlsx';
+-
+-// MODULE_OPTIONS itu list flat, tapi sub-permission-nya ditandai lewat
+-// prefix teks "— Sub: ..." pada label. Susun ulang jadi grup (modul utama +
+-// sub-modulnya) di sini, sekali saat load, supaya modal "Kelola Akses" bisa
+-// menampilkannya terindentasi/dikelompokkan alih-alih list checkbox lurus.
+-const SUB_PREFIX = '— Sub: ';
+-const MODULE_GROUPS = MODULE_OPTIONS.reduce((groups, mod) => {
+-  if (mod.label.startsWith(SUB_PREFIX)) {
+-    const parent = groups[groups.length - 1];
+-    const child = { ...mod, label: mod.label.slice(SUB_PREFIX.length) };
+-    if (parent) parent.children.push(child);
+-    else groups.push({ ...mod, label: child.label, children: [] }); // fallback kalau tidak ada parent di atasnya
+-  } else {
+-    groups.push({ ...mod, children: [] });
+-  }
+-  return groups;
+-}, []);
+-
+-// Pilihan ukuran halaman untuk pagination tabel Employee List.
+-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+-
+-// Banner notifikasi non-blocking — pengganti alert() supaya gayanya konsisten
+-// sama modal custom lain di halaman ini (bukan dialog browser native).
+-// Auto-dismiss setelah beberapa detik, tapi tetap bisa ditutup manual.
+-function Toast({ toast, onDismiss }) {
+-  useEffect(() => {
+-    if (!toast) return undefined;
+-    const t = setTimeout(onDismiss, toast.type === 'error' ? 6000 : 3500);
+-    return () => clearTimeout(t);
+-  }, [toast, onDismiss]);
+-
+-  if (!toast) return null;
+-  const isError = toast.type === 'error';
+-  return (
+-    <div
+-      role="status"
+-      aria-live="polite"
+-      className={`fixed top-5 right-5 z-[1100] max-w-[380px] flex items-start gap-2.5 px-4 py-3.5 shadow-lg border-l-4 bg-white ${
+-        isError ? 'border-madael-red' : 'border-[#166534]'
+-      }`}
+-    >
+-      {isError ? (
+-        <AlertCircle size={18} className="text-madael-red shrink-0 mt-0.5" />
+-      ) : (
+-        <CheckCircle2 size={18} className="text-[#166534] shrink-0 mt-0.5" />
+-      )}
+-      <p className="text-sm text-black flex-1">{toast.message}</p>
+-      <button
+-        type="button"
+-        onClick={onDismiss}
+-        aria-label="Tutup notifikasi"
+-        className="text-[#9A9A9A] hover:text-black shrink-0"
+-      >
+-        <X size={14} />
+-      </button>
+-    </div>
+-  );
+-}
+-
+-// Menu aksi per baris ("⋯") — pengganti 3 icon polos yang cuma punya title
+-// tooltip (tidak kebaca di layar sentuh). Klik di luar / Esc menutup menu.
+-function RowActionsMenu({ emp, canDelete, onManageAccess, onToggleStatus, onDelete, togglingThis }) {
+-  const [open, setOpen] = useState(false);
+-  const ref = useRef(null);
+-
+-  useEffect(() => {
+-    if (!open) return undefined;
+-    function handleClickOutside(e) {
+-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+-    }
+-    function handleEscape(e) {
+-      if (e.key === 'Escape') setOpen(false);
+-    }
+-    document.addEventListener('mousedown', handleClickOutside);
+-    document.addEventListener('touchstart', handleClickOutside);
+-    document.addEventListener('keydown', handleEscape);
+-    return () => {
+-      document.removeEventListener('mousedown', handleClickOutside);
+-      document.removeEventListener('touchstart', handleClickOutside);
+-      document.removeEventListener('keydown', handleEscape);
+-    };
+-  }, [open]);
+-
+-  const item = (label, Icon, onClick, extraClass = '') => (
+-    <button
+-      type="button"
+-      onClick={() => {
+-        setOpen(false);
+-        onClick();
+-      }}
+-      className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left hover:bg-[#F4F4F4] transition-colors ${extraClass}`}
+-    >
+-      <Icon size={14} />
+-      {label}
+-    </button>
+-  );
+-
+-  return (
+-    <div className="relative inline-block text-left" ref={ref}>
+-      <button
+-        type="button"
+-        onClick={() => setOpen((v) => !v)}
+-        aria-haspopup="menu"
+-        aria-expanded={open}
+-        aria-label={`Aksi untuk ${emp.nama}`}
+-        disabled={togglingThis}
+-        className="inline-flex p-1.5 text-[#6B6B6B] hover:text-black hover:bg-[#F4F4F4] transition-colors disabled:opacity-40"
+-      >
+-        <MoreVertical size={16} />
+-      </button>
+-      {open && (
+-        <div
+-          role="menu"
+-          className="absolute right-0 mt-1 w-52 bg-white border border-[#E0E0E0] shadow-lg z-20 py-1"
+-        >
+-          <Link
+-            href={`/employee/list/dokumen/${emp.id}`}
+-            onClick={() => setOpen(false)}
+-            role="menuitem"
+-            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left hover:bg-[#F4F4F4] transition-colors text-black"
+-          >
+-            <FileText size={14} />
+-            Lihat Dokumen
+-          </Link>
+-          {item('Kelola Akses', ShieldCheck, () => onManageAccess(emp), 'text-black')}
+-          {item(
+-            emp.status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan',
+-            Power,
+-            () => onToggleStatus(emp),
+-            emp.status === 'Aktif' ? 'text-madael-red' : 'text-[#166534]'
+-          )}
+-          {canDelete && item('Hapus Permanen', Trash2, () => onDelete(emp), 'text-madael-red')}
+-        </div>
+-      )}
+-    </div>
+-  );
+-}
+-
+-// Kolom yang bisa disortir + cara ambil value-nya dari row employee.
+-const SORT_COLUMNS = {
+-  nama: { label: 'Nama', get: (e) => (e.nama || '').toLowerCase() },
+-  employee_id: { label: 'Employee ID', get: (e) => e.employee_id || '' },
+-  email: { label: 'Email', get: (e) => (e.email || '').toLowerCase() },
+-  perusahaan: { label: 'Perusahaan', get: (e) => (e.companies?.nama_perusahaan || '').toLowerCase() },
+-  status: { label: 'Status', get: (e) => e.status || '' },
+-  is_superadmin: { label: 'Superadmin', get: (e) => (e.is_superadmin ? 1 : 0) },
+-};
+-
+-// Dropdown perusahaan (companies) + opsi tambah baru inline — dipakai di
+-// form Tambah & Edit Employee. Perusahaan baru langsung tersimpan ke
+-// `companies`, tabel yang sama dipakai Payroll Manager/CRM/dll.
+-function CompanySelect({ value, onChange, companies, onAddCompany, inputClass, labelClass }) {
+-  const [adding, setAdding] = useState(false);
+-  const [newName, setNewName] = useState('');
+-  const [saving, setSaving] = useState(false);
+-
+-  const handleAdd = async () => {
+-    if (!newName.trim()) return;
+-    setSaving(true);
+-    const id = await onAddCompany(newName);
+-    setSaving(false);
+-    if (id) {
+-      onChange(id);
+-      setAdding(false);
+-      setNewName('');
+-    }
+-  };
+-
+-  return (
+-    <div>
+-      <label className={labelClass}>Perusahaan</label>
+-      {!adding ? (
+-        <div className="flex gap-2">
+-          <select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>
+-            <option value="">— Pilih Perusahaan —</option>
+-            {companies.map((c) => (
+-              <option key={c.id} value={c.id}>{c.nama_perusahaan}</option>
+-            ))}
+-          </select>
+-          <button
+-            type="button"
+-            onClick={() => setAdding(true)}
+-            className="shrink-0 px-3 text-sm text-madael-red hover:text-madael-dark whitespace-nowrap"
+-          >
+-            + Baru
+-          </button>
+-        </div>
+-      ) : (
+-        <div className="flex gap-2">
+-          <input
+-            autoFocus
+-            value={newName}
+-            onChange={(e) => setNewName(e.target.value)}
+-            placeholder="Nama perusahaan baru"
+-            className={inputClass}
+-          />
+-          <button
+-            type="button"
+-            disabled={saving}
+-            onClick={handleAdd}
+-            className="shrink-0 px-3 text-sm bg-madael-red text-white hover:bg-madael-dark disabled:opacity-50"
+-          >
+-            {saving ? '...' : 'Simpan'}
+-          </button>
+-          <button
+-            type="button"
+-            onClick={() => { setAdding(false); setNewName(''); }}
+-            className="shrink-0 px-2 text-sm text-[#6B6B6B] hover:text-black"
+-          >
+-            Batal
+-          </button>
+-        </div>
+-      )}
+-    </div>
+-  );
+-}
+-
+-// Baris skeleton saat data awal masih dimuat — cuma dipakai untuk initial
+-// load (lihat `loading`), bukan untuk refresh-in-background setelah aksi
+-// (toggle status/tambah akses sudah update state lokal langsung, tanpa
+-// nge-refetch penuh, jadi tabel tidak perlu hilang lagi tiap ada aksi).
+-function SkeletonRows({ rows = 6 }) {
+-  return (
+-    <table className="w-full text-sm" aria-hidden="true">
+-      <tbody>
+-        {Array.from({ length: rows }).map((_, i) => (
+-          <tr key={i} className="border-b border-[#F0F0F0] last:border-0 animate-pulse">
+-            {Array.from({ length: 8 }).map((__, j) => (
+-              <td key={j} className="px-5 py-3.5">
+-                <div className="h-3 bg-[#EFEFEF] rounded-sm" style={{ width: j === 0 ? '70%' : '55%' }} />
+-              </td>
+-            ))}
+-          </tr>
+-        ))}
+-      </tbody>
+-    </table>
+-  );
+-}
+-
+-// Header kolom tabel yang bisa diklik buat sortir.
+-function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
+-  const active = sortField === colKey;
+-  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+-  const ariaSort = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+-  return (
+-    <th className="px-5 py-3 font-medium" aria-sort={ariaSort}>
+-      <button
+-        type="button"
+-        onClick={() => onSort(colKey)}
+-        aria-label={`Urutkan berdasarkan ${label}${active ? (sortDir === 'asc' ? ', sedang A-Z' : ', sedang Z-A') : ''}`}
+-        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
+-      >
+-        {label}
+-        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} aria-hidden="true" />
+-      </button>
+-    </th>
+-  );
+-}
+-
+-// Nonaktif tidak dinilai kelengkapannya — kosong di situ tidak relevan
+-// sampai diaktifkan lagi.
+-function CompletenessBadge({ emp, master, hasSchedule }) {
+-  if (emp.status !== 'Aktif') {
+-    return <span className="text-xs text-[#B0B0B0]">—</span>;
+-  }
+-  const info = getCompletenessInfo({ master, hasSchedule });
+-  const styles = {
+-    complete: 'bg-[#DCFCE7] text-[#166534]',
+-    warning: 'bg-amber-100 text-amber-800',
+-    critical: 'bg-red-100 text-red-700',
+-  };
+-  return (
+-    <span
+-      title={info.missing.length ? `Kosong: ${info.missing.join(', ')}` : undefined}
+-      className={`inline-block whitespace-nowrap text-xs font-medium px-2.5 py-1 ${styles[info.level]}`}
+-    >
+-      {info.label}
+-    </span>
+-  );
+-}
++import Toast from '@/components/employee-list/Toast';
++import RowActionsMenu from '@/components/employee-list/RowActionsMenu';
++import CompanySelect from '@/components/employee-list/CompanySelect';
++import SkeletonRows from '@/components/employee-list/SkeletonRows';
++import CompletenessBadge from '@/components/employee-list/CompletenessBadge';
++import SortableHeader from '@/components/SortableHeader';
++import { emptyForm, TEMPLATE_URL, MODULE_GROUPS, PAGE_SIZE_OPTIONS, SORT_COLUMNS } from '@/lib/employeeListConfig';
+ 
+ export default function EmployeeListPage() {
+   const supabase = createClient();
+diff --git a/components/SortableHeader.js b/components/SortableHeader.js
+new file mode 100644
+index 0000000..bc62bae
+--- /dev/null
++++ b/components/SortableHeader.js
+@@ -0,0 +1,23 @@
++'use client';
++
++import { ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
++
++// Header kolom tabel yang bisa diklik buat sortir.
++export default function SortableHeader({ colKey, label, sortField, sortDir, onSort, className = 'px-5 py-3' }) {
++  const active = sortField === colKey;
++  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
++  const ariaSort = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
++  return (
++    <th className={`${className} font-medium`} aria-sort={ariaSort}>
++      <button
++        type="button"
++        onClick={() => onSort(colKey)}
++        aria-label={`Urutkan berdasarkan ${label}${active ? (sortDir === 'asc' ? ', sedang A-Z' : ', sedang Z-A') : ''}`}
++        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
++      >
++        {label}
++        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} aria-hidden="true" />
++      </button>
++    </th>
++  );
++}
+diff --git a/components/employee-list/CompanySelect.js b/components/employee-list/CompanySelect.js
+new file mode 100644
+index 0000000..c1ce4ff
+--- /dev/null
++++ b/components/employee-list/CompanySelect.js
+@@ -0,0 +1,72 @@
++'use client';
++
++import { useState } from 'react';
++
++// Dropdown perusahaan (companies) + opsi tambah baru inline — dipakai di
++// form Tambah & Edit Employee. Perusahaan baru langsung tersimpan ke
++// `companies`, tabel yang sama dipakai Payroll Manager/CRM/dll.
++export default function CompanySelect({ value, onChange, companies, onAddCompany, inputClass, labelClass }) {
++  const [adding, setAdding] = useState(false);
++  const [newName, setNewName] = useState('');
++  const [saving, setSaving] = useState(false);
++
++  const handleAdd = async () => {
++    if (!newName.trim()) return;
++    setSaving(true);
++    const id = await onAddCompany(newName);
++    setSaving(false);
++    if (id) {
++      onChange(id);
++      setAdding(false);
++      setNewName('');
++    }
++  };
++
++  return (
++    <div>
++      <label className={labelClass}>Perusahaan</label>
++      {!adding ? (
++        <div className="flex gap-2">
++          <select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>
++            <option value="">— Pilih Perusahaan —</option>
++            {companies.map((c) => (
++              <option key={c.id} value={c.id}>{c.nama_perusahaan}</option>
++            ))}
++          </select>
++          <button
++            type="button"
++            onClick={() => setAdding(true)}
++            className="shrink-0 px-3 text-sm text-madael-red hover:text-madael-dark whitespace-nowrap"
++          >
++            + Baru
++          </button>
++        </div>
++      ) : (
++        <div className="flex gap-2">
++          <input
++            autoFocus
++            value={newName}
++            onChange={(e) => setNewName(e.target.value)}
++            placeholder="Nama perusahaan baru"
++            className={inputClass}
++          />
++          <button
++            type="button"
++            disabled={saving}
++            onClick={handleAdd}
++            className="shrink-0 px-3 text-sm bg-madael-red text-white hover:bg-madael-dark disabled:opacity-50"
++          >
++            {saving ? '...' : 'Simpan'}
++          </button>
++          <button
++            type="button"
++            onClick={() => { setAdding(false); setNewName(''); }}
++            className="shrink-0 px-2 text-sm text-[#6B6B6B] hover:text-black"
++          >
++            Batal
++          </button>
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/components/employee-list/CompletenessBadge.js b/components/employee-list/CompletenessBadge.js
+new file mode 100644
+index 0000000..2415cac
+--- /dev/null
++++ b/components/employee-list/CompletenessBadge.js
+@@ -0,0 +1,25 @@
++'use client';
++
++import { getCompletenessInfo } from '@/lib/dataCompleteness';
++
++// Nonaktif tidak dinilai kelengkapannya — kosong di situ tidak relevan
++// sampai diaktifkan lagi.
++export default function CompletenessBadge({ emp, master, hasSchedule }) {
++  if (emp.status !== 'Aktif') {
++    return <span className="text-xs text-[#B0B0B0]">—</span>;
++  }
++  const info = getCompletenessInfo({ master, hasSchedule });
++  const styles = {
++    complete: 'bg-[#DCFCE7] text-[#166534]',
++    warning: 'bg-amber-100 text-amber-800',
++    critical: 'bg-red-100 text-red-700',
++  };
++  return (
++    <span
++      title={info.missing.length ? `Kosong: ${info.missing.join(', ')}` : undefined}
++      className={`inline-block whitespace-nowrap text-xs font-medium px-2.5 py-1 ${styles[info.level]}`}
++    >
++      {info.label}
++    </span>
++  );
++}
+diff --git a/components/employee-list/RowActionsMenu.js b/components/employee-list/RowActionsMenu.js
+new file mode 100644
+index 0000000..06fe224
+--- /dev/null
++++ b/components/employee-list/RowActionsMenu.js
+@@ -0,0 +1,84 @@
++'use client';
++
++import { useEffect, useRef, useState } from 'react';
++import Link from 'next/link';
++import { MoreVertical, ShieldCheck, Power, Trash2, FileText } from 'lucide-react';
++
++// Menu aksi per baris ("⋯") — pengganti 3 icon polos yang cuma punya title
++// tooltip (tidak kebaca di layar sentuh). Klik di luar / Esc menutup menu.
++export default function RowActionsMenu({ emp, canDelete, onManageAccess, onToggleStatus, onDelete, togglingThis }) {
++  const [open, setOpen] = useState(false);
++  const ref = useRef(null);
++
++  useEffect(() => {
++    if (!open) return undefined;
++    function handleClickOutside(e) {
++      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
++    }
++    function handleEscape(e) {
++      if (e.key === 'Escape') setOpen(false);
++    }
++    document.addEventListener('mousedown', handleClickOutside);
++    document.addEventListener('touchstart', handleClickOutside);
++    document.addEventListener('keydown', handleEscape);
++    return () => {
++      document.removeEventListener('mousedown', handleClickOutside);
++      document.removeEventListener('touchstart', handleClickOutside);
++      document.removeEventListener('keydown', handleEscape);
++    };
++  }, [open]);
++
++  const item = (label, Icon, onClick, extraClass = '') => (
++    <button
++      type="button"
++      onClick={() => {
++        setOpen(false);
++        onClick();
++      }}
++      className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left hover:bg-[#F4F4F4] transition-colors ${extraClass}`}
++    >
++      <Icon size={14} />
++      {label}
++    </button>
++  );
++
++  return (
++    <div className="relative inline-block text-left" ref={ref}>
++      <button
++        type="button"
++        onClick={() => setOpen((v) => !v)}
++        aria-haspopup="menu"
++        aria-expanded={open}
++        aria-label={`Aksi untuk ${emp.nama}`}
++        disabled={togglingThis}
++        className="inline-flex p-1.5 text-[#6B6B6B] hover:text-black hover:bg-[#F4F4F4] transition-colors disabled:opacity-40"
++      >
++        <MoreVertical size={16} />
++      </button>
++      {open && (
++        <div
++          role="menu"
++          className="absolute right-0 mt-1 w-52 bg-white border border-[#E0E0E0] shadow-lg z-20 py-1"
++        >
++          <Link
++            href={`/employee/list/dokumen/${emp.id}`}
++            onClick={() => setOpen(false)}
++            role="menuitem"
++            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left hover:bg-[#F4F4F4] transition-colors text-black"
++          >
++            <FileText size={14} />
++            Lihat Dokumen
++          </Link>
++          {item('Kelola Akses', ShieldCheck, () => onManageAccess(emp), 'text-black')}
++          {item(
++            emp.status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan',
++            Power,
++            () => onToggleStatus(emp),
++            emp.status === 'Aktif' ? 'text-madael-red' : 'text-[#166534]'
++          )}
++          {canDelete && item('Hapus Permanen', Trash2, () => onDelete(emp), 'text-madael-red')}
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/components/employee-list/SkeletonRows.js b/components/employee-list/SkeletonRows.js
+new file mode 100644
+index 0000000..a2dbc69
+--- /dev/null
++++ b/components/employee-list/SkeletonRows.js
+@@ -0,0 +1,23 @@
++'use client';
++
++// Baris skeleton saat data awal masih dimuat — cuma dipakai untuk initial
++// load (lihat `loading`), bukan untuk refresh-in-background setelah aksi
++// (toggle status/tambah akses sudah update state lokal langsung, tanpa
++// nge-refetch penuh, jadi tabel tidak perlu hilang lagi tiap ada aksi).
++export default function SkeletonRows({ rows = 6 }) {
++  return (
++    <table className="w-full text-sm" aria-hidden="true">
++      <tbody>
++        {Array.from({ length: rows }).map((_, i) => (
++          <tr key={i} className="border-b border-[#F0F0F0] last:border-0 animate-pulse">
++            {Array.from({ length: 8 }).map((__, j) => (
++              <td key={j} className="px-5 py-3.5">
++                <div className="h-3 bg-[#EFEFEF] rounded-sm" style={{ width: j === 0 ? '70%' : '55%' }} />
++              </td>
++            ))}
++          </tr>
++        ))}
++      </tbody>
++    </table>
++  );
++}
+diff --git a/components/employee-list/Toast.js b/components/employee-list/Toast.js
+new file mode 100644
+index 0000000..70506a3
+--- /dev/null
++++ b/components/employee-list/Toast.js
+@@ -0,0 +1,42 @@
++'use client';
++
++import { useEffect } from 'react';
++import { X, AlertCircle, CheckCircle2 } from 'lucide-react';
++
++// Banner notifikasi non-blocking — pengganti alert() supaya gayanya konsisten
++// sama modal custom lain di halaman ini (bukan dialog browser native).
++// Auto-dismiss setelah beberapa detik, tapi tetap bisa ditutup manual.
++export default function Toast({ toast, onDismiss }) {
++  useEffect(() => {
++    if (!toast) return undefined;
++    const t = setTimeout(onDismiss, toast.type === 'error' ? 6000 : 3500);
++    return () => clearTimeout(t);
++  }, [toast, onDismiss]);
++
++  if (!toast) return null;
++  const isError = toast.type === 'error';
++  return (
++    <div
++      role="status"
++      aria-live="polite"
++      className={`fixed top-5 right-5 z-[1100] max-w-[380px] flex items-start gap-2.5 px-4 py-3.5 shadow-lg border-l-4 bg-white ${
++        isError ? 'border-madael-red' : 'border-[#166534]'
++      }`}
++    >
++      {isError ? (
++        <AlertCircle size={18} className="text-madael-red shrink-0 mt-0.5" />
++      ) : (
++        <CheckCircle2 size={18} className="text-[#166534] shrink-0 mt-0.5" />
++      )}
++      <p className="text-sm text-black flex-1">{toast.message}</p>
++      <button
++        type="button"
++        onClick={onDismiss}
++        aria-label="Tutup notifikasi"
++        className="text-[#9A9A9A] hover:text-black shrink-0"
++      >
++        <X size={14} />
++      </button>
++    </div>
++  );
++}
+diff --git a/lib/absensiKaryawanConfig.js b/lib/absensiKaryawanConfig.js
+new file mode 100644
+index 0000000..afbda7e
+--- /dev/null
++++ b/lib/absensiKaryawanConfig.js
+@@ -0,0 +1,127 @@
++// Helper murni & konfigurasi halaman Kelola Absensi Tim (app/employee/absensi/karyawan).
++// Dipindah dari page.js supaya file halaman fokus ke state & tampilan.
++
++import { hitungStatusTelat, MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
++import { jamJakarta } from '@/lib/serverTime';
++
++// Validasi input Toleransi (menit): bilangan bulat 0..MAX. Return angka, atau null kalau tidak valid.
++export function parseToleransi(value) {
++  const raw = String(value ?? '').trim();
++  if (!/^\d+$/.test(raw)) return null;
++  const n = Number(raw);
++  return n >= 0 && n <= MAX_TOLERANSI_MENIT ? n : null;
++}
++
++export function currentMonthValue() {
++  const d = new Date();
++  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
++}
++
++export function formatJam(value) {
++  return value ? value.slice(0, 5) : '—';
++}
++
++export function formatTanggal(value) {
++  if (!value) return '—';
++  return new Date(value + 'T00:00:00').toLocaleDateString('id-ID', {
++    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
++  });
++}
++
++export function formatWaktu(iso) {
++  if (!iso) return '—';
++  return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
++}
++
++// Hitung jumlah hari kerja terjadwal dalam sebuah bulan, dibatasi sampai
++// tanggal cutoff (hari ini, kalau bulan yang dipilih adalah bulan berjalan).
++export function countScheduledWorkdays(year, month, hariKerja, cutoffDate) {
++  if (!hariKerja?.length) return 0;
++  const lastDay = new Date(year, month, 0).getDate();
++  const cutoff = cutoffDate < lastDay ? cutoffDate : lastDay;
++  let count = 0;
++  for (let day = 1; day <= cutoff; day++) {
++    const date = new Date(year, month - 1, day);
++    if (hariKerja.includes(HARI_LABEL[date.getDay()])) count++;
++  }
++  return count;
++}
++
++export function toCsvValue(value) {
++  const str = String(value ?? '');
++  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
++  return str;
++}
++
++export function downloadRekapCsv(rows, monthValue) {
++  const header = ['Nama', 'Perusahaan', 'Total Hadir', 'Total Telat', 'Tidak Hadir'];
++  const lines = [header.map(toCsvValue).join(',')];
++  rows.forEach(({ emp, totalHadir, totalTelat, totalTidakHadir }) => {
++    lines.push([
++      emp.nama,
++      emp.companies?.nama_perusahaan || '',
++      totalHadir,
++      totalTelat,
++      totalTidakHadir === null ? '' : totalTidakHadir,
++    ].map(toCsvValue).join(','));
++  });
++  const csvContent = '\uFEFF' + lines.join('\r\n');
++  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
++  const url = URL.createObjectURL(blob);
++  const a = document.createElement('a');
++  a.href = url;
++  a.download = `rekap-absensi-${monthValue}.csv`;
++  document.body.appendChild(a);
++  a.click();
++  document.body.removeChild(a);
++  URL.revokeObjectURL(url);
++}
++
++// Cocokkan jam clock-in (ISO) terhadap jadwal, untuk menentukan status telat
++// saat approve koreksi (jadwal employee mungkin belum di-load di tab lain).
++// Memakai aturan yang sama dengan API clock-in (jam masuk + toleransi_menit,
++// waktu Jakarta), supaya koreksi yang disetujui tidak menghasilkan status
++// telat yang berbeda dari clock-in biasa.
++export function computeStatusTelat(afterClockInIso, schedule) {
++  if (!schedule || !afterClockInIso) return false;
++  return hitungStatusTelat({
++    jamClockIn: jamJakarta(new Date(afterClockInIso)),
++    jamMasuk: schedule.jam_masuk,
++    toleransiMenit: schedule.toleransi_menit,
++  });
++}
++
++export const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
++
++export const HARI_OPTIONS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
++
++export const DEFAULT_HARI = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
++
++export const EMPTY_JADWAL_FORM = { jam_masuk: '08:00', jam_pulang: '17:00', hari_kerja: DEFAULT_HARI, toleransi_menit: '0', shift_template_id: '' };
++
++export const JADWAL_SORT_COLUMNS = {
++  nama: { label: 'Nama', get: (r) => (r.emp.nama || '').toLowerCase() },
++  perusahaan: { label: 'Perusahaan', get: (r) => (r.emp.companies?.nama_perusahaan || '').toLowerCase() },
++  jam_masuk: { label: 'Jam Masuk', get: (r) => r.sched?.jam_masuk || '' },
++  jam_pulang: { label: 'Jam Pulang', get: (r) => r.sched?.jam_pulang || '' },
++  toleransi: { label: 'Toleransi', get: (r) => (r.sched ? Number(r.sched.toleransi_menit) || 0 : -1) },
++  shift: { label: 'Shift', get: (r) => (r.sched ? r.shiftNama.toLowerCase() : '') },
++};
++
++export const REKAP_SORT_COLUMNS = {
++  nama: { label: 'Nama', get: (r) => (r.emp.nama || '').toLowerCase() },
++  perusahaan: { label: 'Perusahaan', get: (r) => (r.emp.companies?.nama_perusahaan || '').toLowerCase() },
++  hadir: { label: 'Total Hadir', get: (r) => r.totalHadir },
++  telat: { label: 'Total Telat', get: (r) => r.totalTelat },
++  tidak_hadir: { label: 'Tidak Hadir', get: (r) => (r.totalTidakHadir === null ? -1 : r.totalTidakHadir) },
++};
++
++export const TABS = [
++  { key: 'jadwal', label: 'Jadwal Kerja' },
++  { key: 'shift', label: 'Template Shift' },
++  { key: 'koreksi', label: 'Approval Koreksi' },
++  { key: 'review', label: 'Perlu Review' },
++  { key: 'lokasi', label: 'Lokasi Kerja' },
++  { key: 'rekap', label: 'Rekap Bulanan' },
++  { key: 'pengaturan', label: 'Pengaturan' },
++];
+diff --git a/lib/employeeListConfig.js b/lib/employeeListConfig.js
+new file mode 100644
+index 0000000..2001dbd
+--- /dev/null
++++ b/lib/employeeListConfig.js
+@@ -0,0 +1,43 @@
++import { MODULE_OPTIONS } from '@/lib/employeeModules';
++
++export const emptyForm = {
++  nama: '',
++  employee_id: '',
++  email: '',
++  client_id: '',
++  status: 'Aktif',
++  is_superadmin: false,
++};
++
++export const TEMPLATE_URL = '/templates/template-bulk-employee.xlsx';
++
++// MODULE_OPTIONS itu list flat, tapi sub-permission-nya ditandai lewat
++// prefix teks "— Sub: ..." pada label. Susun ulang jadi grup (modul utama +
++// sub-modulnya) di sini, sekali saat load, supaya modal "Kelola Akses" bisa
++// menampilkannya terindentasi/dikelompokkan alih-alih list checkbox lurus.
++export const SUB_PREFIX = '— Sub: ';
++
++export const MODULE_GROUPS = MODULE_OPTIONS.reduce((groups, mod) => {
++  if (mod.label.startsWith(SUB_PREFIX)) {
++    const parent = groups[groups.length - 1];
++    const child = { ...mod, label: mod.label.slice(SUB_PREFIX.length) };
++    if (parent) parent.children.push(child);
++    else groups.push({ ...mod, label: child.label, children: [] }); // fallback kalau tidak ada parent di atasnya
++  } else {
++    groups.push({ ...mod, children: [] });
++  }
++  return groups;
++}, []);
++
++// Pilihan ukuran halaman untuk pagination tabel Employee List.
++export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
++
++// Kolom yang bisa disortir + cara ambil value-nya dari row employee.
++export const SORT_COLUMNS = {
++  nama: { label: 'Nama', get: (e) => (e.nama || '').toLowerCase() },
++  employee_id: { label: 'Employee ID', get: (e) => e.employee_id || '' },
++  email: { label: 'Email', get: (e) => (e.email || '').toLowerCase() },
++  perusahaan: { label: 'Perusahaan', get: (e) => (e.companies?.nama_perusahaan || '').toLowerCase() },
++  status: { label: 'Status', get: (e) => e.status || '' },
++  is_superadmin: { label: 'Superadmin', get: (e) => (e.is_superadmin ? 1 : 0) },
++};
+-- 
+2.43.0
+
