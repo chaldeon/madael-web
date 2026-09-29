@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { getSessionEmployee } from '@/lib/sessionEmployee';
 import { todayJakarta } from '@/lib/serverTime';
-import { saveClock, isValidFotoPath } from '@/lib/attendanceClock';
+import { saveClock } from '@/lib/attendanceClock';
+import { resolveFotoRef } from '@/lib/attendanceFotoRef';
 import { verifyConfirmToken } from '@/lib/attendanceConfirmToken';
 
 // POST /api/attendance/clock/confirm
@@ -64,11 +65,11 @@ export async function POST(request) {
 
     // Token lama (sebelum fitur QR) tidak punya `metode` -> dianggap foto.
     const metode = p.metode === 'qr' ? 'qr' : 'foto';
-    const fotoPath = metode === 'qr' ? null : fotoPathBody;
-
-    if (!isValidFotoPath(fotoPath, emp.id)) {
-      return NextResponse.json({ error: 'Path foto tidak valid.' }, { status: 400 });
+    const foto = resolveFotoRef(metode === 'qr' ? null : fotoPathBody, emp.id);
+    if (!foto.ok) {
+      return NextResponse.json({ error: 'Referensi foto tidak valid.' }, { status: 400 });
     }
+    const fotoPath = foto.value; // 'drive:<id>' | path Supabase lama | null
 
     const admin = createAdminClient();
     const now = new Date(p.t); // jam saat preview (server), bukan sekarang

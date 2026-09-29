@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase-admin';
 import { getSessionEmployee } from '@/lib/sessionEmployee';
 import { todayJakarta } from '@/lib/serverTime';
 import { evaluateClock, saveClock, toGeo } from '@/lib/attendanceClock';
+import { resolveFotoRef } from '@/lib/attendanceFotoRef';
 
 // POST /api/attendance/clock
 // Clock in/out karyawan, SIMPAN LANGSUNG. Dipakai kalau layar konfirmasi
@@ -35,7 +36,7 @@ export async function POST(request) {
     }
     const { mode, lat, lng, descriptor } = body;
     const qr = typeof body.qr === 'string' && body.qr ? body.qr : null;
-    const fotoPath = qr ? null : (body.fotoPath ?? null);
+    const fotoRaw = qr ? null : (body.fotoPath ?? null);
 
     if (mode !== 'in' && mode !== 'out') {
       return NextResponse.json({ error: 'mode harus "in" atau "out".' }, { status: 400 });
@@ -52,6 +53,14 @@ export async function POST(request) {
       return NextResponse.json({ error: session.error }, { status: session.status });
     }
     const { emp } = session;
+
+    // Sebelumnya route ini menyimpan fotoPath apa adanya. Sekarang divalidasi sama
+    // seperti /confirm: hanya referensi foto bertanda tangan milik karyawan ini.
+    const foto = resolveFotoRef(fotoRaw, emp.id);
+    if (!foto.ok) {
+      return NextResponse.json({ error: 'Referensi foto tidak valid.' }, { status: 400 });
+    }
+    const fotoPath = foto.value;
 
     const admin = createAdminClient();
     const now = new Date();
