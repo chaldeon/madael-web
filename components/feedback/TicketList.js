@@ -68,10 +68,15 @@ export default function TicketList({ onOpen }) {
                   </span>
                   <StatusBadge status={t.status} />
                 </div>
-                <p className="text-sm text-black line-clamp-2">{t.ringkasan}</p>
-                <p className="text-[11px] text-[#9A9A9A] mt-1">
-                  {t.last_staff_nama ? `Dijawab oleh: ${t.last_staff_nama} · ` : ''}
-                  {formatWaktu(t.updated_at)}
+                <p className={`text-sm text-black line-clamp-2 ${t.user_unread ? 'font-medium' : ''}`}>{t.ringkasan}</p>
+                <p className="text-[11px] text-[#9A9A9A] mt-1 flex items-center gap-1.5">
+                  {t.user_unread && (
+                    <span className="inline-block w-2 h-2 rounded-full bg-madael-red shrink-0" aria-label="Balasan baru" />
+                  )}
+                  <span>
+                    {t.last_staff_nama ? `Dijawab oleh: ${t.last_staff_nama} · ` : ''}
+                    {formatWaktu(t.updated_at)}
+                  </span>
                 </p>
               </button>
             </li>

@@ -1,0 +1,1044 @@
+diff --git a/app/api/feedback/admin/tickets/[id]/messages/route.js b/app/api/feedback/admin/tickets/[id]/messages/route.js
+new file mode 100644
+index 0000000..48f71d3
+--- /dev/null
++++ b/app/api/feedback/admin/tickets/[id]/messages/route.js
+@@ -0,0 +1,58 @@
++import { NextResponse } from 'next/server';
++import {
++  isUuid, readFile, readIsi, requireSupportAccess, validateIsi, validateFile,
++  uploadAttachment, discardUploaded,
++} from '@/lib/feedbackServer';
++
++// POST /api/feedback/admin/tickets/[id]/messages — balasan staff (multipart: isi, file?).
++// Nama yang tampil ke user ('Dijawab oleh') diisi trigger DB dari employees.nama
++// akun yang sedang login — tidak bisa diisi/dipalsukan dari request. Pesan
++// tidak bisa diedit/dihapus setelah terkirim. Balasan pertama pada tiket 'baru'
++// otomatis mengubahnya jadi 'diproses' (trigger DB).
++export async function POST(request, { params }) {
++  let admin;
++  let att = null;
++  try {
++    const { id } = await params;
++    if (!isUuid(id)) return NextResponse.json({ error: 'Tiket tidak ditemukan.' }, { status: 404 });
++
++    const gate = await requireSupportAccess();
++    if (gate.error) return NextResponse.json({ error: gate.error }, { status: gate.status });
++    ({ admin } = gate);
++    const { emp } = gate;
++
++    const { data: ticket } = await admin.from('feedback_tickets').select('id').eq('id', id).maybeSingle();
++    if (!ticket) return NextResponse.json({ error: 'Tiket tidak ditemukan.' }, { status: 404 });
++
++    const form = await request.formData();
++    const isi = readIsi(form);
++    const file = readFile(form);
++    const invalid = validateIsi(isi) || validateFile(file);
++    if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
++
++    if (file) att = await uploadAttachment(admin, emp.id, file);
++
++    const { error } = await admin.from('feedback_messages').insert([{
++      ticket_id: id,
++      author_id: emp.id,
++      author_nama: emp.nama,
++      is_staff: true,
++      isi,
++      attachment_path: att?.path ?? null,
++      attachment_name: att?.name ?? null,
++      attachment_mime: att?.mime ?? null,
++    }]);
++
++    if (error) {
++      console.error('Support reply error:', error);
++      await discardUploaded(admin, att);
++      return NextResponse.json({ error: 'Gagal mengirim balasan. Coba lagi.' }, { status: 500 });
++    }
++
++    return NextResponse.json({ success: true }, { status: 201 });
++  } catch (err) {
++    console.error('Support reply error:', err);
++    if (admin) await discardUploaded(admin, att);
++    return NextResponse.json({ error: 'Terjadi kesalahan server.' }, { status: 500 });
++  }
++}
+diff --git a/app/api/feedback/admin/tickets/[id]/route.js b/app/api/feedback/admin/tickets/[id]/route.js
+new file mode 100644
+index 0000000..c16a59e
+--- /dev/null
++++ b/app/api/feedback/admin/tickets/[id]/route.js
+@@ -0,0 +1,85 @@
++import { NextResponse } from 'next/server';
++import { logActivity } from '@/lib/activityLog';
++import { isUuid, requireSupportAccess, withSignedUrls } from '@/lib/feedbackServer';
++
++const STATUSES = ['baru', 'diproses', 'selesai'];
++
++// GET /api/feedback/admin/tickets/[id] — detail tiket + seluruh pesan (urut waktu).
++export async function GET(request, { params }) {
++  try {
++    const { id } = await params;
++    if (!isUuid(id)) return NextResponse.json({ error: 'Tiket tidak ditemukan.' }, { status: 404 });
++
++    const gate = await requireSupportAccess();
++    if (gate.error) return NextResponse.json({ error: gate.error }, { status: gate.status });
++    const { admin, emp } = gate;
++
++    const { data: ticket } = await admin
++      .from('feedback_tickets')
++      .select('id, ticket_no, employee_nama, jenis, modul_label, halaman, status, last_staff_nama, created_at, updated_at, closed_at')
++      .eq('id', id)
++      .maybeSingle();
++    if (!ticket) return NextResponse.json({ error: 'Tiket tidak ditemukan.' }, { status: 404 });
++
++    const { data: messages, error } = await admin
++      .from('feedback_messages')
++      .select('id, author_nama, is_staff, isi, attachment_path, attachment_name, attachment_mime, created_at')
++      .eq('ticket_id', id)
++      .order('created_at', { ascending: true });
++    if (error) return NextResponse.json({ error: 'Gagal memuat pesan.' }, { status: 500 });
++
++    const signed = await withSignedUrls(admin, messages || []);
++    const safe = signed.map(({ attachment_path, ...rest }) => rest);
++    // viewer_nama: nama yang akan tampil ke user sebagai 'Dijawab oleh'
++    return NextResponse.json({ ticket, messages: safe, viewer_nama: emp.nama });
++  } catch (err) {
++    console.error('Support detail error:', err);
++    return NextResponse.json({ error: 'Terjadi kesalahan server.' }, { status: 500 });
++  }
++}
++
++// PATCH /api/feedback/admin/tickets/[id] — ubah status: { status: 'baru'|'diproses'|'selesai' }.
++// Hanya status yang berubah (trigger di DB mengunci kolom lain); 'selesai' cuma
++// memindahkan tiket ke Riwayat, bukan menghapus.
++export async function PATCH(request, { params }) {
++  try {
++    const { id } = await params;
++    if (!isUuid(id)) return NextResponse.json({ error: 'Tiket tidak ditemukan.' }, { status: 404 });
++
++    const gate = await requireSupportAccess();
++    if (gate.error) return NextResponse.json({ error: gate.error }, { status: gate.status });
++    const { admin, emp } = gate;
++
++    const body = await request.json().catch(() => ({}));
++    if (!STATUSES.includes(body?.status)) {
++      return NextResponse.json({ error: 'Status tidak valid.' }, { status: 400 });
++    }
++
++    const { data: ticket } = await admin
++      .from('feedback_tickets')
++      .select('id, ticket_no, status')
++      .eq('id', id)
++      .maybeSingle();
++    if (!ticket) return NextResponse.json({ error: 'Tiket tidak ditemukan.' }, { status: 404 });
++    if (ticket.status === body.status) return NextResponse.json({ success: true });
++
++    const { error } = await admin.from('feedback_tickets').update({ status: body.status }).eq('id', id);
++    if (error) {
++      console.error('Support status error:', error);
++      return NextResponse.json({ error: 'Gagal mengubah status.' }, { status: 500 });
++    }
++
++    await logActivity(admin, {
++      userId: emp.id,
++      aksi: 'ubah_status_tiket_feedback',
++      targetTable: 'feedback_tickets',
++      targetId: id,
++      detail: { ticket_no: ticket.ticket_no, dari: ticket.status, ke: body.status },
++    });
++
++    return NextResponse.json({ success: true });
++  } catch (err) {
++    console.error('Support status error:', err);
++    return NextResponse.json({ error: 'Terjadi kesalahan server.' }, { status: 500 });
++  }
++}
+diff --git a/app/api/feedback/admin/tickets/route.js b/app/api/feedback/admin/tickets/route.js
+new file mode 100644
+index 0000000..327ad6a
+--- /dev/null
++++ b/app/api/feedback/admin/tickets/route.js
+@@ -0,0 +1,64 @@
++import { NextResponse } from 'next/server';
++import { FEEDBACK_MODULES } from '@/lib/feedbackConfig';
++import { requireSupportAccess } from '@/lib/feedbackServer';
++
++const PAGE_SIZE = 30;
++const STATUSES = ['baru', 'diproses', 'selesai'];
++const MODUL_KEYS = FEEDBACK_MODULES.map((m) => m.key);
++
++// GET /api/feedback/admin/tickets?status=aktif|baru|diproses|selesai&modul=<key|all>&page=1
++// Antrean tiket semua user. Tiket 'selesai' tetap ada (tab Riwayat), tidak dihapus.
++export async function GET(request) {
++  try {
++    const gate = await requireSupportAccess();
++    if (gate.error) return NextResponse.json({ error: gate.error }, { status: gate.status });
++    const { admin } = gate;
++
++    const { searchParams } = new URL(request.url);
++    const status = searchParams.get('status') || 'aktif';
++    const modul = searchParams.get('modul') || 'all';
++    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
++
++    if (status !== 'aktif' && !STATUSES.includes(status)) {
++      return NextResponse.json({ error: 'Filter status tidak valid.' }, { status: 400 });
++    }
++    if (modul !== 'all' && !MODUL_KEYS.includes(modul)) {
++      return NextResponse.json({ error: 'Filter modul tidak valid.' }, { status: 400 });
++    }
++
++    let list = admin
++      .from('feedback_tickets')
++      .select('id, ticket_no, employee_nama, jenis, modul_label, ringkasan, status, last_staff_nama, created_at, updated_at', { count: 'exact' });
++    list = status === 'aktif' ? list.in('status', ['baru', 'diproses']) : list.eq('status', status);
++    if (modul !== 'all') list = list.eq('modul', modul);
++    list = list
++      .order('updated_at', { ascending: false })
++      .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
++
++    // Jumlah per status (ikut filter modul) untuk label tab/chip.
++    const countFor = (s) => {
++      let q = admin.from('feedback_tickets').select('id', { count: 'exact', head: true }).eq('status', s);
++      if (modul !== 'all') q = q.eq('modul', modul);
++      return q;
++    };
++
++    const [listRes, baru, diproses, selesai] = await Promise.all([
++      list, countFor('baru'), countFor('diproses'), countFor('selesai'),
++    ]);
++
++    if (listRes.error) {
++      console.error('Support list error:', listRes.error);
++      return NextResponse.json({ error: 'Gagal memuat tiket.' }, { status: 500 });
++    }
++
++    return NextResponse.json({
++      tickets: listRes.data || [],
++      total: listRes.count || 0,
++      pageSize: PAGE_SIZE,
++      counts: { baru: baru.count || 0, diproses: diproses.count || 0, selesai: selesai.count || 0 },
++    });
++  } catch (err) {
++    console.error('Support list error:', err);
++    return NextResponse.json({ error: 'Terjadi kesalahan server.' }, { status: 500 });
++  }
++}
+diff --git a/app/employee/activity-log/page.js b/app/employee/activity-log/page.js
+index 59141d4..5380a16 100644
+--- a/app/employee/activity-log/page.js
++++ b/app/employee/activity-log/page.js
+@@ -25,6 +25,7 @@ const AKSI_LABEL = {
+   ubah_status_payroll: 'Ubah Status Payroll',
+   edit_struktur_gaji: 'Edit Struktur Gaji',
+   tambah_employee_master: 'Tambah Employee Master',
++  ubah_status_tiket_feedback: 'Ubah Status Tiket Feedback',
+ };
+ 
+ function formatWaktu(value) {
+diff --git a/app/employee/support/layout.js b/app/employee/support/layout.js
+new file mode 100644
+index 0000000..e1faa68
+--- /dev/null
++++ b/app/employee/support/layout.js
+@@ -0,0 +1,61 @@
++'use client';
++
++import { useRouter } from 'next/navigation';
++import Link from 'next/link';
++import { createClient } from '@/lib/supabase-browser';
++import { useModuleAccess } from '@/lib/useModuleAccess';
++import LoadingState from '@/components/LoadingState';
++import EmployeeHeader from '@/components/EmployeeHeader';
++
++export default function SupportLayout({ children }) {
++  const router = useRouter();
++  const supabase = createClient();
++  // 'support_access' explicit-only: superadmin pun harus di-assign lewat Kelola Akses.
++  // Gate sebenarnya ada di API (requireSupportAccess); ini cuma menyembunyikan halamannya.
++  const { status } = useModuleAccess('support_access');
++
++  const handleLogout = async () => {
++    await supabase.auth.signOut();
++    router.push('/employee/login');
++    router.refresh();
++  };
++
++  if (status === 'loading') {
++    return (
++      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
++        <LoadingState label="Memuat..." />
++      </section>
++    );
++  }
++
++  if (status === 'denied') {
++    return (
++      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
++        <div className="w-full max-w-[420px] border-t-4 border-madael-red bg-white p-8 text-center">
++          <p className="text-sm text-black mb-6">Halaman ini khusus akun dengan Akses Support.</p>
++          <Link
++            href="/employee/dashboard"
++            className="inline-block bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
++          >
++            Kembali ke Dashboard
++          </Link>
++        </div>
++      </section>
++    );
++  }
++
++  return (
++    <section className="min-h-screen bg-[#F4F4F4]">
++      <EmployeeHeader
++        onLogout={handleLogout}
++        subnav={
++          <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
++            ← Dashboard
++          </Link>
++        }
++      />
++
++      {children}
++    </section>
++  );
++}
+diff --git a/app/employee/support/page.js b/app/employee/support/page.js
+new file mode 100644
+index 0000000..3fe98e5
+--- /dev/null
++++ b/app/employee/support/page.js
+@@ -0,0 +1,152 @@
++'use client';
++
++export const dynamic = 'force-dynamic';
++
++import { useCallback, useEffect, useRef, useState } from 'react';
++import { LifeBuoy } from 'lucide-react';
++import { FEEDBACK_MODULES } from '@/lib/feedbackConfig';
++import LoadingState from '@/components/LoadingState';
++import ErrorState from '@/components/ErrorState';
++import EmptyState from '@/components/EmptyState';
++import { api } from '@/components/feedback/parts';
++import TicketQueue from '@/components/feedback/admin/TicketQueue';
++import TicketDetail from '@/components/feedback/admin/TicketDetail';
++
++const selectClass =
++  'border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
++
++export default function SupportPage() {
++  const [tab, setTab] = useState('aktif'); // 'aktif' | 'riwayat'
++  const [statusFilter, setStatusFilter] = useState('semua'); // 'semua' | 'baru' | 'diproses' (tab aktif)
++  const [modul, setModul] = useState('all');
++  const [page, setPage] = useState(1);
++  const [selectedId, setSelectedId] = useState(null);
++
++  const [data, setData] = useState(null);
++  const [error, setError] = useState('');
++  const [loading, setLoading] = useState(true);
++  const reqRef = useRef(0);
++
++  const apiStatus = tab === 'riwayat' ? 'selesai' : statusFilter === 'semua' ? 'aktif' : statusFilter;
++
++  const load = useCallback(async () => {
++    const req = ++reqRef.current;
++    setLoading(true);
++    setError('');
++    const qs = new URLSearchParams({ status: apiStatus, modul, page: String(page) });
++    const res = await api(`/api/feedback/admin/tickets?${qs}`);
++    if (req !== reqRef.current) return; // respons basi (filter sudah berubah lagi)
++    setLoading(false);
++    if (!res.ok) {
++      setError(res.error);
++      return;
++    }
++    // Halaman terakhir jadi kosong (mis. setelah tiket dipindah ke Riwayat): balik ke halaman 1.
++    if (res.data.tickets.length === 0 && page > 1) {
++      setPage(1);
++      return;
++    }
++    setData(res.data);
++  }, [apiStatus, modul, page]);
++
++  useEffect(() => {
++    load();
++  }, [load]);
++
++  const changeTab = (next) => { setTab(next); setPage(1); };
++  const changeStatus = (next) => { setStatusFilter(next); setPage(1); };
++  const changeModul = (next) => { setModul(next); setPage(1); };
++
++  const counts = data?.counts || { baru: 0, diproses: 0, selesai: 0 };
++  const tabs = [
++    ['aktif', `Aktif (${counts.baru + counts.diproses})`],
++    ['riwayat', `Riwayat (${counts.selesai})`],
++  ];
++  const chips = [
++    ['semua', 'Semua'],
++    ['baru', `Baru (${counts.baru})`],
++    ['diproses', `Diproses (${counts.diproses})`],
++  ];
++
++  return (
++    <div className="max-w-[1200px] mx-auto px-6 md:px-10 py-10">
++      <div className="flex items-center gap-2 mb-1">
++        <LifeBuoy size={18} className="text-madael-red" />
++        <h1 className="text-2xl font-semibold text-black">Pusat Bantuan</h1>
++      </div>
++      <p className="text-sm text-[#6B6B6B] mb-6">
++        Tiket feedback dari pengguna. Tiket yang selesai dipindah ke Riwayat, tidak dihapus.
++      </p>
++
++      <div className="flex flex-wrap items-center gap-3 mb-4">
++        <div className="flex border border-[#E0E0E0] bg-white">
++          {tabs.map(([key, label]) => (
++            <button
++              key={key}
++              onClick={() => changeTab(key)}
++              className={`px-4 py-2 text-sm ${tab === key ? 'bg-madael-red text-white' : 'text-[#3D3D3D] hover:bg-[#F4F4F4]'}`}
++            >
++              {label}
++            </button>
++          ))}
++        </div>
++
++        {tab === 'aktif' && (
++          <div className="flex gap-2">
++            {chips.map(([key, label]) => (
++              <button
++                key={key}
++                onClick={() => changeStatus(key)}
++                className={`px-3 py-1.5 text-xs border transition-colors ${
++                  statusFilter === key
++                    ? 'border-madael-red text-madael-red bg-white'
++                    : 'border-[#E0E0E0] text-[#6B6B6B] bg-white hover:border-madael-red'
++                }`}
++              >
++                {label}
++              </button>
++            ))}
++          </div>
++        )}
++
++        <select value={modul} onChange={(e) => changeModul(e.target.value)} className={`${selectClass} ml-auto`}>
++          <option value="all">Semua Modul</option>
++          {FEEDBACK_MODULES.map((m) => (
++            <option key={m.key} value={m.key}>{m.label}</option>
++          ))}
++        </select>
++      </div>
++
++      {error ? (
++        <ErrorState message={error} onRetry={load} />
++      ) : !data ? (
++        <LoadingState label="Memuat tiket..." />
++      ) : (
++        <div className="grid lg:grid-cols-[400px_1fr] gap-6 items-start">
++          <div className={`${selectedId ? 'hidden lg:block' : ''} ${loading ? 'opacity-60' : ''}`}>
++            <TicketQueue
++              tickets={data.tickets}
++              total={data.total}
++              page={page}
++              pageSize={data.pageSize}
++              selectedId={selectedId}
++              onSelect={setSelectedId}
++              onPage={setPage}
++              emptyMessage={tab === 'aktif' ? 'Tidak ada tiket aktif.' : 'Belum ada tiket yang selesai.'}
++            />
++          </div>
++
++          <div className={selectedId ? '' : 'hidden lg:block'}>
++            {selectedId ? (
++              <TicketDetail key={selectedId} id={selectedId} onBack={() => setSelectedId(null)} onChanged={load} />
++            ) : (
++              <div className="bg-white border border-[#E0E0E0]">
++                <EmptyState message="Pilih tiket untuk melihat percakapan dan membalas." icon={LifeBuoy} />
++              </div>
++            )}
++          </div>
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/components/feedback/admin/TicketDetail.js b/components/feedback/admin/TicketDetail.js
+new file mode 100644
+index 0000000..4d64166
+--- /dev/null
++++ b/components/feedback/admin/TicketDetail.js
+@@ -0,0 +1,184 @@
++'use client';
++
++import { useCallback, useEffect, useRef, useState } from 'react';
++import { ArrowLeft, Paperclip, Send } from 'lucide-react';
++import { FEEDBACK_JENIS_LABEL, FEEDBACK_MAX_TEXT } from '@/lib/feedbackConfig';
++import LoadingState from '@/components/LoadingState';
++import ErrorState from '@/components/ErrorState';
++import { api, formatWaktu, inputClass, StatusBadge, AttachmentPicker } from '../parts';
++
++// Aksi status yang tersedia per status saat ini. 'selesai' hanya memindahkan
++// tiket ke Riwayat — data dan percakapan tetap utuh.
++const STATUS_ACTIONS = {
++  baru: [['diproses', 'Tandai Diproses'], ['selesai', 'Tandai Selesai']],
++  diproses: [['selesai', 'Tandai Selesai']],
++  selesai: [['diproses', 'Buka Kembali']],
++};
++
++export default function TicketDetail({ id, onBack, onChanged }) {
++  const [data, setData] = useState(null);
++  const [loadError, setLoadError] = useState('');
++  const [isi, setIsi] = useState('');
++  const [file, setFile] = useState(null);
++  const [sending, setSending] = useState(false);
++  const [changing, setChanging] = useState(false);
++  const [actionError, setActionError] = useState('');
++  const endRef = useRef(null);
++
++  const load = useCallback(async () => {
++    setLoadError('');
++    const res = await api(`/api/feedback/admin/tickets/${id}`);
++    if (!res.ok) {
++      setLoadError(res.error);
++      return;
++    }
++    setData(res.data);
++  }, [id]);
++
++  useEffect(() => {
++    load();
++  }, [load]);
++
++  useEffect(() => {
++    if (data) endRef.current?.scrollIntoView({ block: 'end' });
++  }, [data]);
++
++  const handleReply = async (e) => {
++    e.preventDefault();
++    if (sending) return;
++    if (!isi.trim()) {
++      setActionError('Balasan tidak boleh kosong.');
++      return;
++    }
++    setSending(true);
++    setActionError('');
++
++    const body = new FormData();
++    body.append('isi', isi.trim());
++    if (file) body.append('file', file);
++
++    const res = await api(`/api/feedback/admin/tickets/${id}/messages`, { method: 'POST', body });
++    setSending(false);
++    if (!res.ok) {
++      setActionError(res.error);
++      return;
++    }
++    setIsi('');
++    setFile(null);
++    await load();
++    onChanged();
++  };
++
++  const handleStatus = async (status) => {
++    if (changing) return;
++    setChanging(true);
++    setActionError('');
++    const res = await api(`/api/feedback/admin/tickets/${id}`, {
++      method: 'PATCH',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ status }),
++    });
++    setChanging(false);
++    if (!res.ok) {
++      setActionError(res.error);
++      return;
++    }
++    await load();
++    onChanged();
++  };
++
++  if (loadError) return <div className="bg-white border border-[#E0E0E0] p-6"><ErrorState message={loadError} onRetry={load} /></div>;
++  if (!data) return <div className="bg-white border border-[#E0E0E0]"><LoadingState label="Memuat tiket..." /></div>;
++
++  const { ticket, messages, viewer_nama: viewerNama } = data;
++
++  return (
++    <div className="bg-white border border-[#E0E0E0] flex flex-col">
++      <div className="px-5 py-4 border-b border-[#E0E0E0]">
++        <button onClick={onBack} className="lg:hidden flex items-center gap-1.5 text-sm text-[#6B6B6B] hover:text-black mb-3">
++          <ArrowLeft size={16} />
++          Kembali ke daftar
++        </button>
++        <div className="flex items-start justify-between gap-3">
++          <div className="min-w-0">
++            <p className="text-xs text-[#6B6B6B]">
++              #{ticket.ticket_no} · {FEEDBACK_JENIS_LABEL[ticket.jenis] || ticket.jenis} · {ticket.modul_label}
++            </p>
++            <p className="text-base font-medium text-black mt-0.5">{ticket.employee_nama}</p>
++            <p className="text-[11px] text-[#9A9A9A] mt-0.5 truncate">
++              {ticket.halaman ? `Dari halaman ${ticket.halaman} · ` : ''}dibuat {formatWaktu(ticket.created_at)}
++            </p>
++          </div>
++          <StatusBadge status={ticket.status} />
++        </div>
++        <div className="flex flex-wrap gap-2 mt-3">
++          {STATUS_ACTIONS[ticket.status].map(([status, label]) => (
++            <button
++              key={status}
++              onClick={() => handleStatus(status)}
++              disabled={changing}
++              className="border border-[#E0E0E0] px-3 py-1.5 text-xs text-[#3D3D3D] hover:border-madael-red hover:text-madael-red transition-colors disabled:opacity-50"
++            >
++              {label}
++            </button>
++          ))}
++        </div>
++      </div>
++
++      <div className="px-5 py-4 space-y-3 max-h-[52vh] overflow-y-auto">
++        {messages.map((m) => (
++          <div key={m.id} className={m.is_staff ? 'pl-10' : 'pr-10'}>
++            <p className={`text-[11px] text-[#6B6B6B] mb-1 ${m.is_staff ? 'text-right' : ''}`}>
++              {m.is_staff ? `Dijawab oleh: ${m.author_nama}` : m.author_nama} · {formatWaktu(m.created_at)}
++            </p>
++            <div className={`px-3 py-2 text-sm text-black whitespace-pre-wrap break-words border ${
++              m.is_staff ? 'bg-[#F4F4F4] border-[#E0E0E0]' : 'bg-white border-madael-red/40'
++            }`}>
++              {m.isi}
++              {m.attachment_url && (
++                <a
++                  href={m.attachment_url}
++                  target="_blank"
++                  rel="noopener noreferrer"
++                  className="mt-2 flex items-center gap-1.5 text-xs text-madael-red hover:underline"
++                >
++                  <Paperclip size={12} />
++                  <span className="truncate">{m.attachment_name || 'Lihat lampiran'}</span>
++                </a>
++              )}
++            </div>
++          </div>
++        ))}
++        <div ref={endRef} />
++      </div>
++
++      <form onSubmit={handleReply} className="px-5 py-4 border-t border-[#E0E0E0] space-y-2">
++        <textarea
++          value={isi}
++          onChange={(e) => setIsi(e.target.value)}
++          rows={3}
++          maxLength={FEEDBACK_MAX_TEXT}
++          disabled={sending}
++          placeholder="Tulis balasan..."
++          className={`${inputClass} resize-none`}
++        />
++        <p className="text-[11px] text-[#9A9A9A]">
++          Balasan tampil ke pengguna sebagai &quot;Dijawab oleh: {viewerNama}&quot; dan tidak bisa diubah setelah terkirim.
++          {ticket.status === 'selesai' && ' Tiket ini sudah selesai; membalas tidak mengubah status.'}
++        </p>
++        <div className="flex items-center justify-between gap-2">
++          <AttachmentPicker file={file} onChange={setFile} onError={setActionError} disabled={sending} />
++          <button
++            type="submit"
++            disabled={sending}
++            className="shrink-0 flex items-center gap-1.5 bg-madael-red text-white px-4 py-2 text-xs font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-60"
++          >
++            <Send size={12} />
++            {sending ? 'Mengirim...' : 'Kirim Balasan'}
++          </button>
++        </div>
++        {actionError && <p className="text-xs text-red-600">{actionError}</p>}
++      </form>
++    </div>
++  );
++}
+diff --git a/components/feedback/admin/TicketQueue.js b/components/feedback/admin/TicketQueue.js
+new file mode 100644
+index 0000000..412c59c
+--- /dev/null
++++ b/components/feedback/admin/TicketQueue.js
+@@ -0,0 +1,70 @@
++'use client';
++
++import { ChevronLeft, ChevronRight } from 'lucide-react';
++import { FEEDBACK_JENIS_LABEL } from '@/lib/feedbackConfig';
++import EmptyState from '@/components/EmptyState';
++import { formatWaktu, StatusBadge } from '../parts';
++
++// Daftar tiket (presentasional). Data & filter dikelola halaman induk.
++export default function TicketQueue({ tickets, total, page, pageSize, selectedId, onSelect, onPage, emptyMessage }) {
++  const totalPages = Math.max(1, Math.ceil(total / pageSize));
++
++  if (tickets.length === 0) {
++    return (
++      <div className="bg-white border border-[#E0E0E0]">
++        <EmptyState message={emptyMessage} />
++      </div>
++    );
++  }
++
++  return (
++    <div className="bg-white border border-[#E0E0E0]">
++      <ul>
++        {tickets.map((t) => (
++          <li key={t.id} className="border-b border-[#F0F0F0] last:border-0">
++            <button
++              onClick={() => onSelect(t.id)}
++              className={`w-full text-left px-4 py-3 border-l-4 hover:bg-[#FAFAFA] ${
++                selectedId === t.id ? 'border-madael-red bg-[#FAFAFA]' : 'border-transparent'
++              }`}
++            >
++              <div className="flex items-center justify-between gap-2 mb-1">
++                <span className="text-[11px] text-[#6B6B6B]">
++                  #{t.ticket_no} · {FEEDBACK_JENIS_LABEL[t.jenis] || t.jenis} · {t.modul_label}
++                </span>
++                <StatusBadge status={t.status} />
++              </div>
++              <p className="text-sm font-medium text-black">{t.employee_nama}</p>
++              <p className="text-sm text-[#3D3D3D] line-clamp-2">{t.ringkasan}</p>
++              <p className="text-[11px] text-[#9A9A9A] mt-1">
++                {t.last_staff_nama ? `Dijawab oleh: ${t.last_staff_nama}` : 'Belum dijawab'} · {formatWaktu(t.updated_at)}
++              </p>
++            </button>
++          </li>
++        ))}
++      </ul>
++
++      {totalPages > 1 && (
++        <div className="flex items-center justify-between px-4 py-2.5 border-t border-[#E0E0E0] text-xs text-[#6B6B6B]">
++          <button
++            onClick={() => onPage(page - 1)}
++            disabled={page <= 1}
++            aria-label="Halaman sebelumnya"
++            className="disabled:opacity-30 hover:text-black"
++          >
++            <ChevronLeft size={16} />
++          </button>
++          <span>Halaman {page} dari {totalPages}</span>
++          <button
++            onClick={() => onPage(page + 1)}
++            disabled={page >= totalPages}
++            aria-label="Halaman berikutnya"
++            className="disabled:opacity-30 hover:text-black"
++          >
++            <ChevronRight size={16} />
++          </button>
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/lib/employeeModules.js b/lib/employeeModules.js
+index 0e7e216..383d577 100644
+--- a/lib/employeeModules.js
++++ b/lib/employeeModules.js
+@@ -42,7 +42,7 @@ export const MODULE_REGISTRY = [
+   { key: 'kalkulator', name: 'Kalkulator', desc: 'PPh 21, BPJS, dan kalkulator lainnya', href: '/kalkulator-pph21', status: 'live', icon: Calculator, layer: 'general' },
+   { key: 'document_generator', name: 'Documents', desc: 'Generate proposal, quotation, agreement, dan nomor surat', href: '/employee/documents', status: 'live', icon: FileText, altKeys: ['nomor_surat'], layer: 'general' },
+   { key: 'compliance_monitor', name: 'Compliance Monitor', desc: 'Pantau kepatuhan hukum', href: '/employee/compliance-monitor', status: 'coming_soon', icon: ShieldCheck, layer: 'general' },
+-  { key: 'support_access', name: 'Pusat Bantuan', desc: 'Lihat dan balas tiket feedback dari pengguna', href: '/employee/support', status: 'coming_soon', icon: LifeBuoy, layer: 'general' },
++  { key: 'support_access', name: 'Pusat Bantuan', desc: 'Lihat dan balas tiket feedback dari pengguna', href: '/employee/support', status: 'live', icon: LifeBuoy, layer: 'general' },
+   { key: 'reports', name: 'Reports', desc: 'Ringkasan data lintas modul (khusus superadmin)', href: '/employee/reports', status: 'live', icon: PieChart, layer: 'general' },
+   { key: 'activity_log', name: 'Activity Log', desc: 'Audit trail aksi penting lintas modul (khusus superadmin)', href: '/employee/activity-log', status: 'live', icon: History, layer: 'general' },
+   { key: 'data_audit', name: 'Kelengkapan Data Karyawan', desc: 'Audit gap data Employee List, Payroll, dan Jadwal Kerja (khusus superadmin)', href: '/employee/data-audit', status: 'live', icon: ClipboardCheck, layer: 'general' },
+diff --git a/lib/feedbackConfig.js b/lib/feedbackConfig.js
+index 47d1a7e..7af7d81 100644
+--- a/lib/feedbackConfig.js
++++ b/lib/feedbackConfig.js
+@@ -37,6 +37,12 @@ const MODULE_TAGS = [
+   ['/kalkulator', 'kalkulator', 'Kalkulator'],
+ ];
+ 
++// Opsi filter modul di panel admin (urutan sama dengan MODULE_TAGS + fallback).
++export const FEEDBACK_MODULES = [
++  ...MODULE_TAGS.map(([, key, label]) => ({ key, label })),
++  { key: 'lainnya', label: 'Lainnya' },
++];
++
+ export function resolveModuleTag(pathname) {
+   const path = typeof pathname === 'string' ? pathname : '';
+   const hit = MODULE_TAGS.find(([prefix]) => path.startsWith(prefix));
+diff --git a/lib/feedbackServer.js b/lib/feedbackServer.js
+index 8d9bf62..cd04713 100644
+--- a/lib/feedbackServer.js
++++ b/lib/feedbackServer.js
+@@ -1,4 +1,7 @@
+ import { randomUUID } from 'crypto';
++import { createAdminClient } from '@/lib/supabase-admin';
++import { getSessionEmployee } from '@/lib/sessionEmployee';
++import { isModuleGranted } from '@/lib/employeeModules';
+ import {
+   FEEDBACK_ALLOWED_MIME,
+   FEEDBACK_MAX_FILE,
+@@ -11,6 +14,29 @@ export const FEEDBACK_BUCKET = 'feedback-attachments';
+ const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+ 
++// Gate semua route /api/feedback/admin/*: harus login DAN punya flag
++// 'support_access' (baris eksplisit di employee_modules — superadmin tidak bypass).
++// Return: { user, emp, admin } kalau lolos, atau { error, status } untuk respons JSON.
++export async function requireSupportAccess() {
++  const session = await getSessionEmployee('id, nama, status, is_superadmin');
++  if (session.error) return session;
++
++  const admin = createAdminClient();
++  const { data: rows } = await admin
++    .from('employee_modules')
++    .select('module_name')
++    .eq('employee_id', session.emp.id)
++    .eq('module_name', 'support_access');
++
++  const allowed = isModuleGranted({
++    isSuperadmin: !!session.emp.is_superadmin,
++    moduleKeys: (rows || []).map((r) => r.module_name),
++    key: 'support_access',
++  });
++  if (!allowed) return { error: 'Akses ditolak.', status: 403 };
++  return { ...session, admin };
++}
++
+ export const isUuid = (v) => typeof v === 'string' && UUID_RE.test(v);
+ 
+ // File kosong dari <input type="file"> yang tidak diisi dianggap "tidak ada lampiran".
+diff --git a/supabase/migrations/20260929_feedback_tickets.sql b/supabase/migrations/20260929_feedback_tickets.sql
+new file mode 100644
+index 0000000..d405360
+--- /dev/null
++++ b/supabase/migrations/20260929_feedback_tickets.sql
+@@ -0,0 +1,238 @@
++-- Feedback / Pusat Bantuan — tiket + pesan, histori PERMANEN.
++-- Jalankan sekali di Supabase SQL Editor. Aman dijalankan ulang (idempotent).
++--
++-- Prinsip yang ditegakkan di level DATABASE (bukan cuma di UI/API):
++--   1. Tiket & pesan tidak pernah bisa dihapus (DELETE/TRUNCATE diblokir trigger).
++--   2. Pesan tidak bisa diedit setelah terkirim (UPDATE diblokir trigger).
++--   3. Data inti tiket (pemilik, jenis, modul, ringkasan) tidak bisa diubah;
++--      hanya status + penanda balasan yang boleh berubah.
++--   4. Nama pengirim/pembalas diambil dari employees.nama oleh trigger (tidak
++--      bisa dipalsukan) lalu disimpan sebagai snapshot di baris pesan.
++--   5. Pesan is_staff=true hanya boleh dari akun dengan flag 'support_access'.
++--
++-- Semua INSERT lewat API route (service role); tidak ada policy INSERT/UPDATE/
++-- DELETE untuk anon/authenticated. Lampiran disimpan di bucket privat.
++
++-- ---------- Tabel ----------
++create table if not exists public.feedback_tickets (
++  id              uuid primary key default gen_random_uuid(),
++  ticket_no       bigint generated always as identity unique,
++  employee_id     uuid not null references public.employees(id) on delete restrict,
++  employee_nama   text not null,
++  jenis           text not null check (jenis in ('bug', 'pertanyaan', 'saran')),
++  modul           text not null,          -- key auto-tag, mis. 'absensi'
++  modul_label     text not null,          -- label saat tiket dibuat, mis. 'Absensi'
++  halaman         text,                   -- path halaman asal, mis. '/employee/absensi'
++  ringkasan       text not null,          -- potongan awal pesan pertama (untuk list)
++  status          text not null default 'baru' check (status in ('baru', 'diproses', 'selesai')),
++  last_staff_nama text,                   -- pembalas terakhir (untuk 'Dijawab oleh')
++  last_staff_at   timestamptz,
++  created_at      timestamptz not null default now(),
++  updated_at      timestamptz not null default now(),
++  closed_at       timestamptz
++);
++
++create table if not exists public.feedback_messages (
++  id              uuid primary key default gen_random_uuid(),
++  ticket_id       uuid not null references public.feedback_tickets(id) on delete restrict,
++  author_id       uuid not null references public.employees(id) on delete restrict,
++  author_nama     text not null,          -- snapshot nama asli, diisi trigger
++  is_staff        boolean not null default false,
++  isi             text not null check (char_length(btrim(isi)) between 1 and 4000),
++  attachment_path text,
++  attachment_name text,
++  attachment_mime text,
++  created_at      timestamptz not null default now()
++);
++
++create index if not exists feedback_tickets_owner_idx  on public.feedback_tickets (employee_id, updated_at desc);
++create index if not exists feedback_tickets_queue_idx  on public.feedback_tickets (status, modul, updated_at desc);
++create index if not exists feedback_messages_thread_idx on public.feedback_messages (ticket_id, created_at);
++
++-- ---------- Trigger: tidak ada hapus / edit ----------
++create or replace function public.feedback_block_change() returns trigger
++language plpgsql as $$
++begin
++  raise exception 'Tiket dan pesan feedback bersifat permanen: tidak bisa diedit atau dihapus.';
++end $$;
++
++drop trigger if exists feedback_messages_no_change on public.feedback_messages;
++create trigger feedback_messages_no_change
++  before update or delete on public.feedback_messages
++  for each row execute function public.feedback_block_change();
++
++drop trigger if exists feedback_messages_no_truncate on public.feedback_messages;
++create trigger feedback_messages_no_truncate
++  before truncate on public.feedback_messages
++  for each statement execute function public.feedback_block_change();
++
++drop trigger if exists feedback_tickets_no_delete on public.feedback_tickets;
++create trigger feedback_tickets_no_delete
++  before delete on public.feedback_tickets
++  for each row execute function public.feedback_block_change();
++
++drop trigger if exists feedback_tickets_no_truncate on public.feedback_tickets;
++create trigger feedback_tickets_no_truncate
++  before truncate on public.feedback_tickets
++  for each statement execute function public.feedback_block_change();
++
++-- ---------- Trigger: tiket cuma boleh ganti status/penanda balasan ----------
++create or replace function public.feedback_tickets_guard_update() returns trigger
++language plpgsql as $$
++begin
++  if row(NEW.id, NEW.ticket_no, NEW.employee_id, NEW.employee_nama, NEW.jenis, NEW.modul,
++         NEW.modul_label, NEW.halaman, NEW.ringkasan, NEW.created_at)
++     is distinct from
++     row(OLD.id, OLD.ticket_no, OLD.employee_id, OLD.employee_nama, OLD.jenis, OLD.modul,
++         OLD.modul_label, OLD.halaman, OLD.ringkasan, OLD.created_at) then
++    raise exception 'Data inti tiket feedback tidak bisa diubah.';
++  end if;
++
++  if NEW.status is distinct from OLD.status then
++    NEW.closed_at := case when NEW.status = 'selesai' then now() else null end;
++  end if;
++  NEW.updated_at := now();
++  return NEW;
++end $$;
++
++drop trigger if exists feedback_tickets_guard on public.feedback_tickets;
++create trigger feedback_tickets_guard
++  before update on public.feedback_tickets
++  for each row execute function public.feedback_tickets_guard_update();
++
++-- ---------- Trigger: validasi + snapshot nama sebelum pesan masuk ----------
++create or replace function public.feedback_messages_before_insert() returns trigger
++language plpgsql security definer set search_path = public as $$
++declare
++  v_nama  text;
++  v_owner uuid;
++begin
++  select nama into v_nama from public.employees where id = NEW.author_id;
++  if v_nama is null then
++    raise exception 'Pengirim pesan tidak ditemukan.';
++  end if;
++  NEW.author_nama := v_nama;
++
++  if NEW.is_staff then
++    if not exists (
++      select 1 from public.employee_modules
++      where employee_id = NEW.author_id and module_name = 'support_access'
++    ) then
++      raise exception 'Akun ini tidak punya Akses Support.';
++    end if;
++  else
++    select employee_id into v_owner from public.feedback_tickets where id = NEW.ticket_id;
++    if v_owner is distinct from NEW.author_id then
++      raise exception 'Hanya pemilik tiket yang bisa mengirim pesan pengguna.';
++    end if;
++  end if;
++  return NEW;
++end $$;
++
++drop trigger if exists feedback_messages_before_ins on public.feedback_messages;
++create trigger feedback_messages_before_ins
++  before insert on public.feedback_messages
++  for each row execute function public.feedback_messages_before_insert();
++
++-- ---------- Trigger: status otomatis setelah pesan masuk ----------
++--  balasan staff ke tiket 'baru'          -> 'diproses' (+ catat pembalas)
++--  pesan user ke tiket 'selesai'          -> 'baru' (dibuka lagi)
++create or replace function public.feedback_messages_after_insert() returns trigger
++language plpgsql security definer set search_path = public as $$
++begin
++  update public.feedback_tickets t set
++    status = case
++      when NEW.is_staff and t.status = 'baru'        then 'diproses'
++      when not NEW.is_staff and t.status = 'selesai' then 'baru'
++      else t.status end,
++    last_staff_nama = case when NEW.is_staff then NEW.author_nama else t.last_staff_nama end,
++    last_staff_at   = case when NEW.is_staff then NEW.created_at  else t.last_staff_at end
++  where t.id = NEW.ticket_id;
++  return NEW;
++end $$;
++
++drop trigger if exists feedback_messages_after_ins on public.feedback_messages;
++create trigger feedback_messages_after_ins
++  after insert on public.feedback_messages
++  for each row execute function public.feedback_messages_after_insert();
++
++-- ---------- Buat tiket + pesan pertama dalam SATU transaksi ----------
++-- (tiket tanpa pesan tidak boleh ada, dan tiket tidak bisa dihapus)
++create or replace function public.feedback_create_ticket(
++  p_employee_id uuid, p_jenis text, p_modul text, p_modul_label text, p_halaman text,
++  p_isi text, p_att_path text, p_att_name text, p_att_mime text
++) returns uuid
++language plpgsql security invoker set search_path = public as $$
++declare
++  v_nama text;
++  v_id   uuid;
++begin
++  select nama into v_nama from public.employees where id = p_employee_id;
++  if v_nama is null then
++    raise exception 'Employee tidak ditemukan.';
++  end if;
++
++  insert into public.feedback_tickets
++    (employee_id, employee_nama, jenis, modul, modul_label, halaman, ringkasan)
++  values
++    (p_employee_id, v_nama, p_jenis, p_modul, p_modul_label, p_halaman, left(btrim(p_isi), 140))
++  returning id into v_id;
++
++  insert into public.feedback_messages
++    (ticket_id, author_id, author_nama, is_staff, isi, attachment_path, attachment_name, attachment_mime)
++  values
++    (v_id, p_employee_id, v_nama, false, p_isi, p_att_path, p_att_name, p_att_mime);
++
++  return v_id;
++end $$;
++
++revoke all on function public.feedback_create_ticket(uuid, text, text, text, text, text, text, text, text)
++  from public, anon, authenticated;
++grant execute on function public.feedback_create_ticket(uuid, text, text, text, text, text, text, text, text)
++  to service_role;
++
++-- ---------- RLS: baca saja ----------
++create or replace function public.feedback_current_employee_id() returns uuid
++language sql stable security definer set search_path = public as $$
++  select id from public.employees
++  where email = (auth.jwt() ->> 'email') and status = 'Aktif'
++  limit 1
++$$;
++
++-- Flag 'support_access' selalu butuh baris eksplisit (superadmin tidak bypass).
++create or replace function public.feedback_has_support_access() returns boolean
++language sql stable security definer set search_path = public as $$
++  select exists (
++    select 1 from public.employee_modules m
++    where m.employee_id = public.feedback_current_employee_id()
++      and m.module_name = 'support_access'
++  )
++$$;
++
++alter table public.feedback_tickets  enable row level security;
++alter table public.feedback_messages enable row level security;
++
++revoke all on public.feedback_tickets, public.feedback_messages from anon, authenticated;
++grant select on public.feedback_tickets, public.feedback_messages to authenticated;
++
++drop policy if exists feedback_tickets_select on public.feedback_tickets;
++create policy feedback_tickets_select on public.feedback_tickets
++  for select to authenticated
++  using (employee_id = public.feedback_current_employee_id() or public.feedback_has_support_access());
++
++drop policy if exists feedback_messages_select on public.feedback_messages;
++create policy feedback_messages_select on public.feedback_messages
++  for select to authenticated
++  using (exists (select 1 from public.feedback_tickets t where t.id = feedback_messages.ticket_id));
++
++-- ---------- Bucket lampiran (privat; akses hanya lewat service role + signed URL) ----------
++insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
++values ('feedback-attachments', 'feedback-attachments', false, 4194304,
++        array['image/jpeg', 'image/png', 'image/webp'])
++on conflict (id) do nothing;
++
++-- ---------- (Opsional) Simulasi balasan staff untuk tes tampilan 'Dijawab oleh' ----------
++-- Ganti EMAIL_PEMEGANG_SUPPORT & TICKET_ID. Akun itu harus punya flag support_access.
++-- insert into public.feedback_messages (ticket_id, author_id, author_nama, is_staff, isi)
++-- select 'TICKET_ID'::uuid, id, nama, true, 'Halo, sudah kami cek ya.'
++-- from public.employees where email = 'EMAIL_PEMEGANG_SUPPORT';
