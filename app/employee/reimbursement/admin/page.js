@@ -12,10 +12,7 @@ import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
-
-function formatRupiah(value) {
-  return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
-}
+import { formatRupiah } from '@/lib/format';
 
 function formatTanggal(value) {
   if (!value) return '—';

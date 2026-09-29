@@ -8,10 +8,7 @@ import Link from 'next/link';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import LoadingState from '@/components/LoadingState';
-
-function formatRupiah(value) {
-  return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
-}
+import { formatRupiah } from '@/lib/format';
 
 function formatTanggal(dateStr) {
   if (!dateStr) return '—';

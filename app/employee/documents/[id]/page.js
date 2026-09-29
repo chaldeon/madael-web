@@ -10,6 +10,7 @@ import { ArrowLeft, Printer, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
+import { formatRupiahOrDash } from '@/lib/format';
 
 const TYPE_LABEL = {
   PRO: 'Proposal',
@@ -42,11 +43,6 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
 }
 
-function formatRupiah(value) {
-  if (value === null || value === undefined || value === '') return '-';
-  return 'Rp ' + Math.round(value).toLocaleString('id-ID');
-}
-
 function Field({ label, children }) {
   return (
     <div className="mb-4">
@@ -64,7 +60,7 @@ function ProposalContent({ content }) {
       <Field label="Scope Pekerjaan">{content.scope_pekerjaan || '-'}</Field>
       <div className="grid grid-cols-2 gap-4">
         <Field label="Jangka Waktu">{content.jangka_waktu || '-'}</Field>
-        <Field label="Nilai Estimasi">{formatRupiah(content.nilai_estimasi)}</Field>
+        <Field label="Nilai Estimasi">{formatRupiahOrDash(content.nilai_estimasi)}</Field>
       </div>
       <Field label="Syarat dan Ketentuan">{content.syarat_ketentuan || '-'}</Field>
     </>
@@ -93,8 +89,8 @@ function QuotationContent({ content }) {
               <tr key={idx} className="border-b border-[#F0F0F0] last:border-0">
                 <td className="px-3 py-2">{it.nama}</td>
                 <td className="px-3 py-2 text-right">{it.qty}</td>
-                <td className="px-3 py-2 text-right">{formatRupiah(it.harga_satuan)}</td>
-                <td className="px-3 py-2 text-right">{formatRupiah(it.subtotal)}</td>
+                <td className="px-3 py-2 text-right">{formatRupiahOrDash(it.harga_satuan)}</td>
+                <td className="px-3 py-2 text-right">{formatRupiahOrDash(it.subtotal)}</td>
               </tr>
             ))}
           </tbody>
@@ -103,9 +99,9 @@ function QuotationContent({ content }) {
 
       <div className="flex justify-end mb-4">
         <div className="w-full max-w-[280px] text-sm text-black space-y-1">
-          <div className="flex justify-between"><span className="text-[#6B6B6B]">Subtotal</span><span>{formatRupiah(content.subtotal)}</span></div>
-          <div className="flex justify-between"><span className="text-[#6B6B6B]">Diskon</span><span>- {formatRupiah(content.diskon)}</span></div>
-          <div className="flex justify-between font-semibold border-t border-[#E0E0E0] pt-1"><span>Total</span><span>{formatRupiah(content.total)}</span></div>
+          <div className="flex justify-between"><span className="text-[#6B6B6B]">Subtotal</span><span>{formatRupiahOrDash(content.subtotal)}</span></div>
+          <div className="flex justify-between"><span className="text-[#6B6B6B]">Diskon</span><span>- {formatRupiahOrDash(content.diskon)}</span></div>
+          <div className="flex justify-between font-semibold border-t border-[#E0E0E0] pt-1"><span>Total</span><span>{formatRupiahOrDash(content.total)}</span></div>
         </div>
       </div>
 
@@ -128,7 +124,7 @@ function AgreementContent({ content }) {
       </div>
       <Field label="Scope Pekerjaan">{content.scope_pekerjaan || '-'}</Field>
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Nilai Kontrak">{formatRupiah(content.nilai_kontrak)}</Field>
+        <Field label="Nilai Kontrak">{formatRupiahOrDash(content.nilai_kontrak)}</Field>
         <Field label="Jangka Waktu">{content.jangka_waktu || '-'}</Field>
       </div>
       <Field label="Syarat dan Ketentuan (umum)">{content.syarat_ketentuan || '-'}</Field>
@@ -227,7 +223,7 @@ function AdministrasiContent({ content }) {
       </div>
       <Field label="Scope Pekerjaan">{content.scope_pekerjaan || '-'}</Field>
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Nilai Kontrak">{formatRupiah(content.nilai_kontrak)}</Field>
+        <Field label="Nilai Kontrak">{formatRupiahOrDash(content.nilai_kontrak)}</Field>
         <Field label="Jangka Waktu">{content.jangka_waktu || '-'}</Field>
       </div>
       <Field label="Syarat dan Ketentuan (umum)">{content.syarat_ketentuan || '-'}</Field>

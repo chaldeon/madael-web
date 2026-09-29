@@ -9,6 +9,7 @@ import { notifySuperadmins } from '@/lib/notify';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { formatRupiah } from '@/lib/format';
 
 const KATEGORI_OPTIONS = [
   { value: 'transport', label: 'Transport' },
@@ -28,10 +29,6 @@ function formatNumberDisplay(value) {
   const num = Number(value);
   if (Number.isNaN(num)) return '';
   return num.toLocaleString('id-ID');
-}
-
-function formatRupiah(value) {
-  return 'Rp ' + Math.round(value || 0).toLocaleString('id-ID');
 }
 
 function formatTanggal(value) {

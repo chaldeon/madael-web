@@ -8,15 +8,11 @@ import Link from 'next/link';
 import { ArrowLeft, Pencil, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
+import { formatRupiahOrDash } from '@/lib/format';
 
 const inputClass =
   'w-full border border-[#E0E0E0] px-3 py-2 text-sm text-black focus:outline-none focus:border-madael-red';
 const labelClass = 'block text-xs font-medium text-[#6B6B6B] mb-1';
-
-function formatRupiah(value) {
-  if (value === null || value === undefined || value === '') return '-';
-  return 'Rp ' + Math.round(value).toLocaleString('id-ID');
-}
 
 function formatJam(value) {
   return value ? value.slice(0, 5) : '-';
@@ -241,8 +237,8 @@ export default function EmployeeDetailPage() {
             <div className="flex flex-col gap-3 text-sm">
               <InfoRow label="Posisi" value={master.posisi || '-'} />
               <InfoRow label="Status Karyawan" value={master.status || '-'} />
-              <InfoRow label="Gaji Pokok" value={formatRupiah(master.gaji_pokok)} />
-              <InfoRow label="Tunjangan" value={formatRupiah(master.tunjangan)} />
+              <InfoRow label="Gaji Pokok" value={formatRupiahOrDash(master.gaji_pokok)} />
+              <InfoRow label="Tunjangan" value={formatRupiahOrDash(master.tunjangan)} />
             </div>
           ) : (
             <p className="text-sm text-[#6B6B6B]">Belum ada data HR/payroll untuk karyawan ini.</p>

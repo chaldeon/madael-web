@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { ArrowLeft, Plus, X, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
+import { formatRupiahOrDash } from '@/lib/format';
 
 const STAGES = [
   'Prospek',
@@ -68,11 +69,6 @@ function StageBadge({ stage }) {
 function formatDate(value) {
   if (!value) return '-';
   return new Date(value).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-function formatRupiah(value) {
-  if (value === null || value === undefined || value === '') return '-';
-  return 'Rp ' + Math.round(value).toLocaleString('id-ID');
 }
 
 const inputClass =
@@ -509,7 +505,7 @@ export default function ClientDetailPage() {
                   <td className="px-3 py-2.5">
                     <span className="inline-block px-2 py-0.5 text-[11px] font-medium rounded bg-[#F3F4F6] text-[#4B5563]">{p.status}</span>
                   </td>
-                  <td className="px-3 py-2.5 text-[#4B4B4B]">{formatRupiah(p.nilai_kontrak)}</td>
+                  <td className="px-3 py-2.5 text-[#4B4B4B]">{formatRupiahOrDash(p.nilai_kontrak)}</td>
                   <td className="px-3 py-2.5 text-[#4B4B4B]">{p.employees?.nama || '-'}</td>
                   <td className="px-3 py-2.5 text-[#4B4B4B]">{formatDate(p.tanggal_mulai)} - {formatDate(p.tanggal_selesai)}</td>
                 </tr>
@@ -556,7 +552,7 @@ export default function ClientDetailPage() {
                       ))}
                     </select>
                   </td>
-                  <td className="px-3 py-2.5 text-[#4B4B4B]">{d.nilai_potensial ? formatRupiah(d.nilai_potensial) : '-'}</td>
+                  <td className="px-3 py-2.5 text-[#4B4B4B]">{d.nilai_potensial ? formatRupiahOrDash(d.nilai_potensial) : '-'}</td>
                   <td className="px-3 py-2.5 text-[#4B4B4B]">{d.employees?.nama || '-'}</td>
                   <td className="px-3 py-2.5 text-[#4B4B4B]">{d.catatan || '-'}</td>
                 </tr>
