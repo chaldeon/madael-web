@@ -4,16 +4,13 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import {
-  ArrowUp, ArrowDown, ArrowUpDown, Pencil, X, AlertTriangle,
-  ExternalLink, Check, XCircle,
-} from 'lucide-react';
+import { Pencil, X, AlertTriangle, ExternalLink, Check, XCircle } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { logActivity } from '@/lib/activityLog';
-import { hitungStatusTelat, isTelatEfektif, MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
-import { jamJakarta } from '@/lib/serverTime';
+import { isTelatEfektif, MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
+
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -21,143 +18,9 @@ import LokasiKerjaManager from '@/components/LokasiKerjaManager';
 import AbsensiReviewPanel from '@/components/AbsensiReviewPanel';
 import AbsensiSettingsPanel from '@/components/AbsensiSettingsPanel';
 import ShiftTemplateManager from '@/components/ShiftTemplateManager';
+import SortableHeader from '@/components/SortableHeader';
+import { parseToleransi, currentMonthValue, formatJam, formatTanggal, formatWaktu, countScheduledWorkdays, downloadRekapCsv, computeStatusTelat, HARI_OPTIONS, DEFAULT_HARI, EMPTY_JADWAL_FORM, JADWAL_SORT_COLUMNS, REKAP_SORT_COLUMNS, TABS } from '@/lib/absensiKaryawanConfig';
 import { durasiMenit, formatDurasi, scheduleFieldsFromTemplate, shiftLabel } from '@/lib/shifts';
-
-const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-const HARI_OPTIONS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
-const DEFAULT_HARI = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
-const EMPTY_JADWAL_FORM = { jam_masuk: '08:00', jam_pulang: '17:00', hari_kerja: DEFAULT_HARI, toleransi_menit: '0', shift_template_id: '' };
-
-// Validasi input Toleransi (menit): bilangan bulat 0..MAX. Return angka, atau null kalau tidak valid.
-function parseToleransi(value) {
-  const raw = String(value ?? '').trim();
-  if (!/^\d+$/.test(raw)) return null;
-  const n = Number(raw);
-  return n >= 0 && n <= MAX_TOLERANSI_MENIT ? n : null;
-}
-
-function currentMonthValue() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function formatJam(value) {
-  return value ? value.slice(0, 5) : '—';
-}
-
-function formatTanggal(value) {
-  if (!value) return '—';
-  return new Date(value + 'T00:00:00').toLocaleDateString('id-ID', {
-    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-  });
-}
-
-function formatWaktu(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-}
-
-// Hitung jumlah hari kerja terjadwal dalam sebuah bulan, dibatasi sampai
-// tanggal cutoff (hari ini, kalau bulan yang dipilih adalah bulan berjalan).
-function countScheduledWorkdays(year, month, hariKerja, cutoffDate) {
-  if (!hariKerja?.length) return 0;
-  const lastDay = new Date(year, month, 0).getDate();
-  const cutoff = cutoffDate < lastDay ? cutoffDate : lastDay;
-  let count = 0;
-  for (let day = 1; day <= cutoff; day++) {
-    const date = new Date(year, month - 1, day);
-    if (hariKerja.includes(HARI_LABEL[date.getDay()])) count++;
-  }
-  return count;
-}
-
-function toCsvValue(value) {
-  const str = String(value ?? '');
-  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
-  return str;
-}
-
-function downloadRekapCsv(rows, monthValue) {
-  const header = ['Nama', 'Perusahaan', 'Total Hadir', 'Total Telat', 'Tidak Hadir'];
-  const lines = [header.map(toCsvValue).join(',')];
-  rows.forEach(({ emp, totalHadir, totalTelat, totalTidakHadir }) => {
-    lines.push([
-      emp.nama,
-      emp.companies?.nama_perusahaan || '',
-      totalHadir,
-      totalTelat,
-      totalTidakHadir === null ? '' : totalTidakHadir,
-    ].map(toCsvValue).join(','));
-  });
-  const csvContent = '\uFEFF' + lines.join('\r\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `rekap-absensi-${monthValue}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-// Cocokkan jam clock-in (ISO) terhadap jadwal, untuk menentukan status telat
-// saat approve koreksi (jadwal employee mungkin belum di-load di tab lain).
-// Memakai aturan yang sama dengan API clock-in (jam masuk + toleransi_menit,
-// waktu Jakarta), supaya koreksi yang disetujui tidak menghasilkan status
-// telat yang berbeda dari clock-in biasa.
-function computeStatusTelat(afterClockInIso, schedule) {
-  if (!schedule || !afterClockInIso) return false;
-  return hitungStatusTelat({
-    jamClockIn: jamJakarta(new Date(afterClockInIso)),
-    jamMasuk: schedule.jam_masuk,
-    toleransiMenit: schedule.toleransi_menit,
-  });
-}
-
-const JADWAL_SORT_COLUMNS = {
-  nama: { label: 'Nama', get: (r) => (r.emp.nama || '').toLowerCase() },
-  perusahaan: { label: 'Perusahaan', get: (r) => (r.emp.companies?.nama_perusahaan || '').toLowerCase() },
-  jam_masuk: { label: 'Jam Masuk', get: (r) => r.sched?.jam_masuk || '' },
-  jam_pulang: { label: 'Jam Pulang', get: (r) => r.sched?.jam_pulang || '' },
-  toleransi: { label: 'Toleransi', get: (r) => (r.sched ? Number(r.sched.toleransi_menit) || 0 : -1) },
-  shift: { label: 'Shift', get: (r) => (r.sched ? r.shiftNama.toLowerCase() : '') },
-};
-
-const REKAP_SORT_COLUMNS = {
-  nama: { label: 'Nama', get: (r) => (r.emp.nama || '').toLowerCase() },
-  perusahaan: { label: 'Perusahaan', get: (r) => (r.emp.companies?.nama_perusahaan || '').toLowerCase() },
-  hadir: { label: 'Total Hadir', get: (r) => r.totalHadir },
-  telat: { label: 'Total Telat', get: (r) => r.totalTelat },
-  tidak_hadir: { label: 'Tidak Hadir', get: (r) => (r.totalTidakHadir === null ? -1 : r.totalTidakHadir) },
-};
-
-function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
-  const active = sortField === colKey;
-  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
-  return (
-    <th className="px-4 py-3 font-medium">
-      <button
-        type="button"
-        onClick={() => onSort(colKey)}
-        className={`flex items-center gap-1.5 hover:text-black transition-colors ${active ? 'text-black' : ''}`}
-      >
-        {label}
-        <Icon size={12} className={active ? 'text-madael-red' : 'text-[#B0B0B0]'} />
-      </button>
-    </th>
-  );
-}
-
-const TABS = [
-  { key: 'jadwal', label: 'Jadwal Kerja' },
-  { key: 'shift', label: 'Template Shift' },
-  { key: 'koreksi', label: 'Approval Koreksi' },
-  { key: 'review', label: 'Perlu Review' },
-  { key: 'lokasi', label: 'Lokasi Kerja' },
-  { key: 'rekap', label: 'Rekap Bulanan' },
-  { key: 'pengaturan', label: 'Pengaturan' },
-];
 
 export default function SemuaKaryawanPage() {
   const supabase = createClient();
@@ -951,12 +814,12 @@ export default function SemuaKaryawanPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
-                        <SortableHeader colKey="nama" label="Nama" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
-                        <SortableHeader colKey="perusahaan" label="Perusahaan" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
-                        <SortableHeader colKey="shift" label="Shift" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
-                        <SortableHeader colKey="jam_masuk" label="Jam Masuk" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
-                        <SortableHeader colKey="jam_pulang" label="Jam Pulang" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
-                        <SortableHeader colKey="toleransi" label="Toleransi (menit)" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+                        <SortableHeader className="px-4 py-3" colKey="nama" label="Nama" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+                        <SortableHeader className="px-4 py-3" colKey="perusahaan" label="Perusahaan" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+                        <SortableHeader className="px-4 py-3" colKey="shift" label="Shift" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+                        <SortableHeader className="px-4 py-3" colKey="jam_masuk" label="Jam Masuk" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+                        <SortableHeader className="px-4 py-3" colKey="jam_pulang" label="Jam Pulang" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
+                        <SortableHeader className="px-4 py-3" colKey="toleransi" label="Toleransi (menit)" sortField={jadwalSortField} sortDir={jadwalSortDir} onSort={handleJadwalSort} />
                         <th className="px-4 py-3 font-medium">Hari Kerja</th>
                         <th className="px-4 py-3 font-medium"></th>
                       </tr>
@@ -1038,11 +901,11 @@ export default function SemuaKaryawanPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
-                        <SortableHeader colKey="nama" label="Nama" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
-                        <SortableHeader colKey="perusahaan" label="Perusahaan" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
-                        <SortableHeader colKey="hadir" label="Total Hadir" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
-                        <SortableHeader colKey="telat" label="Total Telat" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
-                        <SortableHeader colKey="tidak_hadir" label="Tidak Hadir" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+                        <SortableHeader className="px-4 py-3" colKey="nama" label="Nama" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+                        <SortableHeader className="px-4 py-3" colKey="perusahaan" label="Perusahaan" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+                        <SortableHeader className="px-4 py-3" colKey="hadir" label="Total Hadir" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+                        <SortableHeader className="px-4 py-3" colKey="telat" label="Total Telat" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
+                        <SortableHeader className="px-4 py-3" colKey="tidak_hadir" label="Tidak Hadir" sortField={rekapSortField} sortDir={rekapSortDir} onSort={handleRekapSort} />
                         <th className="px-4 py-3 font-medium"></th>
                       </tr>
                     </thead>
