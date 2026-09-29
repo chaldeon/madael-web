@@ -12,6 +12,8 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
+import { durasiIstirahatMenit, formatDurasi } from '@/lib/attendanceBreak';
+import { isDriveRef, driveFotoUrl } from '@/lib/attendancePhotoUrl';
 
 function currentMonthValue() {
   const d = new Date();
@@ -41,6 +43,7 @@ function ClockCell({ waktu, fotoUrl, lat, lng }) {
           <img
             src={fotoUrl}
             alt="Foto absen"
+            loading="lazy"
             className="w-12 h-12 object-cover border border-[#E0E0E0]"
           />
         </a>
@@ -114,24 +117,31 @@ export default function RekapDetailPage() {
     setEmp(empRes.data || null);
     setRows(attRes.data || []);
 
-    const paths = [];
+    // Foto bisa dua jenis: 'drive:<id>' (baru, dilayani lewat /api/attendance/foto/<id>)
+    // atau path Supabase Storage (foto lama, belum dimigrasi -> signed URL seperti dulu).
+    const map = {};
+    const legacyPaths = [];
     (attRes.data || []).forEach((r) => {
-      if (r.foto_clock_in_url) paths.push(r.foto_clock_in_url);
-      if (r.foto_clock_out_url) paths.push(r.foto_clock_out_url);
+      [r.foto_clock_in_url, r.foto_clock_out_url].forEach((v) => {
+        if (!v) return;
+        if (isDriveRef(v)) {
+          const url = driveFotoUrl(v);
+          if (url) map[v] = url;
+        } else {
+          legacyPaths.push(v);
+        }
+      });
     });
 
-    if (paths.length > 0) {
+    if (legacyPaths.length > 0) {
       const { data: signed } = await supabase.storage
         .from('attendance-photos')
-        .createSignedUrls(paths, 60 * 60);
-      const map = {};
+        .createSignedUrls(legacyPaths, 60 * 60);
       (signed || []).forEach((s) => {
         if (s?.signedUrl && s?.path) map[s.path] = s.signedUrl;
       });
-      setPhotoUrls(map);
-    } else {
-      setPhotoUrls({});
     }
+    setPhotoUrls(map);
 
     setLoading(false);
   }, [supabase, employeeId, monthValue]);
@@ -232,13 +242,14 @@ export default function RekapDetailPage() {
                 <th className="px-4 py-3 font-medium">Tanggal</th>
                 <th className="px-4 py-3 font-medium">Clock In</th>
                 <th className="px-4 py-3 font-medium">Clock Out</th>
+                <th className="px-4 py-3 font-medium">Istirahat</th>
                 <th className="px-4 py-3 font-medium">Status</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="p-0">
+                  <td colSpan={5} className="p-0">
                     <EmptyState message="Belum ada data absensi bulan ini." />
                   </td>
                 </tr>
@@ -261,6 +272,22 @@ export default function RekapDetailPage() {
                         lat={row.clock_out_lat}
                         lng={row.clock_out_lng}
                       />
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {row.break_start ? (
+                        <div className="text-sm text-black">
+                          {formatWaktu(row.break_start)} – {row.break_end ? formatWaktu(row.break_end) : '—'}
+                          {row.break_end ? (
+                            <span className="block text-xs text-[#6B6B6B]">
+                              {formatDurasi(durasiIstirahatMenit(row))}
+                            </span>
+                          ) : (
+                            <span className="block text-xs text-amber-700">Belum diselesaikan</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-[#9A9A9A]">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <AttendanceStatusBadge row={row} />

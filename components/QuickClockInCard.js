@@ -19,6 +19,8 @@ import CameraCapture from '@/components/CameraCapture';
 import QrScanner from '@/components/QrScanner';
 import AttendanceReviewScreen from '@/components/AttendanceReviewScreen';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
+import BreakControl from '@/components/BreakControl';
+import { getBreakState } from '@/lib/attendanceBreak';
 
 function formatWaktu(iso) {
   if (!iso) return '—';
@@ -30,9 +32,14 @@ export default function QuickClockInCard({ employee }) {
     loading, loadError, todayRow, hasReferensiWajah,
     acting, geoError, lastMode, cameraMode, qrMode, qrAvailable,
     review, reviewConfirming, reviewError, reviewFatal,
+    breaking, breakError,
     reload,
     openCamera, closeCamera, retryLast, openQr, closeQr, handleQrScan, handleCameraCapture, handleConfirmReview, closeReview, handleRetakeFromReview,
+    handleBreak,
   } = useAttendanceClock(employee);
+
+  // Clock out ditolak server selama istirahat belum diakhiri; tombolnya dikunci di sini.
+  const sedangIstirahat = getBreakState(todayRow) === 'sedang';
 
   // Beda dengan halaman Absensi (yang men-trigger loadClockData lewat effect
   // di page-nya sendiri), widget ini harus memicu load-nya sendiri saat
@@ -112,11 +119,18 @@ export default function QuickClockInCard({ employee }) {
                 {todayRow.status_telat && <AttendanceStatusBadge row={todayRow} />}
               </div>
 
+              <BreakControl
+                row={todayRow}
+                breaking={breaking}
+                breakError={breakError}
+                onBreak={handleBreak}
+              />
+
               {!todayRow.clock_out ? (
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => openCamera('out')}
-                    disabled={acting}
+                    disabled={acting || sedangIstirahat}
                     className="flex items-center gap-2 bg-madael-red text-white px-5 py-2 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
                   >
                     <Camera size={15} />
@@ -125,12 +139,15 @@ export default function QuickClockInCard({ employee }) {
                   {qrAvailable && (
                     <button
                       onClick={() => openQr('out')}
-                      disabled={acting}
+                      disabled={acting || sedangIstirahat}
                       className="flex items-center gap-2 border border-madael-red text-madael-red px-5 py-2 text-sm font-medium tracking-[0.04em] hover:bg-madael-red hover:text-white transition-colors disabled:opacity-50"
                     >
                       <QrCode size={15} />
                       Scan QR
                     </button>
+                  )}
+                  {sedangIstirahat && (
+                    <p className="w-full text-xs text-[#6B6B6B]">Selesaikan istirahat dulu sebelum clock out.</p>
                   )}
                 </div>
               ) : (
