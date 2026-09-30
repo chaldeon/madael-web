@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from 'rea
 import Link from 'next/link';
 import { ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { formatNumberDisplay } from '@/lib/payrollConfig';
+import { WORK_MODES, EXPERIENCE_LEVELS } from '@/lib/jobListingOptions';
 
 const emptyForm = {
   title: '',
@@ -12,6 +14,12 @@ const emptyForm = {
   client_industry: '',
   location: '',
   type: '',
+  work_mode: '',
+  experience_level: '',
+  num_positions: 1,
+  salary_min: '',
+  salary_max: '',
+  show_salary: false,
   description: '',
   requirements: '',
   closes_at: '',
@@ -173,6 +181,12 @@ export default function JobPortalLowonganPage() {
       client_industry: job.client_industry || '',
       location: job.location || '',
       type: job.type || '',
+      work_mode: job.work_mode || '',
+      experience_level: job.experience_level || '',
+      num_positions: job.num_positions ?? 1,
+      salary_min: job.salary_min ?? '',
+      salary_max: job.salary_max ?? '',
+      show_salary: !!job.show_salary,
       description: job.description || '',
       requirements: job.requirements || '',
       closes_at: job.closes_at || '',
@@ -204,6 +218,17 @@ export default function JobPortalLowonganPage() {
 
   const handleToggleActiveInForm = () => {
     setFormData((prev) => ({ ...prev, is_active: !prev.is_active }));
+  };
+
+  const handleToggleShowSalary = () => {
+    setFormData((prev) => ({ ...prev, show_salary: !prev.show_salary }));
+  };
+
+  // Gaji: hanya digit, ditampilkan dengan pemisah ribuan. '' = kosong (NULL),
+  // 0 = info dari client belum ada.
+  const handleSalaryChange = (field) => (e) => {
+    const raw = e.target.value.replace(/[^\d]/g, '').slice(0, 12);
+    setFormData((prev) => ({ ...prev, [field]: raw === '' ? '' : Number(raw) }));
   };
 
   // ---- Pertanyaan untuk pelamar ----
@@ -249,6 +274,19 @@ export default function JobPortalLowonganPage() {
       return;
     }
 
+    const positions = Number(formData.num_positions);
+    if (!Number.isInteger(positions) || positions < 1) {
+      setFormError('Jumlah posisi minimal 1 dan harus bilangan bulat.');
+      return;
+    }
+
+    const salaryMin = formData.salary_min === '' ? null : Number(formData.salary_min);
+    const salaryMax = formData.salary_max === '' ? null : Number(formData.salary_max);
+    if (salaryMin > 0 && salaryMax > 0 && salaryMax < salaryMin) {
+      setFormError('Gaji maksimum tidak boleh lebih kecil dari gaji minimum.');
+      return;
+    }
+
     setSaving(true);
 
     const uniqueSlug = await findUniqueSlug(supabase, formData.slug, editingId);
@@ -260,6 +298,12 @@ export default function JobPortalLowonganPage() {
       client_industry: formData.client_industry || null,
       location: formData.location || null,
       type: formData.type || null,
+      work_mode: formData.work_mode || null,
+      experience_level: formData.experience_level || null,
+      num_positions: positions,
+      salary_min: salaryMin,
+      salary_max: salaryMax,
+      show_salary: formData.show_salary,
       description: formData.description || null,
       requirements: formData.requirements || null,
       closes_at: formData.closes_at || null,
@@ -309,6 +353,12 @@ export default function JobPortalLowonganPage() {
       client_industry: job.client_industry,
       location: job.location,
       type: job.type,
+      work_mode: job.work_mode,
+      experience_level: job.experience_level,
+      num_positions: job.num_positions ?? 1,
+      salary_min: job.salary_min,
+      salary_max: job.salary_max,
+      show_salary: !!job.show_salary,
       description: job.description,
       requirements: job.requirements,
       closes_at: job.closes_at,
@@ -331,6 +381,7 @@ export default function JobPortalLowonganPage() {
   const labelClass = 'block text-xs font-medium text-[#3D3D3D] mb-1.5';
   const textareaClass = inputClass + ' resize-y min-h-[100px]';
   const selectClass = inputClass + ' cursor-pointer';
+  const salaryFilled = Number(formData.salary_min) > 0 || Number(formData.salary_max) > 0;
 
   // Isi form dipakai bareng untuk accordion Create (di atas tabel) & Edit (nempel di row)
   const renderFormContent = () => (
@@ -386,6 +437,101 @@ export default function JobPortalLowonganPage() {
             onChange={handleFieldChange('client_industry')}
             className={inputClass}
           />
+        </div>
+
+        <div className="grid grid-cols-3 gap-5">
+          <div>
+            <label className={labelClass}>Mode Kerja</label>
+            <select value={formData.work_mode} onChange={handleFieldChange('work_mode')} className={selectClass}>
+              <option value="">— Belum ditentukan —</option>
+              {WORK_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label.id}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={labelClass}>Level Pengalaman</label>
+            <select
+              value={formData.experience_level}
+              onChange={handleFieldChange('experience_level')}
+              className={selectClass}
+            >
+              <option value="">— Belum ditentukan —</option>
+              {EXPERIENCE_LEVELS.map((l) => (
+                <option key={l.value} value={l.value}>
+                  {l.label.id} ({l.years.id})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={labelClass}>Jumlah Posisi</label>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={formData.num_positions}
+              onChange={handleFieldChange('num_positions')}
+              className={inputClass}
+            />
+          </div>
+        </div>
+
+        {/* ---- Gaji ---- */}
+        <div className="border-t border-[#E0E0E0] pt-5">
+          <label className={labelClass + ' mb-0.5'}>Gaji per Bulan (Rp)</label>
+          <p className="text-xs text-[#AAA] mb-3">
+            Opsional. Isi 0 kalau info gaji dari client belum ada — lowongan tetap bisa dipublish.
+          </p>
+          <div className="grid grid-cols-2 gap-5">
+            <div>
+              <label className={labelClass}>Minimum</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="0"
+                value={formatNumberDisplay(formData.salary_min)}
+                onChange={handleSalaryChange('salary_min')}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Maksimum</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="0"
+                value={formatNumberDisplay(formData.salary_max)}
+                onChange={handleSalaryChange('salary_max')}
+                className={inputClass}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3 mt-3">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={formData.show_salary}
+              aria-label="Tampilkan gaji di halaman publik"
+              onClick={handleToggleShowSalary}
+              className={'relative w-11 h-6 transition-colors ' + (formData.show_salary ? 'bg-madael-red' : 'bg-[#D0D0D0]')}
+            >
+              <span
+                className={
+                  'absolute top-0.5 left-0.5 w-5 h-5 bg-white transition-transform ' +
+                  (formData.show_salary ? 'translate-x-5' : 'translate-x-0')
+                }
+              />
+            </button>
+            <span className="text-sm text-[#3D3D3D]">Tampilkan gaji di halaman publik</span>
+          </div>
+          {formData.show_salary && !salaryFilled && (
+            <p className="text-xs text-[#AAA] mt-2">
+              Gaji masih 0/kosong, jadi baris gaji belum tampil di halaman publik sampai diisi.
+            </p>
+          )}
         </div>
 
         <div>

@@ -1,11 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Fragment } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/context/LanguageContext';
 import JobApplyForm from '@/components/JobApplyForm';
+import {
+  PUBLIC_JOB_COLUMNS,
+  getWorkModeLabel,
+  getExperienceLevelLabel,
+  formatPositions,
+  formatSalaryRange,
+} from '@/lib/jobListingOptions';
 
 const translations = {
   id: {
@@ -50,7 +57,7 @@ export default function KarirDetailPage() {
       setLoading(true);
       const { data, error } = await supabase
         .from('job_listings')
-        .select('*')
+        .select(PUBLIC_JOB_COLUMNS)
         .eq('slug', slug)
         .eq('is_active', true)
         .single();
@@ -102,6 +109,13 @@ export default function KarirDetailPage() {
     );
   }
 
+  const facts = [
+    getWorkModeLabel(job.work_mode, lang),
+    getExperienceLevelLabel(job.experience_level, lang),
+    formatPositions(job.num_positions, lang),
+    formatSalaryRange(job.public_salary_min, job.public_salary_max, lang),
+  ].filter(Boolean);
+
   return (
     <>
       {/* ============ HERO ============ */}
@@ -123,6 +137,16 @@ export default function KarirDetailPage() {
             {job.location && job.type && <span>·</span>}
             {job.type && <span>{job.type}</span>}
           </div>
+          {facts.length > 0 && (
+            <div className="flex flex-wrap gap-2 text-sm text-[#AAA] mt-2">
+              {facts.map((fact, i) => (
+                <Fragment key={fact}>
+                  {i > 0 && <span>·</span>}
+                  <span>{fact}</span>
+                </Fragment>
+              ))}
+            </div>
+          )}
           {job.closes_at && (
             <p className="text-xs text-madael-red mt-4">
               {t.closes}
