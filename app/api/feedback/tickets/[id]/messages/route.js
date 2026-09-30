@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase-admin';
 import { getSessionEmployee } from '@/lib/sessionEmployee';
 import {
   isUuid, readFile, readIsi, validateIsi, validateFile,
-  uploadAttachment, discardUploaded, overRateLimit,
+  uploadAttachment, discardUploaded, overRateLimit, notifySupportTeam,
 } from '@/lib/feedbackServer';
 
 const MAX_MESSAGES_PER_HOUR = 30;
@@ -26,7 +26,7 @@ export async function POST(request, { params }) {
     admin = createAdminClient();
     const { data: ticket } = await admin
       .from('feedback_tickets')
-      .select('id')
+      .select('id, ticket_no, modul_label')
       .eq('id', id)
       .eq('employee_id', emp.id)
       .maybeSingle();
@@ -61,6 +61,13 @@ export async function POST(request, { params }) {
       await discardUploaded(admin, att);
       return NextResponse.json({ error: 'Gagal mengirim pesan. Coba lagi.' }, { status: 500 });
     }
+
+    // Kabari tim support (lonceng): pengguna menunggu balasan / tiket dibuka lagi.
+    await notifySupportTeam(admin, ticket, {
+      tipe: 'tiket_pesan_baru',
+      pesan: `Pesan baru di tiket #${ticket.ticket_no} (${ticket.modul_label}) dari ${emp.nama}.`,
+      excludeId: emp.id,
+    });
 
     return NextResponse.json({ success: true }, { status: 201 });
   } catch (err) {

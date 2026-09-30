@@ -73,7 +73,7 @@ export async function GET(request, { params }) {
 // PATCH /api/feedback/tickets/[id] — pemilik menandai tiketnya selesai:
 // { status: 'selesai' }. Hanya itu yang boleh dilakukan pengguna; dan hanya
 // setelah tim support menjawab (juga ditegakkan trigger di DB). Tiket tidak
-// dihapus — pindah ke Riwayat, dan terbuka lagi bila pengguna kirim pesan baru.
+// dihapus — berstatus selesai, dan terbuka lagi bila pengguna kirim pesan baru.
 export async function PATCH(request, { params }) {
   try {
     const { id } = await params;

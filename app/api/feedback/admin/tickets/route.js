@@ -6,8 +6,10 @@ const PAGE_SIZE = 30;
 const STATUSES = ['baru', 'diproses', 'selesai'];
 const MODUL_KEYS = FEEDBACK_MODULES.map((m) => m.key);
 
-// GET /api/feedback/admin/tickets?status=aktif|baru|diproses|selesai&modul=<key|all>&page=1
-// Antrean tiket semua user. Tiket 'selesai' tetap ada (tab Riwayat), tidak dihapus.
+// GET /api/feedback/admin/tickets?status=semua|perlu_dibalas|baru|diproses|selesai&modul=<key|all>&page=1
+// 'perlu_dibalas' = tiket aktif yang pesan terakhirnya dari pengguna (menunggu tim support).
+// Antrean tiket semua user dalam satu daftar; 'selesai' hanyalah salah satu filter
+// (tiket selesai tidak pernah dihapus).
 export async function GET(request) {
   try {
     const gate = await requireSupportAccess();
@@ -15,11 +17,11 @@ export async function GET(request) {
     const { admin } = gate;
 
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status') || 'aktif';
+    const status = searchParams.get('status') || 'semua';
     const modul = searchParams.get('modul') || 'all';
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
 
-    if (status !== 'aktif' && !STATUSES.includes(status)) {
+    if (status !== 'semua' && status !== 'perlu_dibalas' && !STATUSES.includes(status)) {
       return NextResponse.json({ error: 'Filter status tidak valid.' }, { status: 400 });
     }
     if (modul !== 'all' && !MODUL_KEYS.includes(modul)) {
@@ -28,22 +30,30 @@ export async function GET(request) {
 
     let list = admin
       .from('feedback_tickets')
-      .select('id, ticket_no, employee_id, employee_nama, jenis, modul_label, ringkasan, status, last_staff_nama, closed_by, closed_by_nama, created_at, updated_at', { count: 'exact' });
-    list = status === 'aktif' ? list.in('status', ['baru', 'diproses']) : list.eq('status', status);
+      .select('id, ticket_no, employee_id, employee_nama, jenis, modul_label, ringkasan, status, last_staff_nama, last_message_is_staff, closed_by, closed_by_nama, created_at, updated_at', { count: 'exact' });
+    if (status === 'perlu_dibalas') list = list.in('status', ['baru', 'diproses']).eq('last_message_is_staff', false);
+    else if (status !== 'semua') list = list.eq('status', status);
     if (modul !== 'all') list = list.eq('modul', modul);
     list = list
       .order('updated_at', { ascending: false })
       .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
 
-    // Jumlah per status (ikut filter modul) untuk label tab/chip.
+    // Jumlah per status (ikut filter modul) untuk label filter.
     const countFor = (s) => {
       let q = admin.from('feedback_tickets').select('id', { count: 'exact', head: true }).eq('status', s);
       if (modul !== 'all') q = q.eq('modul', modul);
       return q;
     };
 
-    const [listRes, baru, diproses, selesai] = await Promise.all([
-      list, countFor('baru'), countFor('diproses'), countFor('selesai'),
+    let needsReply = admin
+      .from('feedback_tickets')
+      .select('id', { count: 'exact', head: true })
+      .in('status', ['baru', 'diproses'])
+      .eq('last_message_is_staff', false);
+    if (modul !== 'all') needsReply = needsReply.eq('modul', modul);
+
+    const [listRes, baru, diproses, selesai, perluDibalas] = await Promise.all([
+      list, countFor('baru'), countFor('diproses'), countFor('selesai'), needsReply,
     ]);
 
     if (listRes.error) {
@@ -59,7 +69,12 @@ export async function GET(request) {
       })),
       total: listRes.count || 0,
       pageSize: PAGE_SIZE,
-      counts: { baru: baru.count || 0, diproses: diproses.count || 0, selesai: selesai.count || 0 },
+      counts: {
+        baru: baru.count || 0,
+        diproses: diproses.count || 0,
+        selesai: selesai.count || 0,
+        perlu_dibalas: perluDibalas.count || 0,
+      },
     });
   } catch (err) {
     console.error('Support list error:', err);

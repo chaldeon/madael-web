@@ -5,10 +5,10 @@ import { ArrowLeft, Paperclip, Send } from 'lucide-react';
 import { FEEDBACK_JENIS_LABEL, FEEDBACK_MAX_TEXT } from '@/lib/feedbackConfig';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
-import { api, formatWaktu, inputClass, StatusBadge, AttachmentPicker } from '../parts';
+import { api, formatWaktu, inputClass, ReplyMarker, StatusBadge, AttachmentPicker } from '../parts';
 
 // Aksi status yang tersedia per status saat ini. 'selesai' hanya memindahkan
-// tiket ke Riwayat — data dan percakapan tetap utuh.
+// tiket (bisa difilter lewat 'Selesai') — data dan percakapan tetap utuh.
 const STATUS_ACTIONS = {
   baru: [['diproses', 'Tandai Diproses'], ['selesai', 'Tandai Selesai']],
   diproses: [['selesai', 'Tandai Selesai']],
@@ -115,7 +115,10 @@ export default function TicketDetail({ id, onBack, onChanged }) {
               </p>
             )}
           </div>
-          <StatusBadge status={ticket.status} />
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <StatusBadge status={ticket.status} />
+            <ReplyMarker ticket={ticket} viewer="admin" />
+          </div>
         </div>
         <div className="flex flex-wrap gap-2 mt-3">
           {STATUS_ACTIONS[ticket.status].map(([status, label]) => (

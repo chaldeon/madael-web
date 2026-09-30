@@ -118,7 +118,7 @@ export default function TicketThread({ id, onRead }) {
         {ticket.can_close && confirmingClose && (
           <div className="bg-[#F4F4F4] border border-[#E0E0E0] p-3 space-y-2">
             <p className="text-xs text-black">
-              Pindahkan tiket ini ke Riwayat? Percakapan tetap tersimpan, dan tiket terbuka lagi kalau Anda mengirim pesan baru.
+              Tandai tiket ini selesai? Percakapan tetap tersimpan, dan tiket terbuka lagi kalau Anda mengirim pesan baru.
             </p>
             <div className="flex gap-2">
               <button

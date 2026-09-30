@@ -3,7 +3,7 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { FEEDBACK_JENIS_LABEL } from '@/lib/feedbackConfig';
 import EmptyState from '@/components/EmptyState';
-import { formatWaktu, StatusBadge } from '../parts';
+import { formatWaktu, ReplyMarker, StatusBadge } from '../parts';
 
 // Daftar tiket (presentasional). Data & filter dikelola halaman induk.
 export default function TicketQueue({ tickets, total, page, pageSize, selectedId, onSelect, onPage, emptyMessage }) {
@@ -34,7 +34,10 @@ export default function TicketQueue({ tickets, total, page, pageSize, selectedId
                 </span>
                 <StatusBadge status={t.status} />
               </div>
-              <p className="text-sm font-medium text-black">{t.employee_nama}</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-black">{t.employee_nama}</p>
+                <ReplyMarker ticket={t} viewer="admin" />
+              </div>
               <p className="text-sm text-[#3D3D3D] line-clamp-2">{t.ringkasan}</p>
               <p className="text-[11px] text-[#9A9A9A] mt-1">
                 {t.last_staff_nama ? `Dijawab oleh: ${t.last_staff_nama}` : 'Belum dijawab'} · {formatWaktu(t.updated_at)}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
-import { Paperclip, X } from 'lucide-react';
+import { Check, Paperclip, X } from 'lucide-react';
 import {
   FEEDBACK_ALLOWED_MIME, FEEDBACK_MAX_FILE, FEEDBACK_STATUS_LABEL,
 } from '@/lib/feedbackConfig';
@@ -35,7 +35,7 @@ export async function api(url, options) {
 const STATUS_STYLE = {
   baru: 'bg-madael-red text-white',
   diproses: 'bg-[#FFF3CD] text-[#7A5C00]',
-  selesai: 'bg-[#E0E0E0] text-[#3D3D3D]',
+  selesai: 'bg-[#2E7D32] text-white',
 };
 
 export function StatusBadge({ status }) {
@@ -43,6 +43,28 @@ export function StatusBadge({ status }) {
     <span className={`text-[10px] font-medium tracking-[0.04em] px-2 py-0.5 ${STATUS_STYLE[status] || STATUS_STYLE.selesai}`}>
       {(FEEDBACK_STATUS_LABEL[status] || status).toUpperCase()}
     </span>
+  );
+}
+
+// Penanda "siapa yang terakhir bicara" untuk tiket aktif (tiket selesai cukup
+// pakai StatusBadge). Sisi admin: perlu dibalas / sudah dijawab. Sisi pengguna:
+// sudah dijawab / menunggu jawaban.
+export function ReplyMarker({ ticket, viewer }) {
+  if (ticket.status === 'selesai') return null;
+  const base = 'inline-flex items-center gap-1 text-[10px] font-medium tracking-[0.04em] px-2 py-0.5';
+
+  if (ticket.last_message_is_staff) {
+    return (
+      <span className={`${base} bg-[#E3F0FF] text-[#1D4E89]`}>
+        <Check size={10} strokeWidth={3} />
+        SUDAH DIJAWAB
+      </span>
+    );
+  }
+  return viewer === 'admin' ? (
+    <span className={`${base} border border-madael-red bg-white text-madael-red`}>PERLU DIBALAS</span>
+  ) : (
+    <span className={`${base} bg-[#F4F4F4] text-[#6B6B6B]`}>MENUNGGU JAWABAN</span>
   );
 }
 

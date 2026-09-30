@@ -1,12 +1,13 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { ArrowLeft, LifeBuoy, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import NewTicketForm from '@/components/feedback/NewTicketForm';
 import TicketList from '@/components/feedback/TicketList';
 import TicketThread from '@/components/feedback/TicketThread';
+import TicketDeepLink from '@/components/feedback/TicketDeepLink';
 import { api } from '@/components/feedback/parts';
 
 // Halaman /employee/* yang belum butuh sesi login — bubble disembunyikan.
@@ -18,24 +19,6 @@ const HIDDEN_PATHS = [
 ];
 
 const UNREAD_POLL_MS = 60 * 1000;
-
-// Deep link dari lonceng notifikasi: ?tiket=<id> membuka bubble langsung ke
-// tiketnya. Dipisah + dibungkus Suspense supaya useSearchParams tidak membuat
-// halaman-halaman /employee/* kehilangan pre-render.
-function TicketDeepLink({ onOpenTicket }) {
-  const tiket = useSearchParams().get('tiket');
-
-  useEffect(() => {
-    if (!tiket) return;
-    onOpenTicket(tiket);
-    // Buang param supaya refresh / klik ulang notifikasi yang sama tetap berfungsi.
-    const url = new URL(window.location.href);
-    url.searchParams.delete('tiket');
-    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
-  }, [tiket, onOpenTicket]);
-
-  return null;
-}
 
 // Bubble feedback mengambang untuk semua halaman /employee/* (dipasang di
 // app/employee/layout.js). Komponen mandiri: cek sesi sendiri, render null
@@ -112,9 +95,8 @@ export default function FeedbackBubble() {
 
   return (
     <>
-      <Suspense fallback={null}>
-        <TicketDeepLink onOpenTicket={openThread} />
-      </Suspense>
+      {/* Klik notifikasi "tiket dibalas" -> ?tiket=<id> membuka bubble di tiketnya */}
+      <TicketDeepLink param="tiket" onOpen={openThread} />
 
       {open && (
         <div

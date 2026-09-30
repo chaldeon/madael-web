@@ -6,12 +6,12 @@ import { FEEDBACK_JENIS_LABEL } from '@/lib/feedbackConfig';
 import LoadingState from '@/components/LoadingState';
 import EmptyState from '@/components/EmptyState';
 import ErrorState from '@/components/ErrorState';
-import { api, formatWaktu, StatusBadge } from './parts';
+import { api, formatWaktu, ReplyMarker, StatusBadge } from './parts';
 
 export default function TicketList({ onOpen }) {
   const [tickets, setTickets] = useState(null);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState('aktif'); // 'aktif' | 'riwayat'
+  const [filter, setFilter] = useState('semua'); // 'semua' | 'baru' | 'diproses' | 'selesai'
 
   const load = useCallback(async () => {
     setError('');
@@ -31,32 +31,45 @@ export default function TicketList({ onOpen }) {
   if (error) return <div className="p-4"><ErrorState message={error} onRetry={load} /></div>;
   if (!tickets) return <LoadingState label="Memuat tiket..." />;
 
-  // Tiket 'selesai' tidak dihapus — cuma pindah ke Riwayat.
-  const aktif = tickets.filter((t) => t.status !== 'selesai');
-  const riwayat = tickets.filter((t) => t.status === 'selesai');
-  const visible = tab === 'aktif' ? aktif : riwayat;
+  // Satu daftar; tiket 'selesai' tidak dihapus, cukup difilter.
+  const countOf = (status) => tickets.filter((t) => t.status === status).length;
+  const filters = [
+    ['semua', `Semua (${tickets.length})`],
+    ['baru', `Baru (${countOf('baru')})`],
+    ['diproses', `Diproses (${countOf('diproses')})`],
+    ['selesai', `Selesai (${countOf('selesai')})`],
+  ];
+  const visible = filter === 'semua' ? tickets : tickets.filter((t) => t.status === filter);
+  const emptyMessages = {
+    semua: 'Belum ada tiket.',
+    selesai: 'Belum ada tiket yang selesai.',
+  };
 
   return (
     <div>
-      <div className="flex items-center border-b border-[#E0E0E0] px-4">
-        {[['aktif', `Aktif (${aktif.length})`], ['riwayat', `Riwayat (${riwayat.length})`]].map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`px-3 py-2.5 text-xs font-medium border-b-2 -mb-px ${
-              tab === key ? 'border-madael-red text-black' : 'border-transparent text-[#6B6B6B] hover:text-black'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-        <button onClick={load} aria-label="Muat ulang" className="ml-auto text-[#6B6B6B] hover:text-madael-red">
+      <div className="flex items-start gap-2 border-b border-[#E0E0E0] px-4 py-2.5">
+        <div className="flex flex-wrap gap-1.5">
+          {filters.map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setFilter(key)}
+              className={`px-2.5 py-1 text-xs border transition-colors ${
+                filter === key
+                  ? 'bg-madael-red text-white border-madael-red'
+                  : 'bg-white text-[#3D3D3D] border-[#E0E0E0] hover:border-madael-red'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <button onClick={load} aria-label="Muat ulang" className="ml-auto mt-1 shrink-0 text-[#6B6B6B] hover:text-madael-red">
           <RotateCcw size={14} />
         </button>
       </div>
 
       {visible.length === 0 ? (
-        <EmptyState message={tab === 'aktif' ? 'Belum ada tiket aktif.' : 'Belum ada tiket yang selesai.'} />
+        <EmptyState message={emptyMessages[filter] || 'Tidak ada tiket pada filter ini.'} />
       ) : (
         <ul>
           {visible.map((t) => (
@@ -69,7 +82,8 @@ export default function TicketList({ onOpen }) {
                   <StatusBadge status={t.status} />
                 </div>
                 <p className={`text-sm text-black line-clamp-2 ${t.user_unread ? 'font-medium' : ''}`}>{t.ringkasan}</p>
-                <p className="text-[11px] text-[#9A9A9A] mt-1 flex items-center gap-1.5">
+                <p className="text-[11px] text-[#9A9A9A] mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                  <ReplyMarker ticket={t} viewer="user" />
                   {t.user_unread && (
                     <span className="inline-block w-2 h-2 rounded-full bg-madael-red shrink-0" aria-label="Balasan baru" />
                   )}

@@ -16,7 +16,7 @@ export async function GET(request, { params }) {
 
     const { data: ticket } = await admin
       .from('feedback_tickets')
-      .select('id, ticket_no, employee_id, employee_nama, jenis, modul_label, halaman, status, last_staff_nama, closed_by, closed_by_nama, created_at, updated_at, closed_at')
+      .select('id, ticket_no, employee_id, employee_nama, jenis, modul_label, halaman, status, last_staff_nama, last_message_is_staff, closed_by, closed_by_nama, created_at, updated_at, closed_at')
       .eq('id', id)
       .maybeSingle();
     if (!ticket) return NextResponse.json({ error: 'Tiket tidak ditemukan.' }, { status: 404 });
@@ -45,7 +45,7 @@ export async function GET(request, { params }) {
 
 // PATCH /api/feedback/admin/tickets/[id] — ubah status: { status: 'baru'|'diproses'|'selesai' }.
 // Hanya status yang berubah (trigger di DB mengunci kolom lain); 'selesai' cuma
-// memindahkan tiket ke Riwayat, bukan menghapus.
+// menandai tiket selesai (tetap ada di daftar, filter 'Selesai'), bukan menghapus.
 export async function PATCH(request, { params }) {
   try {
     const { id } = await params;
