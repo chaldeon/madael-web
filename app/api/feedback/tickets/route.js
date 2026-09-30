@@ -4,14 +4,14 @@ import { getSessionEmployee } from '@/lib/sessionEmployee';
 import { FEEDBACK_JENIS_LABEL, resolveModuleTag } from '@/lib/feedbackConfig';
 import {
   cleanPath, readFile, readIsi, validateIsi, validateFile,
-  uploadAttachment, discardUploaded, overRateLimit,
+  uploadAttachment, discardUploaded, overRateLimit, notifySupportTeam,
 } from '@/lib/feedbackServer';
 
 const MAX_TICKETS_PER_HOUR = 10;
 
 // GET /api/feedback/tickets — daftar tiket milik user yang login.
-// Tab Aktif/Riwayat dipisah di client berdasarkan status (tiket selesai
-// tetap ada, cuma pindah tampilan).
+// Satu daftar; filter status (Semua/Baru/Diproses/Selesai) dilakukan di client.
+// Tiket selesai tetap ada dan tidak pernah dihapus.
 export async function GET() {
   try {
     const session = await getSessionEmployee('id, status');
@@ -20,7 +20,7 @@ export async function GET() {
     const admin = createAdminClient();
     const { data, error } = await admin
       .from('feedback_tickets')
-      .select('id, ticket_no, jenis, modul_label, ringkasan, status, last_staff_nama, last_staff_at, user_unread, created_at, updated_at, closed_at')
+      .select('id, ticket_no, jenis, modul_label, ringkasan, status, last_staff_nama, last_staff_at, last_message_is_staff, user_unread, created_at, updated_at, closed_at')
       .eq('employee_id', session.emp.id)
       .order('updated_at', { ascending: false })
       .limit(200);
@@ -38,7 +38,7 @@ export async function POST(request) {
   let admin;
   let att = null;
   try {
-    const session = await getSessionEmployee('id, status');
+    const session = await getSessionEmployee('id, nama, status');
     if (session.error) return NextResponse.json({ error: session.error }, { status: session.status });
     const { emp } = session;
 
@@ -84,6 +84,18 @@ export async function POST(request) {
       await discardUploaded(admin, att);
       return NextResponse.json({ error: 'Gagal mengirim tiket. Coba lagi.' }, { status: 500 });
     }
+
+    // Kabari tim support (lonceng). Nomor tiket dibuat DB, jadi diambil dulu.
+    const { data: created } = await admin
+      .from('feedback_tickets')
+      .select('ticket_no')
+      .eq('id', ticketId)
+      .maybeSingle();
+    await notifySupportTeam(admin, { id: ticketId }, {
+      tipe: 'tiket_baru',
+      pesan: `Tiket baru${created ? ` #${created.ticket_no}` : ''} (${tag.label}) dari ${emp.nama}: ${FEEDBACK_JENIS_LABEL[jenis]}.`,
+      excludeId: emp.id,
+    });
 
     return NextResponse.json({ success: true, id: ticketId }, { status: 201 });
   } catch (err) {
