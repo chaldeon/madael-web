@@ -161,10 +161,9 @@ export default function KarirDetailPage() {
               <h2 className="font-serif text-[22px] font-normal text-black tracking-[-0.02em] mb-4 border-l-[3px] border-madael-red pl-4">
                 {t.description}
               </h2>
-              <div
-                className="text-sm text-[#3D3D3D] leading-relaxed whitespace-pre-line"
-                dangerouslySetInnerHTML={{ __html: job.description }}
-              />
+              <div className="text-sm text-[#3D3D3D] leading-relaxed whitespace-pre-line">
+                {job.description}
+              </div>
             </div>
           )}
 
@@ -174,10 +173,9 @@ export default function KarirDetailPage() {
               <h2 className="font-serif text-[22px] font-normal text-black tracking-[-0.02em] mb-4 border-l-[3px] border-madael-red pl-4">
                 {t.requirements}
               </h2>
-              <div
-                className="text-sm text-[#3D3D3D] leading-relaxed whitespace-pre-line"
-                dangerouslySetInnerHTML={{ __html: job.requirements }}
-              />
+              <div className="text-sm text-[#3D3D3D] leading-relaxed whitespace-pre-line">
+                {job.requirements}
+              </div>
             </div>
           )}
 
