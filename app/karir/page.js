@@ -13,10 +13,21 @@ import {
   SlidersHorizontal,
   SearchX,
   ExternalLink,
+  Laptop,
+  TrendingUp,
+  Users,
+  Wallet,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/context/LanguageContext';
 import JobApplyForm from '@/components/JobApplyForm';
+import {
+  PUBLIC_JOB_COLUMNS,
+  getWorkModeLabel,
+  getExperienceLevelLabel,
+  formatPositions,
+  formatSalaryRange,
+} from '@/lib/jobListingOptions';
 
 const translations = {
   id: {
@@ -84,7 +95,7 @@ export default function KarirPage() {
       setLoading(true);
       const { data, error } = await supabase
         .from('job_listings')
-        .select('*')
+        .select(PUBLIC_JOB_COLUMNS)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
@@ -139,6 +150,12 @@ export default function KarirPage() {
     const isSm = size === 'sm';
     const textClass = isSm ? 'text-[11px]' : 'text-xs';
     const iconSize = isSm ? 11 : 12;
+    const chipClass = `inline-flex items-center gap-1 ${textClass} text-[#6B6B6B] bg-[#F4F4F4] px-2 py-0.5`;
+    const workMode = getWorkModeLabel(job.work_mode, lang);
+    const salary = formatSalaryRange(job.public_salary_min, job.public_salary_max, lang);
+    // Kartu ringkas (sm) cukup mode kerja + gaji; level & jumlah posisi ada di panel detail.
+    const level = isSm ? null : getExperienceLevelLabel(job.experience_level, lang);
+    const positions = isSm ? null : formatPositions(job.num_positions, lang);
     return (
       <div className="flex flex-wrap gap-1.5">
         {job.department && (
@@ -163,6 +180,30 @@ export default function KarirPage() {
           >
             <Briefcase size={iconSize} />
             {job.type}
+          </span>
+        )}
+        {workMode && (
+          <span className={chipClass}>
+            <Laptop size={iconSize} />
+            {workMode}
+          </span>
+        )}
+        {level && (
+          <span className={chipClass}>
+            <TrendingUp size={iconSize} />
+            {level}
+          </span>
+        )}
+        {positions && (
+          <span className={chipClass}>
+            <Users size={iconSize} />
+            {positions}
+          </span>
+        )}
+        {salary && (
+          <span className={chipClass}>
+            <Wallet size={iconSize} />
+            {salary}
           </span>
         )}
       </div>
