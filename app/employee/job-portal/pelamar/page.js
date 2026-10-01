@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, Fragment } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowUp, ArrowDown, ArrowUpDown, CalendarClock, X } from 'lucide-react';
+import { ArrowUp, ArrowDown, ArrowUpDown, CalendarClock, Search, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { notifyEmployee } from '@/lib/notify';
 
@@ -33,6 +33,27 @@ function csvEscape(value) {
     return '"' + str.replace(/"/g, '""') + '"';
   }
   return str;
+}
+
+// --- Pencarian ---
+const normalizeText = (v) => String(v ?? '').toLowerCase();
+const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Bungkus bagian teks yang cocok dengan kata kunci pakai <mark>.
+function highlightText(text, terms) {
+  const str = String(text ?? '');
+  if (!str || terms.length === 0) return str;
+  const pattern = new RegExp('(' + terms.map(escapeRegExp).join('|') + ')', 'gi');
+  // split dengan capture group: indeks ganjil = potongan yang cocok
+  return str.split(pattern).map((part, i) =>
+    i % 2 === 1 ? (
+      <mark key={i} className="bg-[#FEF3C7] text-black px-0.5">
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
 }
 
 // Kolom yang bisa disortir — pola sama seperti app/employee/list.
@@ -71,6 +92,8 @@ export default function JobPortalCandidatesPage() {
   const [error, setError] = useState(null);
   const [filterJob, setFilterJob] = useState(posisiParam);
   const [filterStatus, setFilterStatus] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchInAnswers, setSearchInAnswers] = useState(true);
   const [updatingId, setUpdatingId] = useState(null);
   const [catatanDrafts, setCatatanDrafts] = useState({});
   const [savingCatatanId, setSavingCatatanId] = useState(null);
@@ -238,15 +261,51 @@ export default function JobPortalCandidatesPage() {
     setSchedulingApp(null);
   };
 
-  const filtered = useMemo(() => {
+  // Kata kunci dipecah per spasi; semua kata harus ketemu (AND), jadi
+  // "budi jakarta" bisa menemukan Budi yang jawabannya menyebut Jakarta.
+  const searchTerms = useMemo(
+    () => searchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean),
+    [searchQuery]
+  );
+
+  // Index teks per pelamar, dibuat sekali setiap data berubah (bukan tiap ketikan).
+  const searchIndex = useMemo(() => {
+    const index = new Map();
+    applications.forEach((a) => {
+      index.set(a.id, {
+        identity: [a.nama, a.email, a.telepon].map(normalizeText).join(' \n '),
+        answers: Array.isArray(a.answers) ? a.answers.map((qa) => normalizeText(qa?.answer)).join(' \n ') : '',
+      });
+    });
+    return index;
+  }, [applications]);
+
+  const { filtered, answerOnlyIds } = useMemo(() => {
+    // id pelamar yang hanya cocok lewat isi jawaban (bukan nama/email/telepon)
+    const answerOnly = new Set();
+
     const base = applications.filter((a) => {
       const matchJob = !filterJob || (filterJob === 'umum' ? !a.job_id : a.job_listings?.slug === filterJob);
       const matchStatus = !filterStatus || a.status === filterStatus;
-      return matchJob && matchStatus;
+      if (!matchJob || !matchStatus) return false;
+
+      if (searchTerms.length === 0) return true;
+      const entry = searchIndex.get(a.id);
+      if (!entry) return false;
+
+      if (searchTerms.every((t) => entry.identity.includes(t))) return true;
+      if (!searchInAnswers) return false;
+
+      const combined = entry.identity + ' \n ' + entry.answers;
+      if (searchTerms.every((t) => combined.includes(t))) {
+        answerOnly.add(a.id);
+        return true;
+      }
+      return false;
     });
 
     const getValue = SORT_COLUMNS[sortField]?.get;
-    if (!getValue) return base;
+    if (!getValue) return { filtered: base, answerOnlyIds: answerOnly };
 
     const sorted = [...base].sort((a, b) => {
       const va = getValue(a);
@@ -255,8 +314,8 @@ export default function JobPortalCandidatesPage() {
       if (va > vb) return 1;
       return 0;
     });
-    return sortDir === 'desc' ? sorted.reverse() : sorted;
-  }, [applications, filterJob, filterStatus, sortField, sortDir]);
+    return { filtered: sortDir === 'desc' ? sorted.reverse() : sorted, answerOnlyIds: answerOnly };
+  }, [applications, filterJob, filterStatus, searchTerms, searchIndex, searchInAnswers, sortField, sortDir]);
 
   const handleSort = (colKey) => {
     if (sortField === colKey) {
@@ -303,7 +362,10 @@ export default function JobPortalCandidatesPage() {
       <div className="flex items-end justify-between mb-8 flex-wrap gap-4">
         <div>
           <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Semua Pelamar</h1>
-          <p className="text-sm text-[#6B6B6B] mt-1">{applications.length} total pelamar</p>
+          <p className="text-sm text-[#6B6B6B] mt-1">
+            {applications.length} total pelamar
+            {(filterJob || filterStatus || searchTerms.length > 0) && ` · ${filtered.length} ditampilkan`}
+          </p>
         </div>
         <button
           onClick={handleExportCsv}
@@ -325,7 +387,28 @@ export default function JobPortalCandidatesPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-6">
+        <div className="relative flex-1 min-w-[240px] max-w-[360px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9A9A9A] pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Cari nama, email, atau telepon..."
+            className="w-full border border-[#E0E0E0] pl-9 pr-8 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label="Hapus pencarian"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#9A9A9A] hover:text-black"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
         <select value={filterJob} onChange={(e) => setFilterJob(e.target.value)} className={selectClass}>
           <option value="">Semua Posisi</option>
           <option value="umum">Umum (tanpa posisi spesifik)</option>
@@ -340,6 +423,16 @@ export default function JobPortalCandidatesPage() {
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
+
+        <label className="flex items-center gap-2 text-xs text-[#3D3D3D] cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={searchInAnswers}
+            onChange={(e) => setSearchInAnswers(e.target.checked)}
+            className="accent-[#B91C1C]"
+          />
+          Cari juga di jawaban screening
+        </label>
       </div>
 
       <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
@@ -348,7 +441,7 @@ export default function JobPortalCandidatesPage() {
         ) : error ? (
           <p className="text-sm text-madael-red p-6">Gagal memuat data: {error}</p>
         ) : filtered.length === 0 ? (
-          <p className="text-sm text-[#6B6B6B] p-6">Tidak ada pelamar yang cocok dengan filter.</p>
+          <p className="text-sm text-[#6B6B6B] p-6">{searchTerms.length > 0 ? `Tidak ada pelamar yang cocok dengan pencarian "${searchQuery.trim()}".` : 'Tidak ada pelamar yang cocok dengan filter.'}</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -371,26 +464,33 @@ export default function JobPortalCandidatesPage() {
                 return (
                   <Fragment key={a.id}>
                     <tr className="border-b border-[#F0F0F0] last:border-0 align-top">
-                      <td className="px-5 py-3.5 text-black">{a.nama}</td>
+                      <td className="px-5 py-3.5 text-black">{highlightText(a.nama, searchTerms)}</td>
                       <td className="px-5 py-3.5 text-[#3D3D3D]">{a.job_listings?.title || 'CV Umum'}</td>
                       <td className="px-5 py-3.5 text-[#6B6B6B]">
                         {new Date(a.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </td>
                       <td className="px-5 py-3.5 text-[#6B6B6B]">
-                        <div>{a.email}</div>
-                        {a.telepon && <div className="text-xs">{a.telepon}</div>}
+                        <div>{highlightText(a.email, searchTerms)}</div>
+                        {a.telepon && <div className="text-xs">{highlightText(a.telepon, searchTerms)}</div>}
                       </td>
                       <td className="px-5 py-3.5">
                         {a.cv_drive_id ? <CvLink driveId={a.cv_drive_id} /> : <span className="text-xs text-[#AAA]">—</span>}
                       </td>
                       <td className="px-5 py-3.5">
                         {hasAnswers ? (
-                          <button
-                            onClick={() => setExpandedId(isExpanded ? null : a.id)}
-                            className="text-xs font-medium text-madael-red hover:text-madael-dark"
-                          >
-                            {isExpanded ? 'Tutup' : `Lihat (${a.answers.length})`}
-                          </button>
+                          <div className="flex flex-col items-start gap-1">
+                            <button
+                              onClick={() => setExpandedId(isExpanded ? null : a.id)}
+                              className="text-xs font-medium text-madael-red hover:text-madael-dark"
+                            >
+                              {isExpanded ? 'Tutup' : `Lihat (${a.answers.length})`}
+                            </button>
+                            {answerOnlyIds.has(a.id) && (
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 bg-[#FEF3C7] text-[#92700C]">
+                                Cocok di jawaban
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-xs text-[#AAA]">—</span>
                         )}
@@ -470,7 +570,7 @@ export default function JobPortalCandidatesPage() {
                                 {a.answers.map((qa, i) => (
                                   <div key={i} className="text-xs">
                                     <span className="text-[#6B6B6B]">{qa.question}</span>
-                                    <p className="text-black mt-0.5">{qa.answer || '—'}</p>
+                                    <p className="text-black mt-0.5">{qa.answer ? highlightText(qa.answer, searchInAnswers ? searchTerms : []) : '—'}</p>
                                   </div>
                                 ))}
                               </div>
