@@ -28,6 +28,7 @@ import {
   formatPositions,
   formatSalaryRange,
 } from '@/lib/jobListingOptions';
+import { isPastDeadline } from '@/lib/jobStatus';
 
 const translations = {
   id: {
@@ -102,7 +103,8 @@ export default function KarirPage() {
       if (error) {
         setError(error.message);
       } else {
-        setJobs(data || []);
+        // Lowongan yang deadline-nya sudah lewat otomatis tidak ditampilkan.
+        setJobs((data || []).filter((job) => !isPastDeadline(job)));
       }
       setLoading(false);
     }

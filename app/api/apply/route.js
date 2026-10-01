@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { uploadCVToDrive } from '@/lib/googleDrive';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { notifyByModule } from '@/lib/notify';
+import { isJobOpen } from '@/lib/jobStatus';
 
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 const GENERAL_FOLDER_NAME = 'Umum';
@@ -65,6 +66,37 @@ export async function POST(request) {
 
     if (file.size > MAX_SIZE) {
       return NextResponse.json({ error: 'Ukuran file CV maksimal 5MB.' }, { status: 400 });
+    }
+
+    // Tolak lamaran ke lowongan yang sudah nonaktif atau lewat deadline.
+    // Dicek di server (bukan hanya disembunyikan di halaman publik) supaya link
+    // lama / request langsung tidak bisa menembus lowongan yang sudah tutup.
+    // Dilakukan SEBELUM upload ke Drive agar tidak menyisakan CV yatim.
+    if (!isGeneral) {
+      const { data: job, error: jobError } = await createAdminClient()
+        .from('job_listings')
+        .select('id, is_active, closes_at')
+        .eq('id', jobId)
+        .maybeSingle();
+
+      if (jobError) {
+        console.error('Supabase job lookup error:', jobError);
+        return NextResponse.json(
+          { error: 'Terjadi kesalahan pada server. Silakan coba lagi.' },
+          { status: 500 }
+        );
+      }
+
+      if (!job) {
+        return NextResponse.json({ error: 'Lowongan tidak ditemukan.' }, { status: 404 });
+      }
+
+      if (!isJobOpen(job)) {
+        return NextResponse.json(
+          { error: 'Lowongan ini sudah ditutup dan tidak lagi menerima lamaran.' },
+          { status: 410 }
+        );
+      }
     }
 
     // Siapkan file untuk diupload
