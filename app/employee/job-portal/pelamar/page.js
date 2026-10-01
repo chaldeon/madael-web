@@ -200,6 +200,23 @@ export default function JobPortalCandidatesPage() {
     });
   };
 
+  // Kirim email status ke pelamar lewat route server. Gagal kirim tidak
+  // membatalkan perubahan status yang sudah tersimpan — cukup kabari admin.
+  const sendStatusEmail = async (id, status) => {
+    try {
+      const res = await fetch(`/api/applications/${id}/status-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) return;
+      const json = await res.json().catch(() => ({}));
+      alert('Status tersimpan, tetapi ' + (json.error || 'email ke pelamar gagal dikirim.'));
+    } catch {
+      alert('Status tersimpan, tetapi email ke pelamar gagal dikirim.');
+    }
+  };
+
   const handleStatusChange = async (id, newStatus) => {
     const current = applications.find((a) => a.id === id);
     if (!current || current.status === newStatus) return;
@@ -215,7 +232,11 @@ export default function JobPortalCandidatesPage() {
       // Begitu status masuk "Interview" dan belum ada jadwal, langsung buka
       // form jadwal — memudahkan alur, tidak perlu klik "Jadwalkan" lagi.
       if (newStatus === 'Interview' && !updatedApp.interview_at) {
+        // Email interview dikirim setelah jadwal disimpan (handleSaveSchedule),
+        // supaya pelamar langsung menerima tanggal/lokasinya.
         openScheduleModal(updatedApp);
+      } else if (newStatus !== 'Baru') {
+        await sendStatusEmail(id, newStatus);
       }
     } else {
       alert('Gagal update status: ' + error.message);
@@ -315,6 +336,9 @@ export default function JobPortalCandidatesPage() {
       pesan: `Kamu dijadwalkan jadi interviewer untuk ${schedulingApp.nama} (${interviewLabel}) pada ${new Date(payload.interview_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}.`,
       link: '/employee/job-portal/pelamar',
     });
+
+    // Pelamar dapat email jadwal interview (juga saat jadwal diubah).
+    await sendStatusEmail(data.id, 'Interview');
 
     setScheduleSaving(false);
     setSchedulingApp(null);
