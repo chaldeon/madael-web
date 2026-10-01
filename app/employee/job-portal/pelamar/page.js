@@ -3,9 +3,11 @@
 import { useEffect, useState, useCallback, useMemo, Fragment } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowUp, ArrowDown, ArrowUpDown, CalendarClock, Search, X } from 'lucide-react';
+import { ArrowUp, ArrowDown, ArrowUpDown, CalendarClock, MessageSquare, Search, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { notifyEmployee } from '@/lib/notify';
+import { useModuleAccess } from '@/lib/useModuleAccess';
+import { logActivity } from '@/lib/activityLog';
 
 const STATUS_OPTIONS = ['Baru', 'Review', 'Interview', 'Ditolak', 'Diterima'];
 
@@ -33,6 +35,27 @@ function csvEscape(value) {
     return '"' + str.replace(/"/g, '""') + '"';
   }
   return str;
+}
+
+const formatWaktu = (value) =>
+  new Date(value).toLocaleString('id-ID', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+
+// Catatan terbaru di atas.
+const getNotes = (a) =>
+  [...(a.application_notes || [])].sort((x, y) => new Date(y.created_at) - new Date(x.created_at));
+
+// Untuk CSV: urut kronologis, catatan lama (kolom `catatan`) di paling depan.
+function notesForCsv(a) {
+  const lines = [...(a.application_notes || [])]
+    .sort((x, y) => new Date(x.created_at) - new Date(y.created_at))
+    .map((n) => {
+      const tgl = new Date(n.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+      return `[${tgl}] ${n.author_nama}: ${n.isi}`;
+    });
+  if (a.catatan) lines.unshift(a.catatan);
+  return lines.join('\n');
 }
 
 // --- Pencarian ---
@@ -95,8 +118,11 @@ export default function JobPortalCandidatesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchInAnswers, setSearchInAnswers] = useState(true);
   const [updatingId, setUpdatingId] = useState(null);
-  const [catatanDrafts, setCatatanDrafts] = useState({});
-  const [savingCatatanId, setSavingCatatanId] = useState(null);
+  const { employee } = useModuleAccess('job_portal');
+  const [notesAppId, setNotesAppId] = useState(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [sortField, setSortField] = useState('tanggal');
   const [sortDir, setSortDir] = useState('desc');
@@ -120,7 +146,7 @@ export default function JobPortalCandidatesPage() {
     const { data, error } = await supabase
       .from('applications')
       .select(
-        'id, created_at, nama, email, telepon, status, cv_drive_id, cv_filename, job_id, catatan, answers, interview_at, interview_interviewer_id, interview_location, job_listings ( title, slug ), interviewer:interview_interviewer_id ( nama )'
+        'id, created_at, nama, email, telepon, status, cv_drive_id, cv_filename, job_id, catatan, answers, interview_at, interview_interviewer_id, interview_location, job_listings ( title, slug ), interviewer:interview_interviewer_id ( nama ), application_notes ( id, isi, author_nama, created_at )'
       )
       .order('created_at', { ascending: false });
 
@@ -128,7 +154,6 @@ export default function JobPortalCandidatesPage() {
       setError(error.message);
     } else {
       setApplications(data || []);
-      setCatatanDrafts(Object.fromEntries((data || []).map((a) => [a.id, a.catatan || ''])));
       const uniqueJobs = new Map();
       (data || []).forEach((a) => {
         if (a.job_listings?.slug) uniqueJobs.set(a.job_listings.slug, a.job_listings.title);
@@ -163,22 +188,32 @@ export default function JobPortalCandidatesPage() {
     fetchInterviewers();
   }, [fetchApplications, fetchInterviewers]);
 
+  const logStatusChange = (app, dari, ke) => {
+    if (!employee?.id) return;
+    logActivity(supabase, {
+      userId: employee.id,
+      aksi: 'ubah_status_pelamar',
+      targetTable: 'applications',
+      targetId: app.id,
+      detail: { nama: app.nama, posisi: app.job_listings?.title || 'CV Umum', dari, ke },
+    });
+  };
+
   const handleStatusChange = async (id, newStatus) => {
+    const current = applications.find((a) => a.id === id);
+    if (!current || current.status === newStatus) return;
+    const oldStatus = current.status;
+
     setUpdatingId(id);
     const { error } = await supabase.from('applications').update({ status: newStatus }).eq('id', id);
 
     if (!error) {
-      let updatedApp = null;
-      setApplications((prev) =>
-        prev.map((a) => {
-          if (a.id !== id) return a;
-          updatedApp = { ...a, status: newStatus };
-          return updatedApp;
-        })
-      );
+      logStatusChange(current, oldStatus, newStatus);
+      const updatedApp = { ...current, status: newStatus };
+      setApplications((prev) => prev.map((a) => (a.id === id ? updatedApp : a)));
       // Begitu status masuk "Interview" dan belum ada jadwal, langsung buka
       // form jadwal — memudahkan alur, tidak perlu klik "Jadwalkan" lagi.
-      if (newStatus === 'Interview' && updatedApp && !updatedApp.interview_at) {
+      if (newStatus === 'Interview' && !updatedApp.interview_at) {
         openScheduleModal(updatedApp);
       }
     } else {
@@ -187,21 +222,44 @@ export default function JobPortalCandidatesPage() {
     setUpdatingId(null);
   };
 
-  const handleCatatanBlur = async (id) => {
-    const original = applications.find((a) => a.id === id)?.catatan || '';
-    const draft = catatanDrafts[id] ?? '';
-    if (draft === original) return;
-
-    setSavingCatatanId(id);
-    const { error } = await supabase.from('applications').update({ catatan: draft }).eq('id', id);
-
-    if (!error) {
-      setApplications((prev) => prev.map((a) => (a.id === id ? { ...a, catatan: draft } : a)));
-    } else {
-      alert('Gagal menyimpan catatan: ' + error.message);
-    }
-    setSavingCatatanId(null);
+  const openNotes = (id) => {
+    setNoteError(null);
+    setNoteDraft('');
+    setNotesAppId(id);
   };
+  const closeNotes = () => setNotesAppId(null);
+
+  const handleAddNote = async () => {
+    const isi = noteDraft.trim();
+    if (!isi || !notesAppId) return;
+
+    setNoteSaving(true);
+    setNoteError(null);
+
+    // author_id, author_nama, created_at diisi trigger di database.
+    const { data, error } = await supabase
+      .from('application_notes')
+      .insert([{ application_id: notesAppId, isi }])
+      .select('id, isi, author_nama, created_at')
+      .single();
+
+    if (error) {
+      setNoteError(error.message || 'Gagal menyimpan catatan.');
+      setNoteSaving(false);
+      return;
+    }
+
+    setApplications((prev) =>
+      prev.map((a) =>
+        a.id === notesAppId ? { ...a, application_notes: [data, ...(a.application_notes || [])] } : a
+      )
+    );
+    setNoteDraft('');
+    setNoteSaving(false);
+  };
+
+  const notesApp = notesAppId ? applications.find((a) => a.id === notesAppId) : null;
+  const notesList = notesApp ? getNotes(notesApp) : [];
 
   const openScheduleModal = (app) => {
     if (app.status !== 'Interview') return; // jaga-jaga — tombolnya sendiri sudah dikunci di UI
@@ -335,7 +393,7 @@ export default function JobPortalCandidatesPage() {
       a.job_listings?.title || 'CV Umum',
       new Date(a.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
       a.status,
-      catatanDrafts[a.id] ?? a.catatan ?? '',
+      notesForCsv(a),
       a.cv_drive_id ? `https://drive.google.com/file/d/${a.cv_drive_id}/view` : '',
     ]);
 
@@ -461,6 +519,8 @@ export default function JobPortalCandidatesPage() {
               {filtered.map((a) => {
                 const hasAnswers = Array.isArray(a.answers) && a.answers.length > 0;
                 const isExpanded = expandedId === a.id;
+                const notes = getNotes(a);
+                const noteCount = notes.length + (a.catatan ? 1 : 0);
                 return (
                   <Fragment key={a.id}>
                     <tr className="border-b border-[#F0F0F0] last:border-0 align-top">
@@ -495,16 +555,23 @@ export default function JobPortalCandidatesPage() {
                           <span className="text-xs text-[#AAA]">—</span>
                         )}
                       </td>
-                      <td className="px-5 py-3.5 min-w-[180px]">
-                        <textarea
-                          value={catatanDrafts[a.id] ?? ''}
-                          onChange={(e) => setCatatanDrafts((prev) => ({ ...prev, [a.id]: e.target.value }))}
-                          onBlur={() => handleCatatanBlur(a.id)}
-                          disabled={savingCatatanId === a.id}
-                          rows={2}
-                          placeholder="Tambah catatan..."
-                          className="w-full border border-[#E0E0E0] px-2 py-1.5 text-xs text-black bg-white focus:outline-none focus:border-madael-red transition-colors resize-y"
-                        />
+                      <td className="px-5 py-3.5 min-w-[200px]">
+                        {notes[0] ? (
+                          <div className="text-xs mb-1.5">
+                            <p className="text-black line-clamp-2 whitespace-pre-wrap">{notes[0].isi}</p>
+                            <p className="text-[#9A9A9A] mt-0.5">{notes[0].author_nama} · {formatWaktu(notes[0].created_at)}</p>
+                          </div>
+                        ) : a.catatan ? (
+                          <p className="text-xs text-black line-clamp-2 whitespace-pre-wrap mb-1.5">{a.catatan}</p>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => openNotes(a.id)}
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-madael-red hover:text-madael-dark"
+                        >
+                          <MessageSquare size={13} />
+                          {noteCount > 0 ? `Catatan (${noteCount})` : 'Tambah catatan'}
+                        </button>
                       </td>
                       <td className="px-5 py-3.5">
                         <select
@@ -586,6 +653,58 @@ export default function JobPortalCandidatesPage() {
           </table>
         )}
       </div>
+
+      {notesApp && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={closeNotes}>
+          <div
+            className="bg-white w-full max-w-[480px] p-6 relative max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button onClick={closeNotes} className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black">
+              <X size={18} />
+            </button>
+            <h2 className="text-sm font-medium text-black mb-1">Catatan Pelamar</h2>
+            <p className="text-xs text-[#6B6B6B] mb-4">
+              {notesApp.nama} — {notesApp.job_listings?.title || 'CV Umum'}
+            </p>
+
+            <div className="flex-1 overflow-y-auto space-y-3 mb-4 min-h-[60px]">
+              {notesList.length === 0 && !notesApp.catatan && (
+                <p className="text-xs text-[#9A9A9A]">Belum ada catatan.</p>
+              )}
+              {notesList.map((n) => (
+                <div key={n.id} className="border border-[#F0F0F0] bg-[#FAFAFA] px-3 py-2.5">
+                  <p className="text-xs text-black whitespace-pre-wrap">{n.isi}</p>
+                  <p className="text-[11px] text-[#9A9A9A] mt-1">{n.author_nama} · {formatWaktu(n.created_at)}</p>
+                </div>
+              ))}
+              {notesApp.catatan && (
+                <div className="border border-dashed border-[#E0E0E0] px-3 py-2.5">
+                  <p className="text-xs text-black whitespace-pre-wrap">{notesApp.catatan}</p>
+                  <p className="text-[11px] text-[#9A9A9A] mt-1">Catatan awal (sebelum fitur multi-entry)</p>
+                </div>
+              )}
+            </div>
+
+            {noteError && <p className="text-xs text-red-600 mb-2">{noteError}</p>}
+            <textarea
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              rows={3}
+              maxLength={2000}
+              placeholder="Tulis catatan baru..."
+              className="w-full border border-[#E0E0E0] px-3 py-2 text-xs text-black bg-white focus:outline-none focus:border-madael-red transition-colors resize-y mb-3"
+            />
+            <button
+              onClick={handleAddNote}
+              disabled={noteSaving || !noteDraft.trim()}
+              className="w-full bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+            >
+              {noteSaving ? 'Menyimpan...' : 'Tambah Catatan'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {schedulingApp && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={() => setSchedulingApp(null)}>
