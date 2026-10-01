@@ -6,6 +6,7 @@ import { ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { formatNumberDisplay } from '@/lib/payrollConfig';
 import { WORK_MODES, EXPERIENCE_LEVELS } from '@/lib/jobListingOptions';
+import { getJobStatus, getDeadlineDate, isPastDeadline } from '@/lib/jobStatus';
 
 const emptyForm = {
   title: '',
@@ -36,6 +37,27 @@ const QUESTION_TYPES = [
 
 const MAX_QUESTIONS = 5;
 
+// Badge status efektif: Aktif / Ditutup (lewat deadline) / Nonaktif (manual).
+const STATUS_BADGE = {
+  open: { label: 'Aktif', className: 'bg-[#DCFCE7] text-[#166534]' },
+  expired: { label: 'Ditutup (lewat deadline)', className: 'bg-[#FEF3C7] text-[#92700C]' },
+  inactive: { label: 'Nonaktif', className: 'bg-[#F0F0F0] text-[#6B6B6B]' },
+};
+const STATUS_RANK = { open: 2, expired: 1, inactive: 0 };
+
+// 'YYYY-MM-DD' → '5 Okt 2026' tanpa geser zona waktu.
+function formatDeadlineLabel(job) {
+  const d = getDeadlineDate(job);
+  if (!d) return null;
+  const [y, m, day] = d.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, day)).toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 function slugify(text) {
   return text
     .toLowerCase()
@@ -63,7 +85,7 @@ async function findUniqueSlug(supabase, baseSlug, excludeId = null) {
 const SORT_COLUMNS = {
   judul: { get: (job) => (job.title || '').toLowerCase() },
   pelamar: { get: (job, ctx) => ctx.applicantCounts[job.id] || 0 },
-  status: { get: (job) => (job.is_active ? 1 : 0) },
+  status: { get: (job) => STATUS_RANK[getJobStatus(job)] },
 };
 
 function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
@@ -169,7 +191,9 @@ export default function JobPortalLowonganPage() {
     setOpenId('new');
   };
 
-  const openEditForm = (job) => {
+  // extend=true (tombol "Perpanjang"): form dibuka dengan toggle Aktif menyala,
+  // karena tujuan memperpanjang adalah membuka lowongan kembali.
+  const openEditForm = (job, { extend = false } = {}) => {
     if (openId === job.id) {
       closeForm();
       return;
@@ -190,7 +214,7 @@ export default function JobPortalLowonganPage() {
       description: job.description || '',
       requirements: job.requirements || '',
       closes_at: job.closes_at || '',
-      is_active: job.is_active,
+      is_active: extend ? true : job.is_active,
       questions: Array.isArray(job.questions) ? job.questions : [],
     });
     setSlugTouched(true);
@@ -361,7 +385,9 @@ export default function JobPortalLowonganPage() {
       show_salary: !!job.show_salary,
       description: job.description,
       requirements: job.requirements,
-      closes_at: job.closes_at,
+      // Deadline yang sudah lewat tidak ikut disalin — salinannya akan langsung
+      // tertutup otomatis begitu diaktifkan.
+      closes_at: isPastDeadline(job) ? null : job.closes_at,
       is_active: false,
       questions: Array.isArray(job.questions) ? job.questions : [],
     };
@@ -633,6 +659,18 @@ export default function JobPortalLowonganPage() {
           </div>
         </div>
 
+        {isPastDeadline({ closes_at: formData.closes_at }) ? (
+          <p className="text-xs text-madael-red -mt-2">
+            Deadline sudah lewat, jadi lowongan ini tertutup otomatis meski toggle Aktif menyala. Ubah tanggalnya
+            ke hari ini atau setelahnya, atau kosongkan untuk membuka kembali.
+          </p>
+        ) : (
+          <p className="text-xs text-[#AAA] -mt-2">
+            Lowongan otomatis ditutup setelah tanggal deadline (masih terbuka sepanjang hari deadline). Kosongkan
+            jika tidak ada batas waktu.
+          </p>
+        )}
+
         {formError && <p className="text-sm text-madael-red">{formError}</p>}
 
         <div className="flex gap-3 pt-2">
@@ -770,14 +808,12 @@ export default function JobPortalLowonganPage() {
                         )}
                       </td>
                       <td className="px-5 py-3.5">
-                        <span
-                          className={
-                            'text-xs font-medium px-2.5 py-1 ' +
-                            (job.is_active ? 'bg-[#DCFCE7] text-[#166534]' : 'bg-[#F0F0F0] text-[#6B6B6B]')
-                          }
-                        >
-                          {job.is_active ? 'Aktif' : 'Nonaktif'}
+                        <span className={'text-xs font-medium px-2.5 py-1 ' + STATUS_BADGE[getJobStatus(job)].className}>
+                          {STATUS_BADGE[getJobStatus(job)].label}
                         </span>
+                        {formatDeadlineLabel(job) && (
+                          <div className="text-xs text-[#AAA] mt-1.5">Deadline: {formatDeadlineLabel(job)}</div>
+                        )}
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-4 flex-wrap">
@@ -796,13 +832,22 @@ export default function JobPortalLowonganPage() {
                           >
                             {duplicatingId === job.id ? 'Menduplikat...' : 'Duplikat'}
                           </button>
-                          <button
-                            onClick={() => handleToggleActive(job)}
-                            disabled={togglingId === job.id}
-                            className="text-xs font-medium text-[#6B6B6B] hover:text-black disabled:opacity-50"
-                          >
-                            {job.is_active ? 'Nonaktifkan' : 'Aktifkan'}
-                          </button>
+                          {isPastDeadline(job) ? (
+                            <button
+                              onClick={() => openEditForm(job, { extend: true })}
+                              className="text-xs font-medium text-madael-red hover:text-madael-dark"
+                            >
+                              Perpanjang
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleToggleActive(job)}
+                              disabled={togglingId === job.id}
+                              className="text-xs font-medium text-[#6B6B6B] hover:text-black disabled:opacity-50"
+                            >
+                              {job.is_active ? 'Nonaktifkan' : 'Aktifkan'}
+                            </button>
+                          )}
                           <a
                             href={`/employee/job-portal-cetak/${job.slug}`}
                             target="_blank"

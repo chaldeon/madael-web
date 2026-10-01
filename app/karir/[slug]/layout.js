@@ -1,16 +1,17 @@
 import { supabase } from '@/lib/supabase';
+import { isPastDeadline } from '@/lib/jobStatus';
 
 export async function generateMetadata({ params }) {
   const { slug } = await params;
 
   const { data: job } = await supabase
     .from('job_listings')
-    .select('title, department, location')
+    .select('title, department, location, closes_at')
     .eq('slug', slug)
     .eq('is_active', true)
     .single();
 
-  if (!job) {
+  if (!job || isPastDeadline(job)) {
     return {
       title: "Lowongan Tidak Ditemukan",
       description: "Lowongan yang Anda cari tidak ditemukan atau sudah tidak aktif.",

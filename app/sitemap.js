@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { isPastDeadline } from '@/lib/jobStatus';
 
 const BASE_URL = 'https://madael.id';
 
@@ -16,10 +17,11 @@ export default async function sitemap() {
 
   const { data: jobs } = await supabase
     .from('job_listings')
-    .select('slug, created_at')
+    .select('slug, created_at, closes_at')
     .eq('is_active', true);
 
-  const jobRoutes = (jobs || []).map((job) => ({
+  // Lowongan yang sudah lewat deadline tidak dimasukkan ke sitemap.
+  const jobRoutes = (jobs || []).filter((job) => !isPastDeadline(job)).map((job) => ({
     url: `${BASE_URL}/karir/${job.slug}`,
     lastModified: job.created_at ? new Date(job.created_at) : new Date(),
     changeFrequency: 'weekly',

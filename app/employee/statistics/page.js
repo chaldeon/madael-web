@@ -15,6 +15,7 @@ import { createClient } from '@/lib/supabase-browser';
 import ExportCsvButton from '@/components/ExportCsvButton';
 import { isTelatEfektif } from '@/lib/attendanceStatus';
 import { formatRupiah } from '@/lib/format';
+import { isJobOpen } from '@/lib/jobStatus';
 
 const PERIODS = [
   { value: 'weekly', label: 'Mingguan' },
@@ -376,7 +377,7 @@ export default function StatisticsPage() {
           .select('id, created_at, job_id, job_listings(title)'),
         supabase
           .from('job_listings')
-          .select('id, title, is_active'),
+          .select('id, title, is_active, closes_at'),
       ]);
       setApplications(apps || []);
       setJobListings(jobs || []);
@@ -385,7 +386,7 @@ export default function StatisticsPage() {
   }, [supabase]);
 
   const totalPelamar = applications.length;
-  const totalLowonganAktif = jobListings.filter((j) => j.is_active).length;
+  const totalLowonganAktif = jobListings.filter((j) => isJobOpen(j)).length;
 
   const pelamarPerPosisi = useMemo(() => {
     const map = {};

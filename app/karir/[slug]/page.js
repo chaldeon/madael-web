@@ -13,6 +13,7 @@ import {
   formatPositions,
   formatSalaryRange,
 } from '@/lib/jobListingOptions';
+import { isPastDeadline } from '@/lib/jobStatus';
 
 const translations = {
   id: {
@@ -20,6 +21,7 @@ const translations = {
     loading: 'Memuat lowongan...',
     errorPrefix: 'Gagal memuat data: ',
     notFound: 'Lowongan tidak ditemukan atau sudah tidak aktif.',
+    closed: 'Lowongan ini sudah ditutup karena melewati batas waktu pendaftaran.',
     closes: 'Deadline: ',
     description: 'Deskripsi Pekerjaan',
     requirements: 'Kualifikasi',
@@ -32,6 +34,7 @@ const translations = {
     loading: 'Loading job...',
     errorPrefix: 'Failed to load data: ',
     notFound: 'Job not found or no longer active.',
+    closed: 'This job is closed because the application deadline has passed.',
     closes: 'Closes: ',
     description: 'Job Description',
     requirements: 'Requirements',
@@ -94,12 +97,16 @@ export default function KarirDetailPage() {
     );
   }
 
-  if (error || !job) {
+  // Link lama tetap bisa dibuka, tapi lowongan yang lewat deadline tidak lagi
+  // menampilkan detail/form apply — hanya pemberitahuan bahwa sudah ditutup.
+  const closed = !!job && isPastDeadline(job);
+
+  if (error || !job || closed) {
     return (
       <section className="px-10 py-16 bg-white">
         <div className="max-w-[900px] mx-auto">
           <p className="text-sm text-madael-red mb-4">
-            {error ? `${t.errorPrefix}${error}` : t.notFound}
+            {error ? `${t.errorPrefix}${error}` : closed ? t.closed : t.notFound}
           </p>
           <Link href="/karir" className="text-sm text-madael-red hover:text-madael-dark no-underline">
             {t.back}
