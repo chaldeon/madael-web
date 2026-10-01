@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { notifyEmployee } from '@/lib/notify';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { logActivity } from '@/lib/activityLog';
+import CvPreviewModal from '@/components/CvPreviewModal';
 
 const STATUS_OPTIONS = ['Baru', 'Review', 'Interview', 'Ditolak', 'Diterima'];
 
@@ -19,12 +20,11 @@ const STATUS_STYLES = {
   Diterima: 'bg-[#166534] text-white',
 };
 
-function CvLink({ driveId }) {
-  const url = "https://drive.google.com/file/d/" + driveId + "/view";
+function CvLink({ onOpen }) {
   return (
-    <a href={url} target="_blank" rel="noopener noreferrer" className="text-madael-red hover:text-madael-dark text-xs font-medium">
+    <button type="button" onClick={onOpen} className="text-madael-red hover:text-madael-dark text-xs font-medium">
       Lihat CV
-    </a>
+    </button>
   );
 }
 
@@ -120,6 +120,7 @@ export default function JobPortalCandidatesPage() {
   const [updatingId, setUpdatingId] = useState(null);
   const { employee } = useModuleAccess('job_portal');
   const [notesAppId, setNotesAppId] = useState(null);
+  const [cvApp, setCvApp] = useState(null); // pelamar yang CV-nya sedang dipreview
   const [noteDraft, setNoteDraft] = useState('');
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteError, setNoteError] = useState(null);
@@ -534,7 +535,7 @@ export default function JobPortalCandidatesPage() {
                         {a.telepon && <div className="text-xs">{highlightText(a.telepon, searchTerms)}</div>}
                       </td>
                       <td className="px-5 py-3.5">
-                        {a.cv_drive_id ? <CvLink driveId={a.cv_drive_id} /> : <span className="text-xs text-[#AAA]">—</span>}
+                        {a.cv_drive_id ? <CvLink onOpen={() => setCvApp(a)} /> : <span className="text-xs text-[#AAA]">—</span>}
                       </td>
                       <td className="px-5 py-3.5">
                         {hasAnswers ? (
@@ -653,6 +654,15 @@ export default function JobPortalCandidatesPage() {
           </table>
         )}
       </div>
+
+      {cvApp && (
+        <CvPreviewModal
+          applicationId={cvApp.id}
+          title={cvApp.nama}
+          subtitle={cvApp.job_listings?.title || 'CV Umum'}
+          onClose={() => setCvApp(null)}
+        />
+      )}
 
       {notesApp && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={closeNotes}>
