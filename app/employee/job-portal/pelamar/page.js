@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowUp, ArrowDown, ArrowUpDown, CalendarClock, ChevronDown, MessageSquare, Search, Send, X } from 'lucide-react';
+import { ArrowUp, ArrowDown, ArrowUpDown, CalendarClock, ChevronDown, MessageSquare, Plus, Search, Send, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { notifyEmployee } from '@/lib/notify';
 import { useModuleAccess } from '@/lib/useModuleAccess';
@@ -11,6 +11,7 @@ import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import { logActivity } from '@/lib/activityLog';
 import CvPreviewModal from '@/components/CvPreviewModal';
 import { findDuplicateApplications } from '@/lib/candidateDuplicates';
+import { MAX_TAG_LENGTH, normalizeTags } from '@/lib/talentPoolTags';
 import {
   MESSAGE_TEMPLATES,
   TEMPLATE_STATUS,
@@ -108,6 +109,102 @@ function DuplicatePanel({ duplicates }) {
   );
 }
 
+// Tag manual kandidat talent pool. Klik nama tag = filter daftar dengan tag itu.
+// onAdd / onRemove mengembalikan teks error, atau null kalau berhasil.
+function TagEditor({ tags, activeTag, searchTerms, busy, onFilter, onAdd, onRemove }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState(null);
+
+  const run = async (action) => {
+    setError(null);
+    const err = await action();
+    if (err) setError(err);
+    return !err;
+  };
+
+  const submit = async () => {
+    const raw = draft.trim();
+    if (!raw) {
+      setEditing(false);
+      return;
+    }
+    if (await run(() => onAdd(raw))) setDraft(''); // form tetap terbuka untuk tag berikutnya
+  };
+
+  return (
+    <div className="mt-1.5 max-w-[260px]">
+      <div className="flex flex-wrap items-center gap-1">
+        {tags.map((t) => (
+          <span
+            key={t}
+            className={`inline-flex items-center text-[10px] font-medium ${
+              t === activeTag ? 'bg-madael-red text-white' : 'bg-[#F4F4F4] text-[#3D3D3D]'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => onFilter(t === activeTag ? '' : t)}
+              title="Tampilkan kandidat dengan tag ini"
+              className="pl-1.5 py-0.5 hover:underline"
+            >
+              {highlightText(t, searchTerms)}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => onRemove(t))}
+              aria-label={`Hapus tag ${t}`}
+              className="px-1 py-0.5 opacity-60 hover:opacity-100 disabled:opacity-30"
+            >
+              <X size={10} />
+            </button>
+          </span>
+        ))}
+        {!editing && (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="inline-flex items-center gap-0.5 text-[10px] font-medium text-madael-red hover:text-madael-dark"
+          >
+            <Plus size={11} /> Tag
+          </button>
+        )}
+      </div>
+      {editing && (
+        <input
+          autoFocus
+          type="text"
+          list="talent-pool-tags"
+          value={draft}
+          disabled={busy}
+          maxLength={MAX_TAG_LENGTH * 4}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              submit();
+            } else if (e.key === 'Escape') {
+              setDraft('');
+              setError(null);
+              setEditing(false);
+            }
+          }}
+          onBlur={() => {
+            if (!draft.trim()) {
+              setError(null);
+              setEditing(false);
+            }
+          }}
+          placeholder="mis. excel, sales + Enter"
+          className="mt-1 w-full border border-[#E0E0E0] px-2 py-1 text-[11px] text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+        />
+      )}
+      {error && <p className="mt-1 text-[11px] text-red-600">{error}</p>}
+    </div>
+  );
+}
+
 function csvEscape(value) {
   if (value === null || value === undefined) return '';
   const str = String(value);
@@ -197,6 +294,12 @@ export default function JobPortalCandidatesPage() {
   const [filterStatus, setFilterStatus] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchInAnswers, setSearchInAnswers] = useState(true);
+  // Tag talent pool (lamaran umum). Dimuat terpisah dari daftar pelamar supaya
+  // halaman tetap jalan kalau migrasi kolom `tags` belum dijalankan.
+  const [filterTag, setFilterTag] = useState('');
+  const [tagsById, setTagsById] = useState({});
+  const [tagsLoadError, setTagsLoadError] = useState(null);
+  const [tagBusyId, setTagBusyId] = useState(null);
   const [updatingId, setUpdatingId] = useState(null);
   // Akses penuh melihat semua pelamar; reviewer terbatas (job_portal_assigned)
   // hanya pelamar dari lowongan yang di-assign ke dia.
@@ -277,6 +380,22 @@ export default function JobPortalCandidatesPage() {
     setLoading(false);
   }, [supabase, scoped, employeeId]);
 
+  // Tag hanya ada untuk lamaran umum dan hanya dikelola akses penuh.
+  const fetchTags = useCallback(async () => {
+    if (scoped) {
+      setTagsById({});
+      setTagsLoadError(null);
+      return;
+    }
+    const { data, error } = await supabase.from('applications').select('id, tags').is('job_id', null);
+    if (error) {
+      setTagsLoadError(error.message);
+      return;
+    }
+    setTagsLoadError(null);
+    setTagsById(Object.fromEntries((data || []).map((row) => [row.id, normalizeTags(row.tags)])));
+  }, [supabase, scoped]);
+
   // Daftar interviewer = pemegang akses penuh (job_portal) + superadmin, ditambah
   // reviewer terbatas yang di-assign ke lowongan lamaran bersangkutan.
   const fetchInterviewers = useCallback(async () => {
@@ -318,7 +437,8 @@ export default function JobPortalCandidatesPage() {
     if (accessStatus !== 'allowed') return;
     fetchApplications();
     fetchInterviewers();
-  }, [accessStatus, fetchApplications, fetchInterviewers]);
+    fetchTags();
+  }, [accessStatus, fetchApplications, fetchInterviewers, fetchTags]);
 
   // Interviewer yang boleh dipilih untuk satu lamaran.
   const interviewersFor = (app) => {
@@ -383,6 +503,28 @@ export default function JobPortalCandidatesPage() {
     }
     setUpdatingId(null);
   };
+
+  // Tambah/hapus tag lewat route server. Return teks error, atau null kalau berhasil.
+  const updateTags = async (id, change) => {
+    setTagBusyId(id);
+    try {
+      const res = await fetch(`/api/applications/${id}/tags`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(change),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return json.error || 'Gagal menyimpan tag.';
+      setTagsById((prev) => ({ ...prev, [id]: normalizeTags(json.tags) }));
+      return null;
+    } catch {
+      return 'Gagal menyimpan tag. Periksa koneksi Anda.';
+    } finally {
+      setTagBusyId(null);
+    }
+  };
+  const handleAddTag = (id, raw) => updateTags(id, { add: raw });
+  const handleRemoveTag = (id, tag) => updateTags(id, { remove: [tag] });
 
   const openNotes = (id) => {
     setNoteError(null);
@@ -650,17 +792,33 @@ export default function JobPortalCandidatesPage() {
   // dimuat (bukan `filtered`) supaya penanda tetap muncul saat filter/pencarian aktif.
   const duplicateMap = useMemo(() => findDuplicateApplications(applications), [applications]);
 
+  // Semua tag yang dipakai (untuk dropdown filter & saran isian), terbanyak dulu.
+  const tagOptions = useMemo(() => {
+    const counts = new Map();
+    Object.values(tagsById).forEach((list) => list.forEach((t) => counts.set(t, (counts.get(t) || 0) + 1)));
+    return Array.from(counts, ([tag, count]) => ({ tag, count })).sort(
+      (a, b) => b.count - a.count || a.tag.localeCompare(b.tag)
+    );
+  }, [tagsById]);
+
+  // Tag terakhir dihapus -> filternya otomatis tidak berlaku, supaya daftar tidak kosong tanpa alasan.
+  const activeTag = tagOptions.some((o) => o.tag === filterTag) ? filterTag : '';
+
   // Index teks per pelamar, dibuat sekali setiap data berubah (bukan tiap ketikan).
   const searchIndex = useMemo(() => {
     const index = new Map();
     applications.forEach((a) => {
+      // Lamaran umum: kolom `catatan` = posisi yang diminati, ikut dicari bersama tag.
+      const general = !a.job_id;
       index.set(a.id, {
-        identity: [a.nama, a.email, a.telepon].map(normalizeText).join(' \n '),
+        identity: [a.nama, a.email, a.telepon, general ? a.catatan : '', ...(general ? tagsById[a.id] || [] : [])]
+          .map(normalizeText)
+          .join(' \n '),
         answers: Array.isArray(a.answers) ? a.answers.map((qa) => normalizeText(qa?.answer)).join(' \n ') : '',
       });
     });
     return index;
-  }, [applications]);
+  }, [applications, tagsById]);
 
   const { filtered, answerOnlyIds } = useMemo(() => {
     // id pelamar yang hanya cocok lewat isi jawaban (bukan nama/email/telepon)
@@ -669,7 +827,8 @@ export default function JobPortalCandidatesPage() {
     const base = applications.filter((a) => {
       const matchJob = !filterJob || (filterJob === 'umum' ? !a.job_id : a.job_listings?.slug === filterJob);
       const matchStatus = !filterStatus || a.status === filterStatus;
-      if (!matchJob || !matchStatus) return false;
+      const matchTag = !activeTag || (tagsById[a.id] || []).includes(activeTag);
+      if (!matchJob || !matchStatus || !matchTag) return false;
 
       if (searchTerms.length === 0) return true;
       const entry = searchIndex.get(a.id);
@@ -697,7 +856,7 @@ export default function JobPortalCandidatesPage() {
       return 0;
     });
     return { filtered: sortDir === 'desc' ? sorted.reverse() : sorted, answerOnlyIds: answerOnly };
-  }, [applications, filterJob, filterStatus, searchTerms, searchIndex, searchInAnswers, sortField, sortDir]);
+  }, [applications, filterJob, filterStatus, activeTag, tagsById, searchTerms, searchIndex, searchInAnswers, sortField, sortDir]);
 
   const handleSort = (colKey) => {
     if (sortField === colKey) {
@@ -709,7 +868,7 @@ export default function JobPortalCandidatesPage() {
   };
 
   const handleExportCsv = () => {
-    const header = ['Nama', 'Email', 'Telepon', 'Posisi', 'Tanggal Apply', 'Status', 'Catatan', 'Link CV'];
+    const header = ['Nama', 'Email', 'Telepon', 'Posisi', 'Tanggal Apply', 'Status', 'Tag', 'Catatan', 'Link CV'];
     const rows = filtered.map((a) => [
       a.nama,
       a.email,
@@ -717,6 +876,7 @@ export default function JobPortalCandidatesPage() {
       a.job_listings?.title || 'CV Umum',
       new Date(a.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
       a.status,
+      (tagsById[a.id] || []).join('; '),
       notesForCsv(a),
       a.cv_drive_id ? `https://drive.google.com/file/d/${a.cv_drive_id}/view` : '',
     ]);
@@ -748,7 +908,7 @@ export default function JobPortalCandidatesPage() {
           </h1>
           <p className="text-sm text-[#6B6B6B] mt-1">
             {applications.length} total pelamar
-            {(filterJob || filterStatus || searchTerms.length > 0) && ` · ${filtered.length} ditampilkan`}
+            {(filterJob || filterStatus || activeTag || searchTerms.length > 0) && ` · ${filtered.length} ditampilkan`}
           </p>
         </div>
         <button
@@ -778,7 +938,7 @@ export default function JobPortalCandidatesPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari nama, email, atau telepon..."
+            placeholder={scoped ? 'Cari nama, email, atau telepon...' : 'Cari nama, email, telepon, posisi diminati, atau tag...'}
             className="w-full border border-[#E0E0E0] pl-9 pr-8 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
           />
           {searchQuery && (
@@ -808,6 +968,15 @@ export default function JobPortalCandidatesPage() {
           ))}
         </select>
 
+        {tagOptions.length > 0 && (
+          <select value={activeTag} onChange={(e) => setFilterTag(e.target.value)} className={selectClass}>
+            <option value="">Semua Tag</option>
+            {tagOptions.map(({ tag, count }) => (
+              <option key={tag} value={tag}>{tag} ({count})</option>
+            ))}
+          </select>
+        )}
+
         <label className="flex items-center gap-2 text-xs text-[#3D3D3D] cursor-pointer select-none">
           <input
             type="checkbox"
@@ -818,6 +987,19 @@ export default function JobPortalCandidatesPage() {
           Cari juga di jawaban screening
         </label>
       </div>
+
+      {tagsLoadError && (
+        <p className="mb-4 text-xs text-[#92700C] bg-[#FEF3C7] px-3 py-2">
+          Tag talent pool belum bisa dimuat: {tagsLoadError}. Pastikan migrasi SQL scripts/sql/talent_pool_tags.sql sudah dijalankan.
+        </p>
+      )}
+
+      {/* Saran tag untuk input di baris pelamar (satu datalist dipakai semua baris) */}
+      <datalist id="talent-pool-tags">
+        {tagOptions.map(({ tag }) => (
+          <option key={tag} value={tag} />
+        ))}
+      </datalist>
 
       <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
         {loading ? (
@@ -862,7 +1044,25 @@ export default function JobPortalCandidatesPage() {
                           />
                         )}
                       </td>
-                      <td className="px-5 py-3.5 text-[#3D3D3D]">{a.job_listings?.title || 'CV Umum'}</td>
+                      <td className="px-5 py-3.5 text-[#3D3D3D]">
+                        {a.job_listings?.title || 'CV Umum'}
+                        {!a.job_id && a.catatan && (
+                          <p className="text-xs text-[#6B6B6B] mt-0.5 line-clamp-2 whitespace-pre-wrap">
+                            Minat: {highlightText(a.catatan, searchTerms)}
+                          </p>
+                        )}
+                        {!a.job_id && !scoped && !tagsLoadError && (
+                          <TagEditor
+                            tags={tagsById[a.id] || []}
+                            activeTag={activeTag}
+                            searchTerms={searchTerms}
+                            busy={tagBusyId === a.id}
+                            onFilter={setFilterTag}
+                            onAdd={(raw) => handleAddTag(a.id, raw)}
+                            onRemove={(tag) => handleRemoveTag(a.id, tag)}
+                          />
+                        )}
+                      </td>
                       <td className="px-5 py-3.5 text-[#6B6B6B]">
                         {new Date(a.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </td>
