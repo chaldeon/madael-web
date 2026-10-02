@@ -8,6 +8,8 @@ import {
   isMailConfigured,
   sendApplicantStatusEmail,
 } from '@/lib/applicationEmail';
+import { recordApplicationMessage } from '@/lib/applicationMessages';
+import { statusToTemplate } from '@/lib/candidateMessages';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -22,7 +24,7 @@ export async function POST(request, { params }) {
   try {
     const { id } = await params;
 
-    const session = await getSessionEmployee('id, status, is_superadmin');
+    const session = await getSessionEmployee('id, nama, status, is_superadmin');
     if (session.error) {
       return NextResponse.json({ error: session.error }, { status: session.status });
     }
@@ -79,8 +81,9 @@ export async function POST(request, { params }) {
       );
     }
 
+    let sent;
     try {
-      await sendApplicantStatusEmail({
+      sent = await sendApplicantStatusEmail({
         to: app.email,
         nama: app.nama,
         posisi: app.job_listings?.title || null,
@@ -92,6 +95,21 @@ export async function POST(request, { params }) {
       console.error('Kirim email status pelamar gagal:', sendErr);
       return NextResponse.json({ error: 'Email ke pelamar gagal dikirim.' }, { status: 502 });
     }
+
+    // Catat ke riwayat pesan pelamar. Gagal mencatat tidak membatalkan
+    // apa pun — email-nya sudah terkirim.
+    await recordApplicationMessage(admin, {
+      application_id: app.id,
+      channel: 'email',
+      template: statusToTemplate(app.status),
+      source: 'otomatis',
+      status: 'terkirim',
+      recipient: app.email,
+      subject: sent.subject,
+      body: sent.text,
+      sent_by: emp.id,
+      sent_by_nama: emp.nama || null,
+    });
 
     await logActivity(admin, {
       userId: emp.id,
