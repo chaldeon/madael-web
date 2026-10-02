@@ -15,6 +15,8 @@ import {
   buildWaLink,
   buildWhatsAppText,
   normalizeWaNumber,
+  getInterviewVenue,
+  hasInterviewVenue,
 } from '@/lib/candidateMessages';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -82,7 +84,7 @@ export async function POST(request, { params }) {
 
     const { data: app, error } = await admin
       .from('applications')
-      .select('id, nama, email, telepon, status, job_id, interview_at, interview_location, job_listings ( title )')
+      .select('id, nama, email, telepon, status, job_id, interview_at, interview_mode, interview_location, interview_address, interview_meeting_url, job_listings ( title )')
       .eq('id', id)
       .maybeSingle();
 
@@ -93,13 +95,23 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: OUT_OF_SCOPE_ERROR }, { status: 403 });
     }
 
-    // Template interview tanpa jadwal akan terkirim setengah jadi; minta HR
-    // menjadwalkan dulu supaya kandidat langsung tahu kapan & di mana.
-    if (template === 'interview' && !app.interview_at) {
-      return NextResponse.json(
-        { error: 'Jadwalkan interview dulu sebelum mengirim template interview.' },
-        { status: 422 }
-      );
+    // Template interview tanpa jadwal/lokasi akan terkirim setengah jadi; minta
+    // HR melengkapinya dulu supaya kandidat langsung tahu kapan & di mana
+    // (alamat lengkap untuk offline, link untuk online).
+    const venue = getInterviewVenue(app);
+    if (template === 'interview') {
+      if (!app.interview_at) {
+        return NextResponse.json(
+          { error: 'Jadwalkan interview dulu sebelum mengirim template interview.' },
+          { status: 422 }
+        );
+      }
+      if (!hasInterviewVenue(venue)) {
+        return NextResponse.json(
+          { error: 'Lokasi atau link meeting interview belum diisi. Lengkapi lewat "Ubah jadwal" dulu.' },
+          { status: 422 }
+        );
+      }
     }
 
     const posisi = app.job_listings?.title || null;
@@ -127,7 +139,7 @@ export async function POST(request, { params }) {
         nama: app.nama,
         posisi,
         interviewAt: app.interview_at,
-        interviewLocation: app.interview_location,
+        venue,
       });
       const waUrl = buildWaLink(phone, text);
 
@@ -168,7 +180,7 @@ export async function POST(request, { params }) {
         posisi,
         status: TEMPLATE_STATUS[template],
         interviewAt: app.interview_at,
-        interviewLocation: app.interview_location,
+        venue,
       });
     } catch (sendErr) {
       console.error('Kirim email template pelamar gagal:', sendErr);
