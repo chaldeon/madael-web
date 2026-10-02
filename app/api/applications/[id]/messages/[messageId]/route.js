@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { MESSAGE_COLUMNS, requireJobPortalAccess } from '@/lib/applicationMessages';
+import { checkApplicationScope } from '@/lib/jobPortalServer';
 
 // PATCH /api/applications/[id]/messages/[messageId]
 // HR mengonfirmasi sudah menekan Send di WhatsApp: 'wa_dibuka' → 'wa_terkirim'.
@@ -13,6 +14,9 @@ export async function PATCH(request, { params }) {
 
     const access = await requireJobPortalAccess(admin);
     if (access.error) return NextResponse.json({ error: access.error }, { status: access.status });
+
+    const scopeCheck = await checkApplicationScope(admin, access.scope, id);
+    if (scopeCheck.error) return NextResponse.json({ error: scopeCheck.error }, { status: scopeCheck.status });
 
     const { data, error } = await admin
       .from('application_messages')

@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { getSessionEmployee } from '@/lib/sessionEmployee';
-import { isModuleGranted } from '@/lib/employeeModules';
+import { requireJobPortalAccess, canAccessJob, OUT_OF_SCOPE_ERROR } from '@/lib/jobPortalServer';
 import { downloadCVFromDrive } from '@/lib/googleDrive';
 import { isValidDriveFileId } from '@/lib/attendancePhotoUrl';
 
@@ -13,7 +12,8 @@ import { isValidDriveFileId } from '@/lib/attendancePhotoUrl';
 // reviewer membacanya lewat sini (session cookie) tanpa perlu akses Drive.
 //
 // Pengaman, karena route ini membaca Drive dengan kredensial service account:
-//   1. Harus login, akun aktif, dan punya akses modul job_portal (atau superadmin).
+//   1. Harus login, akun aktif, dan punya akses modul job_portal (atau superadmin),
+//      atau reviewer yang di-assign ke lowongan lamaran ini (job_portal_assigned).
 //   2. Dicari lewat id lamaran, lalu file yang dibaca diambil dari baris itu —
 //      bukan dari input client, jadi tidak bisa dipakai membaca file Drive lain.
 //   3. CV diupload publik dan tipe filenya hanya dicek di sisi client, jadi isi
@@ -22,32 +22,16 @@ export async function GET(request, { params }) {
   try {
     const { id } = await params;
 
-    const session = await getSessionEmployee('id, status, is_superadmin');
-    if (session.error) {
-      return NextResponse.json({ error: session.error }, { status: session.status });
-    }
-
     const admin = createAdminClient();
 
-    const { data: mods, error: modsError } = await admin
-      .from('employee_modules')
-      .select('module_name')
-      .eq('employee_id', session.emp.id)
-      .eq('module_name', 'job_portal');
-    if (modsError) throw modsError;
-
-    const allowed = isModuleGranted({
-      isSuperadmin: session.emp.is_superadmin,
-      moduleKeys: (mods || []).map((m) => m.module_name),
-      key: 'job_portal',
-    });
-    if (!allowed) {
-      return NextResponse.json({ error: 'Anda tidak punya akses ke modul Job Portal.' }, { status: 403 });
+    const access = await requireJobPortalAccess(admin);
+    if (access.error) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
     }
 
     const { data: app, error: lookupError } = await admin
       .from('applications')
-      .select('id, cv_drive_id, cv_filename')
+      .select('id, job_id, cv_drive_id, cv_filename')
       .eq('id', id)
       .maybeSingle();
     if (lookupError) {
@@ -59,6 +43,9 @@ export async function GET(request, { params }) {
     }
     if (!app || !isValidDriveFileId(app.cv_drive_id)) {
       return NextResponse.json({ error: 'CV tidak ditemukan.' }, { status: 404 });
+    }
+    if (!canAccessJob(access.scope, app.job_id)) {
+      return NextResponse.json({ error: OUT_OF_SCOPE_ERROR }, { status: 403 });
     }
 
     let buffer;
