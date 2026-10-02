@@ -7,6 +7,9 @@ import { createClient } from '@/lib/supabase-browser';
 import { formatNumberDisplay } from '@/lib/payrollConfig';
 import { WORK_MODES, EXPERIENCE_LEVELS } from '@/lib/jobListingOptions';
 import { getJobStatus, getDeadlineDate, isPastDeadline } from '@/lib/jobStatus';
+import { useModuleAccess } from '@/lib/useModuleAccess';
+import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
+import JobReviewersPanel from '@/components/job-portal/JobReviewersPanel';
 
 const emptyForm = {
   title: '',
@@ -108,7 +111,15 @@ function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
 export default function JobPortalLowonganPage() {
   const supabase = createClient();
 
+  // Akses penuh melihat & mengelola semua lowongan. Reviewer terbatas
+  // (job_portal_assigned) hanya melihat lowongan yang di-assign dan tidak
+  // bisa membuat/mengubah lowongan.
+  const { status: accessStatus, employee, moduleKeys } = useModuleAccess(JOB_PORTAL_KEYS);
+  const scoped = isJobPortalScoped(employee, moduleKeys);
+  const employeeId = employee?.id || null;
+
   const [listings, setListings] = useState([]);
+  const [reviewersByJob, setReviewersByJob] = useState({}); // job_id -> [{ id, nama }]
   const [applicantCounts, setApplicantCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -133,10 +144,32 @@ export default function JobPortalLowonganPage() {
     setLoading(true);
     setError(null);
 
-    const { data: jobs, error: jobsError } = await supabase
-      .from('job_listings')
-      .select('*')
-      .order('created_at', { ascending: false });
+    // Reviewer terbatas: ambil dulu id lowongan yang di-assign ke dia. RLS di
+    // database juga membatasi ini; filter di sini supaya halaman tetap benar
+    // meski policy-nya belum terpasang.
+    let assignedIds = null;
+    if (scoped) {
+      const { data: mine, error: mineError } = await supabase
+        .from('job_listing_reviewers')
+        .select('job_id')
+        .eq('employee_id', employeeId);
+      if (mineError) {
+        setError(mineError.message);
+        setLoading(false);
+        return;
+      }
+      assignedIds = (mine || []).map((r) => r.job_id);
+      if (assignedIds.length === 0) {
+        setListings([]);
+        setApplicantCounts({});
+        setLoading(false);
+        return;
+      }
+    }
+
+    let jobsQuery = supabase.from('job_listings').select('*').order('created_at', { ascending: false });
+    if (assignedIds) jobsQuery = jobsQuery.in('id', assignedIds);
+    const { data: jobs, error: jobsError } = await jobsQuery;
 
     if (jobsError) {
       setError(jobsError.message);
@@ -144,7 +177,9 @@ export default function JobPortalLowonganPage() {
       return;
     }
 
-    const { data: apps, error: appsError } = await supabase.from('applications').select('job_id');
+    let appsQuery = supabase.from('applications').select('job_id');
+    if (assignedIds) appsQuery = appsQuery.in('job_id', assignedIds);
+    const { data: apps, error: appsError } = await appsQuery;
 
     if (!appsError && apps) {
       const counts = {};
@@ -156,13 +191,31 @@ export default function JobPortalLowonganPage() {
       setApplicantCounts(counts);
     }
 
+    // Daftar reviewer per lowongan, hanya untuk pengelola. Gagal memuat
+    // (mis. migrasi SQL belum dijalankan) tidak boleh mengganggu halaman.
+    if (!scoped) {
+      const { data: reviewerRows } = await supabase
+        .from('job_listing_reviewers')
+        .select('job_id, employee_id, employees:employee_id ( nama )');
+      const map = {};
+      (reviewerRows || []).forEach((r) => {
+        (map[r.job_id] ||= []).push({ id: r.employee_id, nama: r.employees?.nama || '(tanpa nama)' });
+      });
+      setReviewersByJob(map);
+    }
+
     setListings(jobs || []);
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, scoped, employeeId]);
 
   useEffect(() => {
+    if (accessStatus !== 'allowed') return;
     fetchData();
-  }, [fetchData]);
+  }, [accessStatus, fetchData]);
+
+  const handleReviewersSaved = (jobId, reviewers) => {
+    setReviewersByJob((prev) => ({ ...prev, [jobId]: reviewers }));
+  };
 
   // Auto-scroll ke accordion yang baru dibuka
   useEffect(() => {
@@ -690,6 +743,18 @@ export default function JobPortalLowonganPage() {
           </button>
         </div>
       </form>
+
+      {!scoped && (
+        <div className="mt-8">
+          {editingId ? (
+            <JobReviewersPanel key={editingId} jobId={editingId} onSaved={handleReviewersSaved} />
+          ) : (
+            <p className="text-xs text-[#6B6B6B]">
+              Simpan lowongan dulu, lalu buka Edit untuk meng-assign reviewer.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 
@@ -723,15 +788,21 @@ export default function JobPortalLowonganPage() {
     <div className="max-w-[1100px] mx-auto px-6 py-10">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Kelola Lowongan</h1>
-          <p className="text-sm text-[#6B6B6B] mt-1">{listings.length} lowongan total</p>
+          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
+            {scoped ? 'Lowongan Saya' : 'Kelola Lowongan'}
+          </h1>
+          <p className="text-sm text-[#6B6B6B] mt-1">
+            {scoped ? `${listings.length} lowongan di-assign ke kamu` : `${listings.length} lowongan total`}
+          </p>
         </div>
-        <button
-          onClick={openCreateForm}
-          className="bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors"
-        >
-          Buat Lowongan Baru
-        </button>
+        {!scoped && (
+          <button
+            onClick={openCreateForm}
+            className="bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors"
+          >
+            Buat Lowongan Baru
+          </button>
+        )}
       </div>
 
       <div ref={createSectionRef} className="bg-white border border-[#E0E0E0] overflow-hidden mb-8">
@@ -752,7 +823,11 @@ export default function JobPortalLowonganPage() {
           ) : error ? (
             <p className="text-sm text-madael-red p-6">Gagal memuat data: {error}</p>
           ) : listings.length === 0 ? (
-            <p className="text-sm text-[#6B6B6B] p-6">Belum ada lowongan.</p>
+            <p className="text-sm text-[#6B6B6B] p-6">
+              {scoped
+                ? 'Belum ada lowongan yang di-assign ke kamu. Hubungi pengelola Job Portal untuk di-assign sebagai reviewer.'
+                : 'Belum ada lowongan.'}
+            </p>
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -764,7 +839,9 @@ export default function JobPortalLowonganPage() {
                 </tr>
               </thead>
               <tbody>
-                {/* Baris tetap: lamaran umum (job_id null) — bukan row job_listings sungguhan */}
+                {/* Baris tetap: lamaran umum (job_id null) — bukan row job_listings sungguhan.
+                    Lamaran umum tidak terikat lowongan, jadi hanya untuk akses penuh. */}
+                {!scoped && (
                 <tr className="bg-[#FAFAFA]">
                   <td className="px-5 py-3.5 text-black">
                     Umum
@@ -787,6 +864,7 @@ export default function JobPortalLowonganPage() {
                   </td>
                   <td className="px-5 py-3.5 text-xs text-[#AAA]">—</td>
                 </tr>
+                )}
 
                 {sortedListings.map((job) => (
                   <Fragment key={job.id}>
@@ -794,6 +872,14 @@ export default function JobPortalLowonganPage() {
                       <td className="px-5 py-3.5 text-black">
                         {job.title}
                         <div className="text-xs text-[#AAA] mt-0.5">/{job.slug}</div>
+                        {!scoped && (
+                          <div className="text-xs text-[#6B6B6B] mt-1">
+                            Reviewer:{' '}
+                            {reviewersByJob[job.id]?.length
+                              ? reviewersByJob[job.id].map((r) => r.nama).join(', ')
+                              : <span className="text-[#AAA]">belum ada</span>}
+                          </div>
+                        )}
                       </td>
                       <td className="px-5 py-3.5 text-[#3D3D3D]">
                         {applicantCounts[job.id] ? (
@@ -816,6 +902,14 @@ export default function JobPortalLowonganPage() {
                         )}
                       </td>
                       <td className="px-5 py-3.5">
+                        {scoped ? (
+                          <Link
+                            href={`/employee/job-portal/pelamar?posisi=${job.slug}`}
+                            className="text-xs font-medium text-madael-red hover:text-madael-dark"
+                          >
+                            Lihat Pelamar
+                          </Link>
+                        ) : (
                         <div className="flex items-center gap-4 flex-wrap">
                           <button
                             onClick={() => openEditForm(job)}
@@ -857,6 +951,7 @@ export default function JobPortalLowonganPage() {
                             Cetak PDF
                           </a>
                         </div>
+                        )}
                       </td>
                     </tr>
 

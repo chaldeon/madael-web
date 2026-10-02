@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { getSessionEmployee } from '@/lib/sessionEmployee';
-import { isModuleGranted } from '@/lib/employeeModules';
+import { requireJobPortalAccess, canAccessJob, OUT_OF_SCOPE_ERROR } from '@/lib/jobPortalServer';
 import { logActivity } from '@/lib/activityLog';
 import {
   isNotifiableStatus,
@@ -19,33 +18,19 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // endpoint ini tidak bisa dipakai untuk mengirim isi email sembarang. Body
 // `status` hanya dipakai untuk mendeteksi data basi (409).
 //
-// Akses: superadmin atau pemegang modul job_portal.
+// Akses: superadmin / pemegang modul job_portal, atau reviewer yang di-assign
+// ke lowongan lamaran ini (job_portal_assigned).
 export async function POST(request, { params }) {
   try {
     const { id } = await params;
 
-    const session = await getSessionEmployee('id, nama, status, is_superadmin');
-    if (session.error) {
-      return NextResponse.json({ error: session.error }, { status: session.status });
-    }
-    const { emp } = session;
     const admin = createAdminClient();
 
-    const { data: mods, error: modsError } = await admin
-      .from('employee_modules')
-      .select('module_name')
-      .eq('employee_id', emp.id)
-      .eq('module_name', 'job_portal');
-    if (modsError) throw modsError;
-
-    const allowed = isModuleGranted({
-      isSuperadmin: emp.is_superadmin,
-      moduleKeys: (mods || []).map((m) => m.module_name),
-      key: 'job_portal',
-    });
-    if (!allowed) {
-      return NextResponse.json({ error: 'Anda tidak punya akses ke modul Job Portal.' }, { status: 403 });
+    const access = await requireJobPortalAccess(admin);
+    if (access.error) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
     }
+    const { emp, scope } = access;
 
     const body = await request.json().catch(() => ({}));
 
@@ -57,6 +42,10 @@ export async function POST(request, { params }) {
 
     if (error || !app) {
       return NextResponse.json({ error: 'Lamaran tidak ditemukan.' }, { status: 404 });
+    }
+
+    if (!canAccessJob(scope, app.job_id)) {
+      return NextResponse.json({ error: OUT_OF_SCOPE_ERROR }, { status: 403 });
     }
 
     if (body.status && body.status !== app.status) {

@@ -4,13 +4,16 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import EmployeeHeader from '@/components/EmployeeHeader';
 
 export default function JobPortalLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
-  const { status } = useModuleAccess('job_portal');
+  // Akses penuh (job_portal) ATAU terbatas per lowongan (job_portal_assigned).
+  const { status, employee, moduleKeys } = useModuleAccess(JOB_PORTAL_KEYS);
+  const scoped = isJobPortalScoped(employee, moduleKeys);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -59,10 +62,10 @@ export default function JobPortalLayout({ children }) {
             </Link>
             <div className="flex items-center gap-6">
               <Link href="/employee/job-portal" className={tabClass(!isPelamar)}>
-                Lowongan
+                {scoped ? 'Lowongan Saya' : 'Lowongan'}
               </Link>
               <Link href="/employee/job-portal/pelamar" className={tabClass(isPelamar)}>
-                Semua Pelamar
+                {scoped ? 'Pelamar Saya' : 'Semua Pelamar'}
               </Link>
             </div>
           </>

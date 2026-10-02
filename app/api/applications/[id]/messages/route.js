@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { logActivity } from '@/lib/activityLog';
 import { isMailConfigured, sendApplicantStatusEmail } from '@/lib/applicationEmail';
+import { canAccessJob, checkApplicationScope, OUT_OF_SCOPE_ERROR } from '@/lib/jobPortalServer';
 import {
   MESSAGE_COLUMNS,
   recordApplicationMessage,
@@ -27,6 +28,9 @@ export async function GET(request, { params }) {
 
     const access = await requireJobPortalAccess(admin);
     if (access.error) return NextResponse.json({ error: access.error }, { status: access.status });
+
+    const scopeCheck = await checkApplicationScope(admin, access.scope, id);
+    if (scopeCheck.error) return NextResponse.json({ error: scopeCheck.error }, { status: scopeCheck.status });
 
     const { data, error } = await admin
       .from('application_messages')
@@ -64,7 +68,7 @@ export async function POST(request, { params }) {
 
     const access = await requireJobPortalAccess(admin);
     if (access.error) return NextResponse.json({ error: access.error }, { status: access.status });
-    const { emp } = access;
+    const { emp, scope } = access;
 
     const body = await request.json().catch(() => ({}));
     const { template, channel } = body;
@@ -78,12 +82,15 @@ export async function POST(request, { params }) {
 
     const { data: app, error } = await admin
       .from('applications')
-      .select('id, nama, email, telepon, status, interview_at, interview_location, job_listings ( title )')
+      .select('id, nama, email, telepon, status, job_id, interview_at, interview_location, job_listings ( title )')
       .eq('id', id)
       .maybeSingle();
 
     if (error || !app) {
       return NextResponse.json({ error: 'Lamaran tidak ditemukan.' }, { status: 404 });
+    }
+    if (!canAccessJob(scope, app.job_id)) {
+      return NextResponse.json({ error: OUT_OF_SCOPE_ERROR }, { status: 403 });
     }
 
     // Template interview tanpa jadwal akan terkirim setengah jadi; minta HR

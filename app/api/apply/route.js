@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { uploadCVToDrive } from '@/lib/googleDrive';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { notifyByModule } from '@/lib/notify';
+import { notifyByModule, notifyEmployees } from '@/lib/notify';
 import { isJobOpen } from '@/lib/jobStatus';
 
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
@@ -160,6 +160,21 @@ export async function POST(request) {
         pesan: `Lamaran baru dari ${nama} untuk posisi ${isGeneral ? (posisiMinat || 'Umum') : positionName}.`,
         link: '/employee/job-portal/pelamar',
       });
+
+      // Reviewer terbatas (job_portal_assigned) tidak ikut tercakup notifyByModule
+      // di atas — kabari hanya yang di-assign ke lowongan ini.
+      if (!isGeneral) {
+        const { data: reviewers } = await admin
+          .from('job_listing_reviewers')
+          .select('employee_id')
+          .eq('job_id', jobId);
+        await notifyEmployees(admin, {
+          userIds: (reviewers || []).map((r) => r.employee_id),
+          tipe: 'pelamar_baru',
+          pesan: `Lamaran baru dari ${nama} untuk posisi ${positionName}.`,
+          link: '/employee/job-portal/pelamar',
+        });
+      }
     } catch (notifyErr) {
       console.error('Gagal mengirim notifikasi pelamar baru:', notifyErr);
     }

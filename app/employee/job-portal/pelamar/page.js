@@ -7,6 +7,7 @@ import { ArrowUp, ArrowDown, ArrowUpDown, CalendarClock, MessageSquare, Search, 
 import { createClient } from '@/lib/supabase-browser';
 import { notifyEmployee } from '@/lib/notify';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import { logActivity } from '@/lib/activityLog';
 import CvPreviewModal from '@/components/CvPreviewModal';
 import {
@@ -142,7 +143,12 @@ export default function JobPortalCandidatesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchInAnswers, setSearchInAnswers] = useState(true);
   const [updatingId, setUpdatingId] = useState(null);
-  const { employee } = useModuleAccess('job_portal');
+  // Akses penuh melihat semua pelamar; reviewer terbatas (job_portal_assigned)
+  // hanya pelamar dari lowongan yang di-assign ke dia.
+  const { status: accessStatus, employee, moduleKeys } = useModuleAccess(JOB_PORTAL_KEYS);
+  const scoped = isJobPortalScoped(employee, moduleKeys);
+  const employeeId = employee?.id || null;
+  const employeeNama = employee?.nama || null;
   const [notesAppId, setNotesAppId] = useState(null);
   const [cvApp, setCvApp] = useState(null); // pelamar yang CV-nya sedang dipreview
   const [noteDraft, setNoteDraft] = useState('');
@@ -153,7 +159,9 @@ export default function JobPortalCandidatesPage() {
   const [sortDir, setSortDir] = useState('desc');
 
   // --- Jadwal interview ---
-  const [interviewers, setInterviewers] = useState([]); // karyawan pemegang akses modul job_portal
+  // Kandidat interviewer: pemegang akses penuh + superadmin (boleh untuk lowongan
+  // mana pun) dan reviewer terbatas (hanya untuk lowongan yang di-assign ke mereka).
+  const [interviewerPool, setInterviewerPool] = useState({ full: [], scoped: [], reviewerMap: {} });
   const [schedulingApp, setSchedulingApp] = useState(null); // application yang lagi dijadwalkan
   const [scheduleForm, setScheduleForm] = useState({ interview_at: '', interview_interviewer_id: '', interview_location: '' });
   const [scheduleSaving, setScheduleSaving] = useState(false);
@@ -168,12 +176,37 @@ export default function JobPortalCandidatesPage() {
     setLoading(true);
     setError(null);
 
-    const { data, error } = await supabase
+    // Reviewer terbatas: batasi ke lowongan yang di-assign. RLS di database juga
+    // menegakkan ini; filter di sini supaya halaman tetap benar meski policy
+    // belum terpasang.
+    let assignedIds = null;
+    if (scoped) {
+      const { data: mine, error: mineError } = await supabase
+        .from('job_listing_reviewers')
+        .select('job_id')
+        .eq('employee_id', employeeId);
+      if (mineError) {
+        setError(mineError.message);
+        setLoading(false);
+        return;
+      }
+      assignedIds = (mine || []).map((r) => r.job_id);
+      if (assignedIds.length === 0) {
+        setApplications([]);
+        setJobOptions([]);
+        setLoading(false);
+        return;
+      }
+    }
+
+    let query = supabase
       .from('applications')
       .select(
         'id, created_at, nama, email, telepon, status, cv_drive_id, cv_filename, job_id, catatan, answers, interview_at, interview_interviewer_id, interview_location, job_listings ( title, slug ), interviewer:interview_interviewer_id ( nama ), application_notes ( id, isi, author_nama, created_at )'
       )
       .order('created_at', { ascending: false });
+    if (assignedIds) query = query.in('job_id', assignedIds);
+    const { data, error } = await query;
 
     if (error) {
       setError(error.message);
@@ -186,32 +219,59 @@ export default function JobPortalCandidatesPage() {
       setJobOptions(Array.from(uniqueJobs, ([slug, title]) => ({ slug, title })));
     }
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, scoped, employeeId]);
 
-  // Daftar interviewer = karyawan pemegang akses modul job_portal + superadmin
-  // (superadmin selalu punya akses ke semua modul).
+  // Daftar interviewer = pemegang akses penuh (job_portal) + superadmin, ditambah
+  // reviewer terbatas yang di-assign ke lowongan lamaran bersangkutan.
   const fetchInterviewers = useCallback(async () => {
-    const [modsRes, adminsRes] = await Promise.all([
-      supabase.from('employee_modules').select('employee_id, employees:employee_id ( id, nama, status )').eq('module_name', 'job_portal'),
+    const [modsRes, adminsRes, reviewersRes] = await Promise.all([
+      supabase
+        .from('employee_modules')
+        .select('module_name, employees:employee_id ( id, nama, status )')
+        .in('module_name', JOB_PORTAL_KEYS),
       supabase.from('employees').select('id, nama, status').eq('is_superadmin', true),
+      supabase.from('job_listing_reviewers').select('job_id, employee_id'),
     ]);
 
-    const byId = new Map();
+    const full = new Map();
+    const limited = new Map();
     (modsRes.data || []).forEach((m) => {
       const e = m.employees;
-      if (e && e.status === 'Aktif') byId.set(e.id, e.nama);
+      if (!e || e.status !== 'Aktif') return;
+      (m.module_name === 'job_portal' ? full : limited).set(e.id, e.nama);
     });
     (adminsRes.data || []).forEach((a) => {
-      if (a.status === 'Aktif') byId.set(a.id, a.nama);
+      if (a.status === 'Aktif') full.set(a.id, a.nama);
+    });
+    // Reviewer terbatas yang sedang login selalu bisa memilih dirinya sendiri,
+    // walau RLS membatasi daftar karyawan lain yang bisa dibaca.
+    if (scoped && employeeId && employeeNama) limited.set(employeeId, employeeNama);
+
+    const toList = (map) =>
+      Array.from(map, ([id, nama]) => ({ id, nama })).sort((a, b) => a.nama.localeCompare(b.nama));
+
+    const reviewerMap = {};
+    (reviewersRes.data || []).forEach((r) => {
+      (reviewerMap[r.job_id] ||= new Set()).add(r.employee_id);
     });
 
-    setInterviewers(Array.from(byId, ([id, nama]) => ({ id, nama })).sort((a, b) => a.nama.localeCompare(b.nama)));
-  }, [supabase]);
+    setInterviewerPool({ full: toList(full), scoped: toList(limited), reviewerMap });
+  }, [supabase, scoped, employeeId, employeeNama]);
 
   useEffect(() => {
+    if (accessStatus !== 'allowed') return;
     fetchApplications();
     fetchInterviewers();
-  }, [fetchApplications, fetchInterviewers]);
+  }, [accessStatus, fetchApplications, fetchInterviewers]);
+
+  // Interviewer yang boleh dipilih untuk satu lamaran.
+  const interviewersFor = (app) => {
+    const { full, scoped: limited, reviewerMap } = interviewerPool;
+    const assigned = app?.job_id ? reviewerMap[app.job_id] : null;
+    const extra = assigned ? limited.filter((i) => assigned.has(i.id)) : [];
+    const byId = new Map([...full, ...extra].map((i) => [i.id, i]));
+    return Array.from(byId.values()).sort((a, b) => a.nama.localeCompare(b.nama));
+  };
 
   const logStatusChange = (app, dari, ke) => {
     if (!employee?.id) return;
@@ -305,6 +365,7 @@ export default function JobPortalCandidatesPage() {
   };
 
   const notesApp = notesAppId ? applications.find((a) => a.id === notesAppId) : null;
+  const schedulingInterviewers = schedulingApp ? interviewersFor(schedulingApp) : [];
   const notesList = notesApp ? getNotes(notesApp) : [];
 
   const openScheduleModal = (app) => {
@@ -622,7 +683,9 @@ export default function JobPortalCandidatesPage() {
     <div className="max-w-[1200px] mx-auto px-6 py-10">
       <div className="flex items-end justify-between mb-8 flex-wrap gap-4">
         <div>
-          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Semua Pelamar</h1>
+          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
+            {scoped ? 'Pelamar Saya' : 'Semua Pelamar'}
+          </h1>
           <p className="text-sm text-[#6B6B6B] mt-1">
             {applications.length} total pelamar
             {(filterJob || filterStatus || searchTerms.length > 0) && ` · ${filtered.length} ditampilkan`}
@@ -672,7 +735,7 @@ export default function JobPortalCandidatesPage() {
 
         <select value={filterJob} onChange={(e) => setFilterJob(e.target.value)} className={selectClass}>
           <option value="">Semua Posisi</option>
-          <option value="umum">Umum (tanpa posisi spesifik)</option>
+          {!scoped && <option value="umum">Umum (tanpa posisi spesifik)</option>}
           {jobOptions.map((job) => (
             <option key={job.slug} value={job.slug}>{job.title}</option>
           ))}
@@ -1117,11 +1180,11 @@ export default function JobPortalCandidatesPage() {
                 className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
               >
                 <option value="">Pilih interviewer...</option>
-                {interviewers.map((i) => (
+                {schedulingInterviewers.map((i) => (
                   <option key={i.id} value={i.id}>{i.nama}</option>
                 ))}
               </select>
-              {interviewers.length === 0 && (
+              {schedulingInterviewers.length === 0 && (
                 <span className="text-[11px] text-[#9A9A9A]">Belum ada karyawan dengan akses modul Job Portal.</span>
               )}
             </label>
