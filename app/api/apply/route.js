@@ -4,13 +4,44 @@ import { uploadCVToDrive } from '@/lib/googleDrive';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { notifyByModule, notifyEmployees } from '@/lib/notify';
 import { isJobOpen } from '@/lib/jobStatus';
+import { APPLY_RATE_LIMIT, HONEYPOT_FIELD, getClientIp, rateLimit } from '@/lib/antiSpam';
 
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 const GENERAL_FOLDER_NAME = 'Umum';
 
+// Batas lamaran per IP per jam bisa diubah lewat env APPLY_RATE_LIMIT_PER_HOUR
+// (0 = matikan rate limit). Berguna kalau hosting tidak meneruskan IP asli
+// pengunjung sehingga semua pelamar terlihat berasal dari satu IP.
+const envLimit = Number.parseInt(process.env.APPLY_RATE_LIMIT_PER_HOUR ?? '', 10);
+const rateConfig = {
+  ...APPLY_RATE_LIMIT,
+  limit: Number.isNaN(envLimit) || envLimit < 0 ? APPLY_RATE_LIMIT.limit : envLimit,
+};
+
 export async function POST(request) {
   try {
+    // Rate limit per IP — dicek paling awal, sebelum membaca file CV dan
+    // sebelum upload ke Drive. Hanya aktif di production (saat dev lokal semua
+    // request berasal dari satu IP) dan dilewati kalau IP tidak terdeteksi.
+    const clientIp = getClientIp(request);
+    if (clientIp && rateConfig.limit > 0 && process.env.NODE_ENV === 'production') {
+      const limited = rateLimit(`apply:${clientIp}`, rateConfig);
+      if (!limited.ok) {
+        return NextResponse.json(
+          { error: 'Terlalu banyak percobaan mengirim lamaran. Silakan coba lagi nanti.' },
+          { status: 429, headers: { 'Retry-After': String(limited.retryAfterSec) } }
+        );
+      }
+    }
+
     const formData = await request.formData();
+
+    // Honeypot: field tersembunyi yang tidak pernah diisi manusia. Kalau terisi,
+    // anggap bot — balas sukses palsu supaya bot tidak tahu ia terdeteksi, tanpa
+    // upload ke Drive, tanpa menyimpan, tanpa notifikasi.
+    if ((formData.get(HONEYPOT_FIELD) || '').toString().trim() !== '') {
+      return NextResponse.json({ success: true }, { status: 200 });
+    }
 
     const nama = (formData.get('nama') || '').toString().trim();
     const email = (formData.get('email') || '').toString().trim();
