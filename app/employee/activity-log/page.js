@@ -26,6 +26,7 @@ const AKSI_LABEL = {
   edit_struktur_gaji: 'Edit Struktur Gaji',
   tambah_employee_master: 'Tambah Employee Master',
   ubah_status_tiket_feedback: 'Ubah Status Tiket Feedback',
+  kirim_pesan_kandidat: 'Kirim Pesan ke Kandidat',
 };
 
 function formatWaktu(value) {

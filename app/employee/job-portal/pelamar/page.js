@@ -1,14 +1,23 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo, Fragment } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowUp, ArrowDown, ArrowUpDown, CalendarClock, MessageSquare, Search, X } from 'lucide-react';
+import { ArrowUp, ArrowDown, ArrowUpDown, CalendarClock, MessageSquare, Search, Send, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { notifyEmployee } from '@/lib/notify';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { logActivity } from '@/lib/activityLog';
 import CvPreviewModal from '@/components/CvPreviewModal';
+import {
+  MESSAGE_TEMPLATES,
+  TEMPLATE_STATUS,
+  buildWaLink,
+  buildWhatsAppText,
+  getTemplateLabel,
+  normalizeWaNumber,
+  statusToTemplate,
+} from '@/lib/candidateMessages';
 
 const STATUS_OPTIONS = ['Baru', 'Review', 'Interview', 'Ditolak', 'Diterima'];
 
@@ -18,6 +27,21 @@ const STATUS_STYLES = {
   Interview: 'bg-[#DCFCE7] text-[#166534]',
   Ditolak: 'bg-[#FEE2E2] text-[#B91C1C]',
   Diterima: 'bg-[#166534] text-white',
+};
+
+// Riwayat pesan ke kandidat (tabel application_messages)
+const CHANNEL_LABEL = { email: 'Email', whatsapp: 'WhatsApp' };
+const MSG_STATUS_LABEL = {
+  terkirim: 'Terkirim',
+  gagal: 'Gagal terkirim',
+  wa_dibuka: 'WhatsApp dibuka — belum dikonfirmasi',
+  wa_terkirim: 'Terkirim (dikonfirmasi HR)',
+};
+const MSG_STATUS_STYLE = {
+  terkirim: 'bg-[#DCFCE7] text-[#166534]',
+  gagal: 'bg-[#FEE2E2] text-[#B91C1C]',
+  wa_dibuka: 'bg-[#FEF3C7] text-[#92700C]',
+  wa_terkirim: 'bg-[#DCFCE7] text-[#166534]',
 };
 
 function CvLink({ onOpen }) {
@@ -344,6 +368,160 @@ export default function JobPortalCandidatesPage() {
     setSchedulingApp(null);
   };
 
+  // --- Pesan ke kandidat (email otomatis + link WhatsApp) ---
+  const [msgAppId, setMsgAppId] = useState(null);
+  const [msgTemplate, setMsgTemplate] = useState('interview');
+  const [msgChannel, setMsgChannel] = useState('email');
+  const [msgHistory, setMsgHistory] = useState([]);
+  const [msgHistoryLoading, setMsgHistoryLoading] = useState(false);
+  const [msgHistoryError, setMsgHistoryError] = useState(null);
+  const [msgSending, setMsgSending] = useState(false);
+  const [msgError, setMsgError] = useState(null);
+  const [msgNotice, setMsgNotice] = useState(null);
+  const msgAppIdRef = useRef(null); // buang respons riwayat yang basi kalau modal sudah ganti/tutup
+
+  const msgApp = msgAppId ? applications.find((a) => a.id === msgAppId) || null : null;
+
+  const loadMessageHistory = useCallback(async (appId) => {
+    setMsgHistoryLoading(true);
+    setMsgHistoryError(null);
+    let messages = [];
+    let errMsg = null;
+    try {
+      const res = await fetch(`/api/applications/${appId}/messages`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Gagal memuat riwayat pesan.');
+      messages = json.messages || [];
+    } catch (err) {
+      errMsg = err.message;
+    }
+    if (msgAppIdRef.current !== appId) return;
+    setMsgHistory(messages);
+    setMsgHistoryError(errMsg);
+    setMsgHistoryLoading(false);
+  }, []);
+
+  const openMessages = (app) => {
+    msgAppIdRef.current = app.id;
+    setMsgAppId(app.id);
+    // Template awal mengikuti status sekarang; HR bisa menggantinya.
+    setMsgTemplate(statusToTemplate(app.status) || 'interview');
+    setMsgChannel('email');
+    setMsgError(null);
+    setMsgNotice(null);
+    setMsgHistory([]);
+    loadMessageHistory(app.id);
+  };
+
+  const closeMessages = () => {
+    msgAppIdRef.current = null;
+    setMsgAppId(null);
+  };
+
+  // Nilai turunan untuk modal pesan
+  const msgPosisi = msgApp?.job_listings?.title || null;
+  const msgNeedsSchedule = msgTemplate === 'interview' && !msgApp?.interview_at;
+  const msgStatusMismatch = Boolean(msgApp) && TEMPLATE_STATUS[msgTemplate] !== msgApp.status;
+  const msgWaPhone = msgApp ? normalizeWaNumber(msgApp.telepon) : null;
+  const msgWaText = msgApp
+    ? buildWhatsAppText(msgTemplate, {
+        nama: msgApp.nama,
+        posisi: msgPosisi,
+        interviewAt: msgApp.interview_at,
+        interviewLocation: msgApp.interview_location,
+      })
+    : '';
+  const msgWaUrl = msgWaPhone && !msgNeedsSchedule ? buildWaLink(msgWaPhone, msgWaText) : null;
+
+  // Template yang tidak sesuai status sekarang (mis. "Diterima" untuk pelamar
+  // berstatus Review) sering salah klik — minta konfirmasi dulu.
+  const confirmStatusMismatch = () =>
+    !msgStatusMismatch ||
+    window.confirm(
+      `Status pelamar saat ini "${msgApp.status}", sedangkan template "${getTemplateLabel(msgTemplate)}" ` +
+        `biasanya untuk status "${TEMPLATE_STATUS[msgTemplate]}". Tetap kirim?`
+    );
+
+  const postMessage = async (channel) => {
+    const res = await fetch(`/api/applications/${msgApp.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template: msgTemplate, channel }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || 'Gagal mengirim pesan.');
+    return json;
+  };
+
+  const handleSendEmail = async () => {
+    if (!msgApp || msgSending || !confirmStatusMismatch()) return;
+    const appId = msgApp.id;
+    setMsgSending(true);
+    setMsgError(null);
+    setMsgNotice(null);
+    try {
+      const json = await postMessage('email');
+      if (msgAppIdRef.current === appId) {
+        if (json.message) setMsgHistory((prev) => [json.message, ...prev]);
+        setMsgNotice(
+          json.historyRecorded === false
+            ? 'Email terkirim, tetapi gagal dicatat ke riwayat.'
+            : `Email terkirim ke ${msgApp.email}.`
+        );
+      }
+    } catch (err) {
+      if (msgAppIdRef.current === appId) {
+        setMsgError(err.message);
+        loadMessageHistory(appId); // percobaan gagal ikut tercatat di server
+      }
+    }
+    setMsgSending(false);
+  };
+
+  // Tombol WhatsApp adalah <a href> sungguhan (bukan window.open setelah await)
+  // supaya tidak diblokir popup blocker. Pencatatan berjalan paralel saat klik.
+  const handleWhatsAppClick = (e) => {
+    if (!msgApp || !msgWaUrl) return;
+    if (msgSending || !confirmStatusMismatch()) {
+      e.preventDefault();
+      return;
+    }
+    const appId = msgApp.id;
+    setMsgSending(true);
+    setMsgError(null);
+    setMsgNotice(null);
+    postMessage('whatsapp')
+      .then((json) => {
+        if (msgAppIdRef.current !== appId) return;
+        if (json.message) setMsgHistory((prev) => [json.message, ...prev]);
+        setMsgNotice(
+          json.historyRecorded === false
+            ? 'WhatsApp dibuka, tetapi gagal dicatat ke riwayat.'
+            : 'WhatsApp dibuka. Setelah menekan Send di WhatsApp, klik "Sudah saya kirim" pada riwayat di bawah.'
+        );
+      })
+      .catch((err) => {
+        if (msgAppIdRef.current === appId) setMsgError('WhatsApp dibuka, tetapi tidak tercatat di riwayat: ' + err.message);
+      })
+      .finally(() => setMsgSending(false));
+  };
+
+  const handleConfirmWhatsApp = async (messageId) => {
+    if (!msgApp) return;
+    const appId = msgApp.id;
+    setMsgError(null);
+    try {
+      const res = await fetch(`/api/applications/${appId}/messages/${messageId}`, { method: 'PATCH' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Gagal menyimpan konfirmasi.');
+      if (msgAppIdRef.current === appId) {
+        setMsgHistory((prev) => prev.map((m) => (m.id === messageId ? json.message : m)));
+      }
+    } catch (err) {
+      if (msgAppIdRef.current === appId) setMsgError(err.message);
+    }
+  };
+
   // Kata kunci dipecah per spasi; semua kata harus ketemu (AND), jadi
   // "budi jakarta" bisa menemukan Budi yang jawabannya menyebut Jakarta.
   const searchTerms = useMemo(
@@ -599,16 +777,25 @@ export default function JobPortalCandidatesPage() {
                         </button>
                       </td>
                       <td className="px-5 py-3.5">
-                        <select
-                          value={a.status}
-                          disabled={updatingId === a.id}
-                          onChange={(e) => handleStatusChange(a.id, e.target.value)}
-                          className={`text-xs font-medium px-2.5 py-1.5 border-0 focus:outline-none cursor-pointer ${STATUS_STYLES[a.status] || 'bg-[#F4F4F4] text-[#3D3D3D]'}`}
-                        >
-                          {STATUS_OPTIONS.map((s) => (
-                            <option key={s} value={s}>{s}</option>
-                          ))}
-                        </select>
+                        <div className="flex flex-col items-start gap-2">
+                          <select
+                            value={a.status}
+                            disabled={updatingId === a.id}
+                            onChange={(e) => handleStatusChange(a.id, e.target.value)}
+                            className={`text-xs font-medium px-2.5 py-1.5 border-0 focus:outline-none cursor-pointer ${STATUS_STYLES[a.status] || 'bg-[#F4F4F4] text-[#3D3D3D]'}`}
+                          >
+                            {STATUS_OPTIONS.map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => openMessages(a)}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-madael-red hover:text-madael-dark"
+                          >
+                            <Send size={12} /> Pesan
+                          </button>
+                        </div>
                       </td>
                       <td className="px-5 py-3.5 min-w-[160px]">
                         {a.interview_at ? (
@@ -736,6 +923,167 @@ export default function JobPortalCandidatesPage() {
             >
               {noteSaving ? 'Menyimpan...' : 'Tambah Catatan'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {msgApp && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={closeMessages}>
+          <div
+            className="bg-white w-full max-w-[520px] p-6 relative max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button onClick={closeMessages} className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black">
+              <X size={18} />
+            </button>
+            <h2 className="text-sm font-medium text-black mb-1">Pesan ke Kandidat</h2>
+            <p className="text-xs text-[#6B6B6B] mb-4">{msgApp.nama} — {msgPosisi || 'CV Umum'}</p>
+
+            <p className="text-xs text-[#6B6B6B] mb-1.5">Template</p>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {MESSAGE_TEMPLATES.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => { setMsgTemplate(t.key); setMsgError(null); setMsgNotice(null); }}
+                  className={`px-3 py-1.5 text-xs font-medium border transition-colors ${
+                    msgTemplate === t.key
+                      ? 'border-madael-red bg-madael-red text-white'
+                      : 'border-[#E0E0E0] text-[#3D3D3D] hover:border-madael-red'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex border-b border-[#E0E0E0] mb-4">
+              {['email', 'whatsapp'].map((ch) => (
+                <button
+                  key={ch}
+                  type="button"
+                  onClick={() => { setMsgChannel(ch); setMsgError(null); setMsgNotice(null); }}
+                  className={`px-4 py-2 text-xs font-medium -mb-px border-b-2 transition-colors ${
+                    msgChannel === ch ? 'border-madael-red text-black' : 'border-transparent text-[#9A9A9A] hover:text-black'
+                  }`}
+                >
+                  {CHANNEL_LABEL[ch]}
+                </button>
+              ))}
+            </div>
+
+            {msgStatusMismatch && (
+              <p className="text-xs text-[#92700C] bg-[#FEF3C7] px-3 py-2 mb-3">
+                Status pelamar saat ini &quot;{msgApp.status}&quot;, template ini biasanya untuk &quot;{TEMPLATE_STATUS[msgTemplate]}&quot;.
+              </p>
+            )}
+            {msgNeedsSchedule && (
+              <p className="text-xs text-[#B91C1C] bg-[#FEE2E2] px-3 py-2 mb-3">
+                Belum ada jadwal interview. Tutup jendela ini lalu klik &quot;Jadwalkan&quot; dulu supaya jadwal masuk ke pesan.
+              </p>
+            )}
+
+            {msgChannel === 'email' ? (
+              <div className="mb-4">
+                <p className="text-xs text-[#6B6B6B] mb-1">Kepada</p>
+                <p className="text-sm text-black mb-2">{msgApp.email}</p>
+                <p className="text-xs text-[#6B6B6B]">
+                  Email dikirim langsung oleh sistem begitu Anda klik kirim (dwibahasa Indonesia/English, sama dengan
+                  email status otomatis).
+                </p>
+              </div>
+            ) : (
+              <div className="mb-4">
+                <p className="text-xs text-[#6B6B6B] mb-1">Nomor WhatsApp</p>
+                {msgWaPhone ? (
+                  <p className="text-sm text-black mb-2">+{msgWaPhone}</p>
+                ) : (
+                  <p className="text-xs text-[#B91C1C] mb-2">
+                    {msgApp.telepon
+                      ? `Nomor pelamar "${msgApp.telepon}" bukan nomor WhatsApp yang valid.`
+                      : 'Pelamar tidak mengisi nomor telepon.'}
+                  </p>
+                )}
+                <p className="text-xs text-[#6B6B6B] mb-1">Pratinjau pesan</p>
+                <pre className="text-xs text-black bg-[#FAFAFA] border border-[#F0F0F0] px-3 py-2.5 whitespace-pre-wrap font-sans">
+                  {msgWaText}
+                </pre>
+              </div>
+            )}
+
+            {msgError && <p className="text-xs text-red-600 mb-3">{msgError}</p>}
+            {msgNotice && <p className="text-xs text-[#166534] mb-3">{msgNotice}</p>}
+
+            {msgChannel === 'email' ? (
+              <button
+                onClick={handleSendEmail}
+                disabled={msgSending || msgNeedsSchedule}
+                className="w-full bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+              >
+                {msgSending ? 'Mengirim...' : 'Kirim Email Sekarang'}
+              </button>
+            ) : msgWaUrl ? (
+              <a
+                href={msgWaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={handleWhatsAppClick}
+                className="block text-center w-full bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
+              >
+                Buka WhatsApp
+              </a>
+            ) : (
+              <span className="block text-center w-full bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] opacity-50 cursor-not-allowed">
+                Buka WhatsApp
+              </span>
+            )}
+
+            <h3 className="text-xs font-medium text-black mt-6 mb-2">Riwayat Pesan</h3>
+            {msgHistoryLoading ? (
+              <p className="text-xs text-[#9A9A9A]">Memuat riwayat...</p>
+            ) : msgHistoryError ? (
+              <p className="text-xs text-red-600">{msgHistoryError}</p>
+            ) : msgHistory.length === 0 ? (
+              <p className="text-xs text-[#9A9A9A]">Belum ada pesan yang tercatat.</p>
+            ) : (
+              <div className="space-y-2.5">
+                {msgHistory.map((m) => (
+                  <div key={m.id} className="border border-[#F0F0F0] bg-[#FAFAFA] px-3 py-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-xs font-medium text-black">
+                        {CHANNEL_LABEL[m.channel] || m.channel} · {getTemplateLabel(m.template)}
+                      </span>
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 shrink-0 ${MSG_STATUS_STYLE[m.status] || 'bg-[#F4F4F4] text-[#3D3D3D]'}`}>
+                        {MSG_STATUS_LABEL[m.status] || m.status}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#9A9A9A] mt-1">
+                      {formatWaktu(m.created_at)} ·{' '}
+                      {m.source === 'otomatis'
+                        ? `Otomatis saat status diubah${m.sent_by_nama ? ` (${m.sent_by_nama})` : ''}`
+                        : m.sent_by_nama || '—'}
+                      {m.recipient ? ` · ke ${m.channel === 'whatsapp' ? '+' : ''}${m.recipient}` : ''}
+                    </p>
+                    {m.error && <p className="text-[11px] text-red-600 mt-1">{m.error}</p>}
+                    {m.status !== 'gagal' && (
+                      <details className="mt-1.5">
+                        <summary className="text-[11px] text-madael-red cursor-pointer">Lihat isi pesan</summary>
+                        <pre className="text-xs text-black whitespace-pre-wrap font-sans mt-1.5">{m.body}</pre>
+                      </details>
+                    )}
+                    {m.status === 'wa_dibuka' && (
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmWhatsApp(m.id)}
+                        className="mt-2 text-[11px] font-medium text-madael-red hover:text-madael-dark"
+                      >
+                        Sudah saya kirim di WhatsApp
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
