@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useLanguage } from '@/context/LanguageContext';
+import { HONEYPOT_FIELD } from '@/lib/antiSpam';
 
 const translations = {
   id: {
@@ -83,6 +84,7 @@ export default function JobApplyForm({
 
   const [form, setForm] = useState({ nama: '', email: '', telepon: '', posisi_minat: '' });
   const [cvFile, setCvFile] = useState(null);
+  const [honeypot, setHoneypot] = useState(''); // jebakan bot, lihat HONEYPOT_FIELD
   const [answers, setAnswers] = useState({});
   const [formError, setFormError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -141,6 +143,7 @@ export default function JobApplyForm({
       payload.append('nama', form.nama);
       payload.append('email', form.email);
       payload.append('telepon', form.telepon);
+      payload.append(HONEYPOT_FIELD, honeypot);
 
       if (isGeneral) {
         // Tidak mengirim job_id -> API memperlakukan ini sebagai lamaran umum
@@ -212,6 +215,24 @@ export default function JobApplyForm({
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Honeypot anti-spam: disembunyikan dari manusia (di luar layar, tidak bisa
+                di-tab, tidak diisi otomatis). Bot yang mengisi semua field akan terjebak. */}
+            <div
+              aria-hidden="true"
+              style={{ position: 'absolute', left: '-10000px', width: '1px', height: '1px', overflow: 'hidden' }}
+            >
+              <label htmlFor={`${anchorId}-${HONEYPOT_FIELD}`}>Leave this field empty</label>
+              <input
+                id={`${anchorId}-${HONEYPOT_FIELD}`}
+                name={HONEYPOT_FIELD}
+                type="text"
+                tabIndex={-1}
+                autoComplete="off"
+                value={honeypot}
+                onChange={(e) => setHoneypot(e.target.value)}
+              />
+            </div>
+
             <div>
               <label htmlFor={`${anchorId}-nama`} className={labelClass}>
                 {t.fieldName}

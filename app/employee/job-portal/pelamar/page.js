@@ -10,6 +10,7 @@ import { useModuleAccess } from '@/lib/useModuleAccess';
 import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import { logActivity } from '@/lib/activityLog';
 import CvPreviewModal from '@/components/CvPreviewModal';
+import { findDuplicateApplications } from '@/lib/candidateDuplicates';
 import {
   MESSAGE_TEMPLATES,
   TEMPLATE_STATUS,
@@ -50,6 +51,41 @@ function CvLink({ onOpen }) {
     <button type="button" onClick={onOpen} className="text-madael-red hover:text-madael-dark text-xs font-medium">
       Lihat CV
     </button>
+  );
+}
+
+// Petunjuk bahwa email/telepon pelamar ini sama dengan lamaran lain (mis. melamar
+// ke beberapa posisi). Hanya petunjuk — bisa saja bukan orang yang sama.
+const DUPLICATE_FIELD_LABEL = { email: 'email', telepon: 'telepon' };
+const DUPLICATE_PREVIEW_LIMIT = 3;
+
+function DuplicateNotice({ duplicates }) {
+  if (!duplicates || duplicates.length === 0) return null;
+  const shown = duplicates.slice(0, DUPLICATE_PREVIEW_LIMIT);
+  const rest = duplicates.length - shown.length;
+  return (
+    <div className="mt-1.5 max-w-[260px]">
+      <span
+        title="Email atau nomor telepon sama dengan lamaran lain — kemungkinan kandidat yang sama"
+        className="inline-block text-[10px] font-medium px-1.5 py-0.5 bg-[#FEF3C7] text-[#92700C]"
+      >
+        Kemungkinan pelamar ganda · {duplicates.length} lamaran lain
+      </span>
+      <ul className="mt-1 space-y-0.5 text-[11px] text-[#6B6B6B]">
+        {shown.map((d) => (
+          <li key={d.id}>
+            {d.jobTitle}
+            {d.sameJob ? ' (posisi sama)' : ''} ·{' '}
+            {new Date(d.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })} ·{' '}
+            {d.status}
+            <span className="text-[#9A9A9A]">
+              {' '}· cocok: {d.matchedBy.map((f) => DUPLICATE_FIELD_LABEL[f] || f).join(' & ')}
+            </span>
+          </li>
+        ))}
+        {rest > 0 && <li>+{rest} lainnya</li>}
+      </ul>
+    </div>
   );
 }
 
@@ -590,6 +626,10 @@ export default function JobPortalCandidatesPage() {
     [searchQuery]
   );
 
+  // Lamaran lain dengan email/telepon yang sama. Dihitung dari SEMUA lamaran yang
+  // dimuat (bukan `filtered`) supaya penanda tetap muncul saat filter/pencarian aktif.
+  const duplicateMap = useMemo(() => findDuplicateApplications(applications), [applications]);
+
   // Index teks per pelamar, dibuat sekali setiap data berubah (bukan tiap ketikan).
   const searchIndex = useMemo(() => {
     const index = new Map();
@@ -790,7 +830,10 @@ export default function JobPortalCandidatesPage() {
                 return (
                   <Fragment key={a.id}>
                     <tr className="border-b border-[#F0F0F0] last:border-0 align-top">
-                      <td className="px-5 py-3.5 text-black">{highlightText(a.nama, searchTerms)}</td>
+                      <td className="px-5 py-3.5 text-black">
+                        {highlightText(a.nama, searchTerms)}
+                        <DuplicateNotice duplicates={duplicateMap.get(a.id)} />
+                      </td>
                       <td className="px-5 py-3.5 text-[#3D3D3D]">{a.job_listings?.title || 'CV Umum'}</td>
                       <td className="px-5 py-3.5 text-[#6B6B6B]">
                         {new Date(a.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
