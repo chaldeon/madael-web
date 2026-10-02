@@ -20,6 +20,10 @@ import {
   getTemplateLabel,
   normalizeWaNumber,
   statusToTemplate,
+  INTERVIEW_MODES,
+  getInterviewVenue,
+  hasInterviewVenue,
+  isHttpUrl,
 } from '@/lib/candidateMessages';
 
 const STATUS_OPTIONS = ['Baru', 'Review', 'Interview', 'Ditolak', 'Diterima'];
@@ -46,6 +50,42 @@ const MSG_STATUS_STYLE = {
   wa_dibuka: 'bg-[#FEF3C7] text-[#92700C]',
   wa_terkirim: 'bg-[#DCFCE7] text-[#166534]',
 };
+
+// Ringkasan format + lokasi interview di kolom Jadwal.
+function InterviewVenue({ app }) {
+  const v = getInterviewVenue(app);
+  if (v.mode === 'online') {
+    return (
+      <div className="text-[#9A9A9A]">
+        Online
+        {isHttpUrl(v.meetingUrl) && (
+          <>
+            {' · '}
+            <a
+              href={v.meetingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-madael-red hover:text-madael-dark"
+            >
+              Buka link
+            </a>
+          </>
+        )}
+      </div>
+    );
+  }
+  if (!v.location && !v.address) return null;
+  return (
+    <div className="text-[#9A9A9A]">
+      {v.location && <div>{v.location}</div>}
+      {v.address && (
+        <div className="line-clamp-2 whitespace-pre-line" title={v.address}>
+          {v.address}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CvLink({ onOpen }) {
   return (
@@ -322,7 +362,14 @@ export default function JobPortalCandidatesPage() {
   // mana pun) dan reviewer terbatas (hanya untuk lowongan yang di-assign ke mereka).
   const [interviewerPool, setInterviewerPool] = useState({ full: [], scoped: [], reviewerMap: {} });
   const [schedulingApp, setSchedulingApp] = useState(null); // application yang lagi dijadwalkan
-  const [scheduleForm, setScheduleForm] = useState({ interview_at: '', interview_interviewer_id: '', interview_location: '' });
+  const [scheduleForm, setScheduleForm] = useState({
+    interview_at: '',
+    interview_interviewer_id: '',
+    interview_mode: 'offline',
+    interview_location: '',
+    interview_address: '',
+    interview_meeting_url: '',
+  });
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleError, setScheduleError] = useState(null);
 
@@ -361,7 +408,7 @@ export default function JobPortalCandidatesPage() {
     let query = supabase
       .from('applications')
       .select(
-        'id, created_at, nama, email, telepon, status, cv_drive_id, cv_filename, job_id, catatan, answers, interview_at, interview_interviewer_id, interview_location, job_listings ( title, slug ), interviewer:interview_interviewer_id ( nama ), application_notes ( id, isi, author_nama, created_at )'
+        'id, created_at, nama, email, telepon, status, cv_drive_id, cv_filename, job_id, catatan, answers, interview_at, interview_interviewer_id, interview_mode, interview_location, interview_address, interview_meeting_url, job_listings ( title, slug ), interviewer:interview_interviewer_id ( nama ), application_notes ( id, isi, author_nama, created_at )'
       )
       .order('created_at', { ascending: false });
     if (assignedIds) query = query.in('job_id', assignedIds);
@@ -460,23 +507,6 @@ export default function JobPortalCandidatesPage() {
     });
   };
 
-  // Kirim email status ke pelamar lewat route server. Gagal kirim tidak
-  // membatalkan perubahan status yang sudah tersimpan — cukup kabari admin.
-  const sendStatusEmail = async (id, status) => {
-    try {
-      const res = await fetch(`/api/applications/${id}/status-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) return;
-      const json = await res.json().catch(() => ({}));
-      alert('Status tersimpan, tetapi ' + (json.error || 'email ke pelamar gagal dikirim.'));
-    } catch {
-      alert('Status tersimpan, tetapi email ke pelamar gagal dikirim.');
-    }
-  };
-
   const handleStatusChange = async (id, newStatus) => {
     const current = applications.find((a) => a.id === id);
     if (!current || current.status === newStatus) return;
@@ -491,12 +521,10 @@ export default function JobPortalCandidatesPage() {
       setApplications((prev) => prev.map((a) => (a.id === id ? updatedApp : a)));
       // Begitu status masuk "Interview" dan belum ada jadwal, langsung buka
       // form jadwal — memudahkan alur, tidak perlu klik "Jadwalkan" lagi.
+      // Mengubah status TIDAK mengirim pesan ke pelamar; pengiriman hanya lewat
+      // tombol "Pesan" (email / WhatsApp).
       if (newStatus === 'Interview' && !updatedApp.interview_at) {
-        // Email interview dikirim setelah jadwal disimpan (handleSaveSchedule),
-        // supaya pelamar langsung menerima tanggal/lokasinya.
         openScheduleModal(updatedApp);
-      } else if (newStatus !== 'Baru') {
-        await sendStatusEmail(id, newStatus);
       }
     } else {
       alert('Gagal update status: ' + error.message);
@@ -570,11 +598,15 @@ export default function JobPortalCandidatesPage() {
     if (app.status !== 'Interview') return; // jaga-jaga — tombolnya sendiri sudah dikunci di UI
     setScheduleError(null);
     setSchedulingApp(app);
+    const venue = getInterviewVenue(app);
     setScheduleForm({
       // input datetime-local butuh format "YYYY-MM-DDTHH:mm" tanpa detik/timezone
       interview_at: app.interview_at ? new Date(app.interview_at).toISOString().slice(0, 16) : '',
       interview_interviewer_id: app.interview_interviewer_id || '',
-      interview_location: app.interview_location || '',
+      interview_mode: venue.mode || 'offline',
+      interview_location: venue.location || '',
+      interview_address: venue.address || '',
+      interview_meeting_url: venue.meetingUrl || '',
     });
   };
 
@@ -585,13 +617,30 @@ export default function JobPortalCandidatesPage() {
       return;
     }
 
+    // Online → link meeting wajib; offline → alamat lengkap wajib. Dua field
+    // itu yang ikut terkirim ke kandidat lewat email/WhatsApp.
+    const isOnline = scheduleForm.interview_mode === 'online';
+    const meetingUrl = scheduleForm.interview_meeting_url.trim();
+    const address = scheduleForm.interview_address.trim();
+    if (isOnline && !isHttpUrl(meetingUrl)) {
+      setScheduleError('Link meeting wajib diisi dan harus diawali http:// atau https://.');
+      return;
+    }
+    if (!isOnline && !address) {
+      setScheduleError('Alamat lengkap wajib diisi untuk interview offline.');
+      return;
+    }
+
     setScheduleSaving(true);
     setScheduleError(null);
 
     const payload = {
       interview_at: new Date(scheduleForm.interview_at).toISOString(),
       interview_interviewer_id: scheduleForm.interview_interviewer_id,
-      interview_location: scheduleForm.interview_location || null,
+      interview_mode: isOnline ? 'online' : 'offline',
+      interview_location: isOnline ? null : scheduleForm.interview_location.trim() || null,
+      interview_address: isOnline ? null : address,
+      interview_meeting_url: isOnline ? meetingUrl : null,
       // Otomatis pindahkan status ke "Interview" kalau belum, biar sinkron
       // dengan jadwal yang baru diisi — bisa diubah manual lagi kalau perlu.
       status: schedulingApp.status === 'Interview' ? schedulingApp.status : 'Interview',
@@ -601,7 +650,7 @@ export default function JobPortalCandidatesPage() {
       .from('applications')
       .update(payload)
       .eq('id', schedulingApp.id)
-      .select('id, status, interview_at, interview_interviewer_id, interview_location, interviewer:interview_interviewer_id ( nama )')
+      .select('id, status, interview_at, interview_interviewer_id, interview_mode, interview_location, interview_address, interview_meeting_url, interviewer:interview_interviewer_id ( nama )')
       .single();
 
     if (error) {
@@ -619,9 +668,6 @@ export default function JobPortalCandidatesPage() {
       pesan: `Kamu dijadwalkan jadi interviewer untuk ${schedulingApp.nama} (${interviewLabel}) pada ${new Date(payload.interview_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}.`,
       link: '/employee/job-portal/pelamar',
     });
-
-    // Pelamar dapat email jadwal interview (juga saat jadwal diubah).
-    await sendStatusEmail(data.id, 'Interview');
 
     setScheduleSaving(false);
     setSchedulingApp(null);
@@ -679,7 +725,11 @@ export default function JobPortalCandidatesPage() {
 
   // Nilai turunan untuk modal pesan
   const msgPosisi = msgApp?.job_listings?.title || null;
+  const msgVenue = msgApp ? getInterviewVenue(msgApp) : null;
   const msgNeedsSchedule = msgTemplate === 'interview' && !msgApp?.interview_at;
+  // Jadwal sudah ada tapi lokasi/link belum lengkap — kandidat tidak tahu harus ke mana.
+  const msgNeedsVenue = msgTemplate === 'interview' && !msgNeedsSchedule && !hasInterviewVenue(msgVenue);
+  const msgBlocked = msgNeedsSchedule || msgNeedsVenue;
   const msgStatusMismatch = Boolean(msgApp) && TEMPLATE_STATUS[msgTemplate] !== msgApp.status;
   const msgWaPhone = msgApp ? normalizeWaNumber(msgApp.telepon) : null;
   const msgWaText = msgApp
@@ -687,10 +737,10 @@ export default function JobPortalCandidatesPage() {
         nama: msgApp.nama,
         posisi: msgPosisi,
         interviewAt: msgApp.interview_at,
-        interviewLocation: msgApp.interview_location,
+        venue: msgVenue,
       })
     : '';
-  const msgWaUrl = msgWaPhone && !msgNeedsSchedule ? buildWaLink(msgWaPhone, msgWaText) : null;
+  const msgWaUrl = msgWaPhone && !msgBlocked ? buildWaLink(msgWaPhone, msgWaText) : null;
 
   // Template yang tidak sesuai status sekarang (mis. "Diterima" untuk pelamar
   // berstatus Review) sering salah klik — minta konfirmasi dulu.
@@ -1138,7 +1188,7 @@ export default function JobPortalCandidatesPage() {
                               {new Date(a.interview_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
                             </div>
                             <div>{a.interviewer?.nama || '—'}</div>
-                            {a.interview_location && <div className="text-[#9A9A9A]">{a.interview_location}</div>}
+                            <InterviewVenue app={a} />
                             {a.status === 'Interview' ? (
                               <button
                                 onClick={() => openScheduleModal(a)}
@@ -1332,14 +1382,19 @@ export default function JobPortalCandidatesPage() {
                 Belum ada jadwal interview. Tutup jendela ini lalu klik &quot;Jadwalkan&quot; dulu supaya jadwal masuk ke pesan.
               </p>
             )}
+            {msgNeedsVenue && (
+              <p className="text-xs text-[#B91C1C] bg-[#FEE2E2] px-3 py-2 mb-3">
+                Lokasi atau link meeting interview belum diisi. Tutup jendela ini lalu klik &quot;Ubah jadwal&quot; untuk melengkapinya.
+              </p>
+            )}
 
             {msgChannel === 'email' ? (
               <div className="mb-4">
                 <p className="text-xs text-[#6B6B6B] mb-1">Kepada</p>
                 <p className="text-sm text-black mb-2">{msgApp.email}</p>
                 <p className="text-xs text-[#6B6B6B]">
-                  Email dikirim langsung oleh sistem begitu Anda klik kirim (dwibahasa Indonesia/English, sama dengan
-                  email status otomatis).
+                  Email dikirim langsung oleh sistem begitu Anda klik kirim (dwibahasa Indonesia/English). Mengubah
+                  status pelamar tidak mengirim email.
                 </p>
               </div>
             ) : (
@@ -1367,7 +1422,7 @@ export default function JobPortalCandidatesPage() {
             {msgChannel === 'email' ? (
               <button
                 onClick={handleSendEmail}
-                disabled={msgSending || msgNeedsSchedule}
+                disabled={msgSending || msgBlocked}
                 className="w-full bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
               >
                 {msgSending ? 'Mengirim...' : 'Kirim Email Sekarang'}
@@ -1476,15 +1531,61 @@ export default function JobPortalCandidatesPage() {
               )}
             </label>
 
-            <label className="flex flex-col gap-1 mb-5">
-              <span className="text-xs text-[#6B6B6B]">Lokasi / Link Meeting (opsional)</span>
-              <input
-                value={scheduleForm.interview_location}
-                onChange={(e) => setScheduleForm((f) => ({ ...f, interview_location: e.target.value }))}
-                placeholder="Kantor Pusat / link Zoom / Google Meet"
-                className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
-              />
-            </label>
+            <div className="mb-3">
+              <span className="text-xs text-[#6B6B6B] block mb-1.5">Format Interview</span>
+              <div className="flex flex-wrap gap-2">
+                {INTERVIEW_MODES.map((m) => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => setScheduleForm((f) => ({ ...f, interview_mode: m.key }))}
+                    className={`px-3 py-1.5 text-xs font-medium border transition-colors ${
+                      scheduleForm.interview_mode === m.key
+                        ? 'border-madael-red bg-madael-red text-white'
+                        : 'border-[#E0E0E0] text-[#3D3D3D] hover:border-madael-red'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {scheduleForm.interview_mode === 'online' ? (
+              <label className="flex flex-col gap-1 mb-5">
+                <span className="text-xs text-[#6B6B6B]">Link Meeting (Zoom / Google Meet / Teams)</span>
+                <input
+                  type="url"
+                  value={scheduleForm.interview_meeting_url}
+                  onChange={(e) => setScheduleForm((f) => ({ ...f, interview_meeting_url: e.target.value }))}
+                  placeholder="https://zoom.us/j/..."
+                  className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+                />
+                <span className="text-[11px] text-[#9A9A9A]">Link ini ikut terkirim di email dan WhatsApp ke kandidat.</span>
+              </label>
+            ) : (
+              <>
+                <label className="flex flex-col gap-1 mb-3">
+                  <span className="text-xs text-[#6B6B6B]">Nama Lokasi (opsional)</span>
+                  <input
+                    value={scheduleForm.interview_location}
+                    onChange={(e) => setScheduleForm((f) => ({ ...f, interview_location: e.target.value }))}
+                    placeholder="Kantor Pusat"
+                    className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 mb-5">
+                  <span className="text-xs text-[#6B6B6B]">Alamat Lengkap</span>
+                  <textarea
+                    rows={3}
+                    value={scheduleForm.interview_address}
+                    onChange={(e) => setScheduleForm((f) => ({ ...f, interview_address: e.target.value }))}
+                    placeholder="Gedung, jalan, kota, kode pos. Tambahkan lantai/patokan bila perlu."
+                    className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors resize-none"
+                  />
+                </label>
+              </>
+            )}
 
             <button
               onClick={handleSaveSchedule}
