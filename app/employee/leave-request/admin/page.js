@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Check, X as XIcon, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { hitungHariKerja, hitungSisaCuti } from '@/lib/leave';
+import { hitungHariKerja, hitungSisaCuti, labelJenisCuti, potongKuota } from '@/lib/leave';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -167,7 +167,7 @@ export default function LeaveRequestAdminPage() {
   const handleDecision = async (row, decision) => {
     if (decision === 'cancelled') {
       const konfirmasi = window.confirm(
-        `Batalkan cuti yang sudah disetujui (${formatTanggal(row.tanggal_mulai)} — ${formatTanggal(row.tanggal_selesai)})?\n\nKuota cuti karyawan akan dikembalikan.`
+        `Batalkan ${potongKuota(row.jenis) ? 'cuti' : labelJenisCuti(row.jenis).toLowerCase()} yang sudah disetujui (${formatTanggal(row.tanggal_mulai)} — ${formatTanggal(row.tanggal_selesai)})?${potongKuota(row.jenis) ? '\n\nKuota cuti karyawan akan dikembalikan.' : ''}`
       );
       if (!konfirmasi) return;
     }
@@ -269,6 +269,7 @@ export default function LeaveRequestAdminPage() {
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
                 <SortableHeader colKey="nama" label="Nama" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <th className="px-4 py-3 font-medium">Jenis</th>
                 <SortableHeader colKey="periode" label="Periode" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="hari_kerja" label="Hari Kerja" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="sisa_kuota" label="Sisa Kuota" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
@@ -280,7 +281,7 @@ export default function LeaveRequestAdminPage() {
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-0">
+                  <td colSpan={8} className="p-0">
                     <EmptyState message="Tidak ada pengajuan yang cocok dengan filter ini." />
                   </td>
                 </tr>
@@ -292,13 +293,28 @@ export default function LeaveRequestAdminPage() {
                     <tr key={row.id} className="border-b border-[#E0E0E0] last:border-0">
                       <td className="px-4 py-3 text-black whitespace-nowrap">{empById[row.employee_id]?.nama || '—'}</td>
                       <td className="px-4 py-3 text-[#6B6B6B] whitespace-nowrap">
+                        {labelJenisCuti(row.jenis)}
+                        {row.lampiran_drive_id && (
+                          <a
+                            href={`/api/leave-requests/${row.id}/lampiran`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block text-[11px] text-madael-red hover:text-madael-dark"
+                          >
+                            Lihat lampiran
+                          </a>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-[#6B6B6B] whitespace-nowrap">
                         {formatTanggal(row.tanggal_mulai)} — {formatTanggal(row.tanggal_selesai)}
                       </td>
                       <td className="px-4 py-3 text-[#6B6B6B]">
                         {hitungHariKerja(row.tanggal_mulai, row.tanggal_selesai, hariKerjaByEmpId[row.employee_id])}
                       </td>
                       <td className="px-4 py-3 text-[#6B6B6B] whitespace-nowrap">
-                        {sisa ? `${sisa.sisa}/${sisa.jatah}` : <span className="text-[#9A9A9A]">belum terhubung</span>}
+                        {!potongKuota(row.jenis)
+                          ? <span className="text-[#9A9A9A]">tidak memotong</span>
+                          : sisa ? `${sisa.sisa}/${sisa.jatah}` : <span className="text-[#9A9A9A]">belum terhubung</span>}
                       </td>
                       <td className="px-4 py-3 text-[#6B6B6B] max-w-[200px] truncate" title={row.alasan}>{row.alasan}</td>
                       <td className="px-4 py-3"><StatusBadge status={row.status} /></td>

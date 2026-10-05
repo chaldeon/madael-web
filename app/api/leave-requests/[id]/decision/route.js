@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase-admin';
 import { getSessionEmployee } from '@/lib/sessionEmployee';
 import { logActivity } from '@/lib/activityLog';
 import { notifyEmployee } from '@/lib/notify';
-import { hitungHariKerja, tahunSekarang, tahunDariTanggal } from '@/lib/leave';
+import { hitungHariKerja, tahunSekarang, tahunDariTanggal, potongKuota, labelJenisCuti } from '@/lib/leave';
 import { ambilKonteksCuti, cariCutiBentrok, formatTanggal, ubahKuotaTerpakai } from '@/lib/leaveServer';
 
 // POST /api/leave-requests/[id]/decision   body: { decision }
@@ -11,6 +11,10 @@ import { ambilKonteksCuti, cariCutiBentrok, formatTanggal, ubahKuotaTerpakai } f
 //   'rejected'  : pending  -> rejected
 //   'cancelled' : approved -> cancelled (admin membatalkan cuti yang sudah
 //                 disetujui; kuota dikembalikan)
+//
+// Jenis sakit/izin tidak memotong kuota: approve/cancel hanya mengubah status
+// (lihat JENIS_CUTI di lib/leave.js). Hanya jenis yang memotong kuota
+// (tahunan) yang menyentuh employees_master.
 //
 // Hanya superadmin aktif. Dulu approve dilakukan dari browser dengan dua
 // UPDATE terpisah (status, lalu kuota) tanpa cek sisa kuota. Di sini kuota
@@ -68,6 +72,7 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: `Gagal memuat data cuti: ${ctx.error.message}` }, { status: 500 });
     }
 
+    const potong = potongKuota(row.jenis);
     const tahun = tahunSekarang();
     const hariDariJadwal = hitungHariKerja(row.tanggal_mulai, row.tanggal_selesai, ctx.hariKerja);
     const sekarang = new Date().toISOString();
@@ -123,7 +128,9 @@ export async function POST(request, { params }) {
         );
       }
 
-      if (ctx.master) {
+      if (!potong) {
+        // sakit/izin: tidak ada potongan kuota
+      } else if (ctx.master) {
         const q = await ubahKuotaTerpakai(admin, ctx.master.id, tahun, jumlahHari, { batasiJatah: true });
         if (!q.ok) {
           if (q.reason === 'kuota') {
@@ -145,7 +152,7 @@ export async function POST(request, { params }) {
       hasil = await updateStatus({ status: 'approved', approved_by: emp.id, jumlah_hari: jumlahHari });
 
       // Status gagal berubah (kalah balapan / error) -> batalkan potongan kuota.
-      if (hasil.error || !hasil.data) {
+      if (potong && (hasil.error || !hasil.data)) {
         await kembalikanKuota(-jumlahHari);
         kuota = null;
       }
@@ -158,7 +165,7 @@ export async function POST(request, { params }) {
         tahunDariTanggal(row.tanggal_mulai) === tahun && tahunDariTanggal(row.tanggal_selesai) === tahun;
 
       let sudahKembali = false;
-      if (ctx.master && tahunSama && jumlahHari > 0) {
+      if (potong && ctx.master && tahunSama && jumlahHari > 0) {
         const q = await ubahKuotaTerpakai(admin, ctx.master.id, tahun, -jumlahHari);
         if (!q.ok) {
           const pesan = q.reason === 'konflik' ? 'Kuota sedang diubah proses lain. Coba lagi.' : `Gagal mengembalikan kuota: ${q.message}`;
@@ -166,9 +173,9 @@ export async function POST(request, { params }) {
         }
         kuota = { master_id: ctx.master.id, cuti_terpakai: q.terpakai, cuti_terpakai_tahun: q.tahun };
         sudahKembali = true;
-      } else if (!ctx.master) {
+      } else if (potong && !ctx.master) {
         warning = 'Cuti dibatalkan. Karyawan ini belum terhubung ke data master (Payroll), kuota tidak diubah.';
-      } else if (!tahunSama) {
+      } else if (potong && !tahunSama) {
         warning = `Cuti dibatalkan, tetapi kuota tidak dikembalikan karena cuti ini bukan di tahun ${tahun} (kuota hanya dilacak untuk tahun berjalan).`;
       }
 
@@ -201,6 +208,7 @@ export async function POST(request, { params }) {
         employee_id: row.employee_id,
         tanggal_mulai: row.tanggal_mulai,
         tanggal_selesai: row.tanggal_selesai,
+        jenis: row.jenis || 'tahunan',
         jumlah_hari_kerja: jumlahHari,
         kuota_terpakai_setelah: kuota ? kuota.cuti_terpakai : null,
       },
@@ -210,7 +218,7 @@ export async function POST(request, { params }) {
     await notifyEmployee(admin, {
       userId: row.employee_id,
       tipe: decision === 'cancelled' ? 'cuti_cancelled' : `cuti_${decision}`,
-      pesan: `Pengajuan cuti kamu (${formatTanggal(row.tanggal_mulai)} – ${formatTanggal(row.tanggal_selesai)}, ${jumlahHari} hari kerja) telah ${label}.`,
+      pesan: `Pengajuan ${potong ? 'cuti' : labelJenisCuti(row.jenis).toLowerCase()} kamu (${formatTanggal(row.tanggal_mulai)} – ${formatTanggal(row.tanggal_selesai)}, ${jumlahHari} hari kerja) telah ${label}.`,
       link: '/employee/leave-request',
     });
 
