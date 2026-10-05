@@ -10,6 +10,7 @@ import { useModuleAccess } from '@/lib/useModuleAccess';
 import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import { logActivity } from '@/lib/activityLog';
 import CvPreviewModal from '@/components/CvPreviewModal';
+import BulkApplicantActions from '@/components/job-portal/BulkApplicantActions';
 import { findDuplicateApplications } from '@/lib/candidateDuplicates';
 import { MAX_TAG_LENGTH, normalizeTags } from '@/lib/talentPoolTags';
 import {
@@ -356,6 +357,8 @@ export default function JobPortalCandidatesPage() {
   const [dupExpandedId, setDupExpandedId] = useState(null); // lamaran yang detail pelamar gandanya dibuka
   const [sortField, setSortField] = useState('tanggal');
   const [sortDir, setSortDir] = useState('desc');
+  // Pilihan untuk aksi massal (id lamaran). Yang diproses hanya yang sedang tampil.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
 
   // --- Jadwal interview ---
   // Kandidat interviewer: pemegang akses penuh + superadmin (boleh untuk lowongan
@@ -917,6 +920,73 @@ export default function JobPortalCandidatesPage() {
     }
   };
 
+  // --- Aksi massal ---
+  // Pilihan hanya berlaku untuk baris yang sedang tampil, jadi pelamar yang
+  // tersembunyi oleh filter/pencarian tidak ikut diubah tanpa terlihat.
+  const selectedApps = useMemo(() => filtered.filter((a) => selectedIds.has(a.id)), [filtered, selectedIds]);
+  const hiddenSelectedCount = selectedIds.size - selectedApps.length;
+  const allVisibleSelected = filtered.length > 0 && selectedApps.length === filtered.length;
+
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) filtered.forEach((a) => next.delete(a.id));
+      else filtered.forEach((a) => next.add(a.id));
+      return next;
+    });
+  };
+
+  // Tiga handler di bawah mengerjakan SATU pelamar dan mengembalikan { error? }.
+  // Alurnya sama dengan aksi satuan (update status langsung, tag & pesan lewat
+  // route server), sehingga hak akses dan pencatatan log tidak berubah.
+  const bulkChangeStatus = async (app, newStatus) => {
+    const oldStatus = app.status;
+    if (oldStatus === newStatus) return { skipped: true };
+    const { data, error } = await supabase
+      .from('applications')
+      .update({ status: newStatus })
+      .eq('id', app.id)
+      .select('id');
+    if (error) return { error: error.message };
+    // RLS yang menolak update biasanya tidak memberi error, hanya 0 baris berubah.
+    if (!data || data.length === 0) return { error: 'Tidak ada baris yang berubah (tidak punya izin atau data sudah dihapus).' };
+    logStatusChange(app, oldStatus, newStatus);
+    setApplications((prev) => prev.map((a) => (a.id === app.id ? { ...a, status: newStatus } : a)));
+    return {};
+  };
+
+  const bulkAddTag = async (app, tags) => {
+    const res = await fetch(`/api/applications/${app.id}/tags`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ add: tags }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) return { error: json.error || 'Gagal menyimpan tag.' };
+    setTagsById((prev) => ({ ...prev, [app.id]: normalizeTags(json.tags) }));
+    return {};
+  };
+
+  const bulkSendRejection = async (app) => {
+    const res = await fetch(`/api/applications/${app.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template: 'ditolak', channel: 'email' }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) return { error: json.error || 'Gagal mengirim email.' };
+    return {};
+  };
+
   const handleExportCsv = () => {
     const header = ['Nama', 'Email', 'Telepon', 'Posisi', 'Tanggal Apply', 'Status', 'Tag', 'Catatan', 'Link CV'];
     const rows = filtered.map((a) => [
@@ -1051,6 +1121,17 @@ export default function JobPortalCandidatesPage() {
         ))}
       </datalist>
 
+      <BulkApplicantActions
+        selectedApps={selectedApps}
+        hiddenCount={hiddenSelectedCount}
+        canTag={!scoped && !tagsLoadError}
+        onChangeStatus={bulkChangeStatus}
+        onAddTag={bulkAddTag}
+        onSendRejection={bulkSendRejection}
+        onFinish={(failedIds) => setSelectedIds(new Set(failedIds))}
+        onClear={() => setSelectedIds(new Set())}
+      />
+
       <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
         {loading ? (
           <p className="text-sm text-[#6B6B6B] p-6">Memuat data...</p>
@@ -1062,6 +1143,16 @@ export default function JobPortalCandidatesPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B] tracking-[0.04em]">
+                <th className="pl-5 pr-0 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    ref={(el) => { if (el) el.indeterminate = selectedApps.length > 0 && !allVisibleSelected; }}
+                    onChange={toggleAllVisible}
+                    aria-label="Pilih semua pelamar yang ditampilkan"
+                    className="accent-[#B91C1C] cursor-pointer"
+                  />
+                </th>
                 <SortableHeader colKey="nama" label="Nama" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="posisi" label="Posisi" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="tanggal" label="Tanggal Apply" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
@@ -1083,7 +1174,16 @@ export default function JobPortalCandidatesPage() {
                 const noteCount = notes.length + (a.catatan ? 1 : 0);
                 return (
                   <Fragment key={a.id}>
-                    <tr className="border-b border-[#F0F0F0] last:border-0 align-top">
+                    <tr className={`border-b border-[#F0F0F0] last:border-0 align-top ${selectedIds.has(a.id) ? 'bg-[#FFF9F9]' : ''}`}>
+                      <td className="pl-5 pr-0 py-3.5">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(a.id)}
+                          onChange={() => toggleSelected(a.id)}
+                          aria-label={`Pilih ${a.nama}`}
+                          className="accent-[#B91C1C] cursor-pointer"
+                        />
+                      </td>
                       <td className="px-5 py-3.5 text-black">
                         {highlightText(a.nama, searchTerms)}
                         {duplicates && (
@@ -1222,7 +1322,7 @@ export default function JobPortalCandidatesPage() {
 
                     {duplicates && (
                       <tr>
-                        <td colSpan={9} className={`p-0 ${isDupOpen ? 'border-b border-[#F0F0F0]' : ''}`}>
+                        <td colSpan={10} className={`p-0 ${isDupOpen ? 'border-b border-[#F0F0F0]' : ''}`}>
                           <div
                             className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
                               isDupOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
@@ -1238,7 +1338,7 @@ export default function JobPortalCandidatesPage() {
 
                     {hasAnswers && (
                       <tr>
-                        <td colSpan={9} className="p-0 border-b border-[#F0F0F0] last:border-0">
+                        <td colSpan={10} className="p-0 border-b border-[#F0F0F0] last:border-0">
                           <div
                             className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
                               isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
