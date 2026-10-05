@@ -6,7 +6,11 @@ import { useEffect, useState, useCallback } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { notifySuperadmins } from '@/lib/notify';
-import { hitungHariKerja, tahunSekarang } from '@/lib/leave';
+import {
+  hitungHariKerja, tahunSekarang,
+  JENIS_CUTI, JENIS_CUTI_DEFAULT, labelJenisCuti, potongKuota, lampiranWajib,
+  LAMPIRAN_MAKS_BYTES, LAMPIRAN_MIME,
+} from '@/lib/leave';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -45,7 +49,9 @@ export default function LeaveRequestPage() {
   const [balance, setBalance] = useState(null); // { linked, jatah, terpakai, sisa, tahun }
   const [balanceLoading, setBalanceLoading] = useState(true);
 
-  const [form, setForm] = useState({ tanggalMulai: '', tanggalSelesai: '', alasan: '' });
+  const [form, setForm] = useState({ jenis: JENIS_CUTI_DEFAULT, tanggalMulai: '', tanggalSelesai: '', alasan: '' });
+  const [lampiran, setLampiran] = useState(null);
+  const [fileInputKey, setFileInputKey] = useState(0); // ganti key = reset <input type=file>
   const [formError, setFormError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
@@ -131,18 +137,31 @@ export default function LeaveRequestPage() {
       return;
     }
 
+    if (lampiran) {
+      if (!LAMPIRAN_MIME[lampiran.type]) {
+        setFormError('Format lampiran harus PDF, JPG, atau PNG.');
+        return;
+      }
+      if (lampiran.size > LAMPIRAN_MAKS_BYTES) {
+        setFormError('Ukuran lampiran maksimal 4MB.');
+        return;
+      }
+    } else if (lampiranWajib(form.jenis, jumlahHari)) {
+      setFormError(`Pengajuan ${labelJenisCuti(form.jenis)} ${jumlahHari} hari kerja wajib melampirkan bukti (mis. surat dokter).`);
+      return;
+    }
+
     setSubmitting(true);
     let data;
     try {
-      const res = await fetch('/api/leave-requests', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tanggalMulai: form.tanggalMulai,
-          tanggalSelesai: form.tanggalSelesai,
-          alasan: form.alasan.trim(),
-        }),
-      });
+      // multipart (bukan JSON) supaya bisa membawa file lampiran.
+      const payload = new FormData();
+      payload.append('jenis', form.jenis);
+      payload.append('tanggalMulai', form.tanggalMulai);
+      payload.append('tanggalSelesai', form.tanggalSelesai);
+      payload.append('alasan', form.alasan.trim());
+      if (lampiran) payload.append('lampiran', lampiran);
+      const res = await fetch('/api/leave-requests', { method: 'POST', body: payload });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         setSubmitting(false);
@@ -158,12 +177,14 @@ export default function LeaveRequestPage() {
     setSubmitting(false);
 
     setRequests((prev) => [data, ...prev]);
-    setForm({ tanggalMulai: '', tanggalSelesai: '', alasan: '' });
+    setForm({ jenis: JENIS_CUTI_DEFAULT, tanggalMulai: '', tanggalSelesai: '', alasan: '' });
+    setLampiran(null);
+    setFileInputKey((k) => k + 1);
     setSubmitSuccess(true);
 
     notifySuperadmins(supabase, {
       tipe: 'cuti_diajukan',
-      pesan: `${employeeName || 'Karyawan'} mengajukan cuti ${formatTanggal(data.tanggal_mulai)} – ${formatTanggal(data.tanggal_selesai)} (${jumlahHari} hari kerja).`,
+      pesan: `${employeeName || 'Karyawan'} mengajukan ${potongKuota(data.jenis) ? 'cuti' : labelJenisCuti(data.jenis).toLowerCase()} ${formatTanggal(data.tanggal_mulai)} – ${formatTanggal(data.tanggal_selesai)} (${jumlahHari} hari kerja).`,
       link: '/employee/leave-request/admin',
     });
   };
@@ -228,7 +249,7 @@ export default function LeaveRequestPage() {
     <div className="max-w-[700px] mx-auto px-6 py-10">
       <div className="mb-6">
         <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Ajukan Cuti</h1>
-        <p className="text-sm text-[#6B6B6B] mt-1">Isi form di bawah untuk mengajukan cuti. Atasan akan meninjau pengajuanmu. Sabtu/Minggu dan hari libur di jadwal kerjamu tidak dihitung sebagai hari cuti. Pengajuan hanya untuk tahun berjalan, tidak boleh lintas tahun, dan tidak boleh melebihi sisa kuota.</p>
+        <p className="text-sm text-[#6B6B6B] mt-1">Isi form di bawah untuk mengajukan cuti. Atasan akan meninjau pengajuanmu. Sabtu/Minggu dan hari libur di jadwal kerjamu tidak dihitung sebagai hari cuti. Pengajuan hanya untuk tahun berjalan dan tidak boleh lintas tahun. Cuti tahunan tidak boleh melebihi sisa kuota; sakit dan izin tidak memotong kuota.</p>
       </div>
 
       <div className="bg-white border border-[#E0E0E0] p-5 mb-8">
@@ -251,6 +272,19 @@ export default function LeaveRequestPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="bg-white border border-[#E0E0E0] p-6 mb-10">
+        <label className="flex flex-col gap-1 mb-4">
+          <span className="text-xs text-[#6B6B6B]">Jenis</span>
+          <select
+            value={form.jenis}
+            onChange={(e) => setForm((f) => ({ ...f, jenis: e.target.value }))}
+            className={inputClass}
+          >
+            {Object.entries(JENIS_CUTI).map(([key, cfg]) => (
+              <option key={key} value={key}>{cfg.label}{cfg.potongKuota ? '' : ' (tidak memotong kuota)'}</option>
+            ))}
+          </select>
+        </label>
+
         <div className="grid grid-cols-2 gap-4 mb-4">
           <label className="flex flex-col gap-1">
             <span className="text-xs text-[#6B6B6B]">Tanggal Mulai</span>
@@ -293,6 +327,20 @@ export default function LeaveRequestPage() {
           />
         </label>
 
+        <label className="flex flex-col gap-1 mb-4">
+          <span className="text-xs text-[#6B6B6B]">
+            Lampiran {JENIS_CUTI[form.jenis]?.lampiranWajibMinHari ? `(wajib untuk ${JENIS_CUTI[form.jenis].lampiranWajibMinHari} hari kerja atau lebih, mis. surat dokter)` : '(opsional)'}
+          </span>
+          <input
+            key={fileInputKey}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png"
+            onChange={(e) => setLampiran(e.target.files?.[0] || null)}
+            className="text-xs text-[#6B6B6B] file:mr-3 file:border file:border-[#E0E0E0] file:bg-white file:px-3 file:py-1.5 file:text-xs file:text-black"
+          />
+          <span className="text-[11px] text-[#9A9A9A]">PDF, JPG, atau PNG, maksimal 4MB.</span>
+        </label>
+
         {formError && <p className="text-xs text-red-600 mb-4">{formError}</p>}
         {submitSuccess && <p className="text-xs text-green-700 mb-4">Pengajuan cuti berhasil dikirim, menunggu persetujuan.</p>}
 
@@ -316,6 +364,7 @@ export default function LeaveRequestPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
+                <th className="px-4 py-3 font-medium">Jenis</th>
                 <th className="px-4 py-3 font-medium">Periode</th>
                 <th className="px-4 py-3 font-medium">Hari Kerja</th>
                 <th className="px-4 py-3 font-medium">Alasan</th>
@@ -326,6 +375,19 @@ export default function LeaveRequestPage() {
             <tbody>
               {requests.map((r) => (
                 <tr key={r.id} className="border-b border-[#E0E0E0] last:border-0">
+                  <td className="px-4 py-3 text-[#6B6B6B] whitespace-nowrap">
+                    {labelJenisCuti(r.jenis)}
+                    {r.lampiran_drive_id && (
+                      <a
+                        href={`/api/leave-requests/${r.id}/lampiran`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-[11px] text-madael-red hover:text-madael-dark"
+                      >
+                        Lihat lampiran
+                      </a>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-black whitespace-nowrap">
                     {formatTanggal(r.tanggal_mulai)} — {formatTanggal(r.tanggal_selesai)}
                   </td>

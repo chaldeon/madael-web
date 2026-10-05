@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { getSessionEmployee } from '@/lib/sessionEmployee';
-import { hitungHariKerja, hitungSisaCuti, tahunSekarang, tahunDariTanggal, tanggalValid } from '@/lib/leave';
+import {
+  hitungHariKerja, hitungSisaCuti, tahunSekarang, tahunDariTanggal, tanggalValid,
+  JENIS_CUTI_DEFAULT, JENIS_POTONG_KUOTA, jenisCutiValid, labelJenisCuti, potongKuota, lampiranWajib,
+  LAMPIRAN_MAKS_BYTES, LAMPIRAN_MIME,
+} from '@/lib/leave';
 import { ambilKonteksCuti, cariCutiBentrok, formatTanggal } from '@/lib/leaveServer';
+import { uploadLeaveAttachmentToDrive, deleteEmployeeDocumentFromDrive } from '@/lib/googleDrive';
 
 const MAKS_ALASAN = 500;
 
@@ -14,7 +19,12 @@ const MAKS_ALASAN = 500;
 //   employees_master hanya melacak satu tahun
 // - minimal 1 hari kerja menurut jadwal employee
 // - tidak bentrok dengan pengajuan lain yang pending/approved
-// - tidak melebihi sisa kuota (dikurangi pengajuan pending lain tahun ini)
+// - tidak melebihi sisa kuota (dikurangi pengajuan pending lain tahun ini) —
+//   hanya untuk jenis yang memotong kuota (tahunan); sakit/izin tidak
+// - jenis cuti (tahunan/sakit/izin; kosong = tahunan, kompatibel klien lama)
+// - lampiran opsional (PDF/JPG/PNG maks 4MB); wajib untuk jenis tertentu
+//   (lihat JENIS_CUTI di lib/leave.js). Body boleh JSON (tanpa lampiran) atau
+//   multipart/form-data (dengan field `lampiran`).
 // employee_id selalu diambil dari sesi, bukan dari body.
 export async function POST(request) {
   try {
@@ -24,10 +34,27 @@ export async function POST(request) {
     }
     const { emp } = session;
 
-    const body = await request.json().catch(() => ({}));
+    let body = {};
+    let file = null;
+    if ((request.headers.get('content-type') || '').includes('multipart/form-data')) {
+      const formData = await request.formData().catch(() => null);
+      if (formData) {
+        body = {
+          tanggalMulai: formData.get('tanggalMulai'),
+          tanggalSelesai: formData.get('tanggalSelesai'),
+          alasan: formData.get('alasan'),
+          jenis: formData.get('jenis'),
+        };
+        const f = formData.get('lampiran');
+        if (f && typeof f !== 'string' && f.size > 0) file = f;
+      }
+    } else {
+      body = await request.json().catch(() => ({}));
+    }
     const tanggalMulai = body?.tanggalMulai;
     const tanggalSelesai = body?.tanggalSelesai;
     const alasan = typeof body?.alasan === 'string' ? body.alasan.trim() : '';
+    const jenis = body?.jenis ? String(body.jenis) : JENIS_CUTI_DEFAULT;
 
     if (!tanggalValid(tanggalMulai) || !tanggalValid(tanggalSelesai)) {
       return NextResponse.json({ error: 'Tanggal mulai dan tanggal selesai wajib diisi dengan benar.' }, { status: 400 });
@@ -40,6 +67,18 @@ export async function POST(request) {
     }
     if (alasan.length > MAKS_ALASAN) {
       return NextResponse.json({ error: `Alasan maksimal ${MAKS_ALASAN} karakter.` }, { status: 400 });
+    }
+
+    if (!jenisCutiValid(jenis)) {
+      return NextResponse.json({ error: 'Jenis cuti tidak valid.' }, { status: 400 });
+    }
+    if (file) {
+      if (!LAMPIRAN_MIME[file.type]) {
+        return NextResponse.json({ error: 'Format lampiran harus PDF, JPG, atau PNG.' }, { status: 400 });
+      }
+      if (file.size > LAMPIRAN_MAKS_BYTES) {
+        return NextResponse.json({ error: 'Ukuran lampiran maksimal 4MB.' }, { status: 400 });
+      }
     }
 
     const tahun = tahunSekarang();
@@ -66,6 +105,13 @@ export async function POST(request) {
       );
     }
 
+    if (!file && lampiranWajib(jenis, jumlahHari)) {
+      return NextResponse.json(
+        { error: `Pengajuan ${labelJenisCuti(jenis)} ${jumlahHari} hari kerja wajib melampirkan bukti (mis. surat dokter).` },
+        { status: 400 }
+      );
+    }
+
     const { error: bentrokError, bentrok } = await cariCutiBentrok(admin, {
       employeeId: emp.id,
       tanggalMulai,
@@ -85,8 +131,9 @@ export async function POST(request) {
 
     // Kuota hanya bisa dicek kalau akun sudah di-link ke employees_master.
     // Kalau belum, pengajuan tetap diterima (perilaku lama) dan admin
-    // mendapat peringatan saat menyetujui.
-    if (ctx.master) {
+    // mendapat peringatan saat menyetujui. Jenis yang tidak memotong kuota
+    // (sakit/izin) tidak dicek.
+    if (ctx.master && potongKuota(jenis)) {
       const { sisa } = hitungSisaCuti(ctx.master, tahun);
 
       const { data: pendingRows, error: pendingError } = await admin
@@ -94,6 +141,7 @@ export async function POST(request) {
         .select('tanggal_mulai, tanggal_selesai')
         .eq('employee_id', emp.id)
         .eq('status', 'pending')
+        .in('jenis', JENIS_POTONG_KUOTA)
         .gte('tanggal_mulai', `${tahun}-01-01`)
         .lte('tanggal_mulai', `${tahun}-12-31`);
       if (pendingError) {
@@ -115,6 +163,21 @@ export async function POST(request) {
       }
     }
 
+    // Upload lampiran dilakukan paling akhir, setelah semua validasi lolos,
+    // supaya pengajuan yang ditolak validasi tidak meninggalkan file di Drive.
+    let lampiran = null;
+    if (file) {
+      const fileName = `cuti_${jenis}_${tanggalMulai}_${Date.now()}.${LAMPIRAN_MIME[file.type]}`;
+      try {
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const up = await uploadLeaveAttachmentToDrive(buffer, fileName, file.type, `${emp.nama} (${emp.id.slice(0, 8)})`);
+        lampiran = { driveId: up.fileId, nama: fileName };
+      } catch (driveError) {
+        console.error('Google Drive upload error (lampiran cuti):', driveError);
+        return NextResponse.json({ error: 'Gagal mengupload lampiran ke Google Drive. Coba lagi.' }, { status: 500 });
+      }
+    }
+
     const { data, error: insertError } = await admin
       .from('leave_requests')
       .insert([{
@@ -122,12 +185,22 @@ export async function POST(request) {
         tanggal_mulai: tanggalMulai,
         tanggal_selesai: tanggalSelesai,
         alasan,
+        jenis,
+        lampiran_drive_id: lampiran?.driveId || null,
+        lampiran_nama: lampiran?.nama || null,
         status: 'pending',
       }])
       .select()
       .single();
 
     if (insertError) {
+      if (lampiran) {
+        try {
+          await deleteEmployeeDocumentFromDrive(lampiran.driveId);
+        } catch (cleanupError) {
+          console.error('Gagal hapus lampiran yatim:', cleanupError);
+        }
+      }
       console.error('Ajukan cuti error:', insertError);
       return NextResponse.json({ error: `Gagal mengirim pengajuan cuti: ${insertError.message}` }, { status: 500 });
     }
