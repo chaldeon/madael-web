@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { MAX_TAG_LENGTH, MAX_TAGS_PER_CANDIDATE, parseTagList } from '@/lib/talentPoolTags';
+import { REJECTION_REASON_OTHER, REJECTION_REASON_PRESETS, buildRejectionReason } from '@/lib/applicationStatus';
 
 // Aksi massal di halaman Pelamar (/employee/job-portal/pelamar).
 //
@@ -16,7 +17,7 @@ import { MAX_TAG_LENGTH, MAX_TAGS_PER_CANDIDATE, parseTagList } from '@/lib/tale
 //   selectedApps   : pelamar terpilih yang sedang tampil (sudah ikut filter)
 //   hiddenCount    : jumlah terpilih yang tersembunyi oleh filter (tidak ikut diproses)
 //   canTag         : true kalau akses penuh dan tag berhasil dimuat
-//   onChangeStatus : (app, status) => Promise<{ error?, skipped? }>
+//   onChangeStatus : (app, status, reason?) => Promise<{ error?, skipped? }> — reason wajib untuk "Ditolak"
 //   onAddTag       : (app, rawTags) => Promise<{ error? }>
 //   onSendRejection: (app) => Promise<{ error? }>
 //   onFinish       : (failedIds: string[]) => void — dipanggil saat modal ditutup setelah proses
@@ -52,11 +53,14 @@ export default function BulkApplicantActions({
   const [action, setAction] = useState(null); // 'status' | 'tag' | 'email' | null
   const [statusValue, setStatusValue] = useState('Review');
   const [alsoEmail, setAlsoEmail] = useState(false);
+  const [rejectPreset, setRejectPreset] = useState('');
+  const [rejectDetail, setRejectDetail] = useState('');
   const [tagInput, setTagInput] = useState('');
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [result, setResult] = useState(null); // { ok, skipped, failed: [{ id, nama, error }] }
 
+  const rejectReason = useMemo(() => buildRejectionReason(rejectPreset, rejectDetail), [rejectPreset, rejectDetail]);
   const tagList = useMemo(() => parseTagList(tagInput), [tagInput]);
   const tagEligible = useMemo(() => selectedApps.filter((a) => !a.job_id), [selectedApps]);
   const emailEligible = useMemo(
@@ -72,6 +76,8 @@ export default function BulkApplicantActions({
     setAction(name);
     setResult(null);
     setAlsoEmail(false);
+    setRejectPreset('');
+    setRejectDetail('');
     setTagInput('');
     setProgress({ done: 0, total: 0 });
   };
@@ -98,7 +104,7 @@ export default function BulkApplicantActions({
       skipped = selectedApps.length - targets.length;
       const sendMail = statusValue === 'Ditolak' && alsoEmail;
       worker = async (app) => {
-        const res = await onChangeStatus(app, statusValue);
+        const res = await onChangeStatus(app, statusValue, statusValue === 'Ditolak' ? rejectReason : undefined);
         if (res?.error) {
           failed.push({ id: app.id, nama: app.nama, error: res.error });
           return;
@@ -170,7 +176,7 @@ export default function BulkApplicantActions({
   if (action === 'status') {
     confirmCount = statusChangeable.length;
     confirmLabel = `Ubah status ${confirmCount} pelamar`;
-    confirmDisabled = confirmCount === 0;
+    confirmDisabled = confirmCount === 0 || (statusValue === 'Ditolak' && !rejectReason);
   } else if (action === 'tag') {
     confirmCount = tagEligible.length;
     confirmLabel = `Tambah tag ke ${confirmCount} pelamar`;
@@ -252,6 +258,31 @@ export default function BulkApplicantActions({
                         `, ${selectedApps.length - statusChangeable.length} dilewati karena sudah berstatus "${statusValue}"`}
                       . Status &quot;Interview&quot; tidak tersedia di sini karena butuh jadwal per kandidat.
                     </p>
+                    {statusValue === 'Ditolak' && (
+                      <div className="mt-3">
+                        <p className="text-xs text-[#6B6B6B] mb-1.5">Alasan penolakan (dicatat di riwayat tiap pelamar)</p>
+                        <select
+                          value={rejectPreset}
+                          disabled={running}
+                          onChange={(e) => setRejectPreset(e.target.value)}
+                          className="w-full border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors mb-2"
+                        >
+                          <option value="">Pilih alasan...</option>
+                          {REJECTION_REASON_PRESETS.map((r) => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          value={rejectDetail}
+                          disabled={running}
+                          onChange={(e) => setRejectDetail(e.target.value)}
+                          maxLength={200}
+                          placeholder={rejectPreset === REJECTION_REASON_OTHER ? 'Jelaskan alasannya (wajib)' : 'Keterangan tambahan (opsional)'}
+                          className="w-full border border-[#E0E0E0] px-3 py-2 text-xs text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
+                        />
+                      </div>
+                    )}
                     {statusValue === 'Ditolak' && (
                       <label className="flex items-start gap-2 mt-3 text-xs text-[#3D3D3D] cursor-pointer select-none">
                         <input
