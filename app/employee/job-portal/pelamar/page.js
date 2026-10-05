@@ -3,12 +3,16 @@
 import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowUp, ArrowDown, ArrowUpDown, CalendarClock, ChevronDown, MessageSquare, Plus, Search, Send, X } from 'lucide-react';
+import { ArrowUp, ArrowDown, ArrowUpDown, CalendarClock, ChevronDown, Clock, MessageSquare, Plus, Search, Send, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { notifyEmployee } from '@/lib/notify';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
-import { logActivity } from '@/lib/activityLog';
+import {
+  APPLICATION_STATUSES,
+  REJECTION_REASON_OTHER,
+  REJECTION_REASON_PRESETS,
+  buildRejectionReason,
+} from '@/lib/applicationStatus';
 import CvPreviewModal from '@/components/CvPreviewModal';
 import BulkApplicantActions from '@/components/job-portal/BulkApplicantActions';
 import { findDuplicateApplications } from '@/lib/candidateDuplicates';
@@ -27,7 +31,7 @@ import {
   isHttpUrl,
 } from '@/lib/candidateMessages';
 
-const STATUS_OPTIONS = ['Baru', 'Review', 'Interview', 'Ditolak', 'Diterima'];
+const STATUS_OPTIONS = APPLICATION_STATUSES;
 
 const STATUS_STYLES = {
   Baru: 'bg-[#E8F0FE] text-[#1A56DB]',
@@ -342,6 +346,20 @@ export default function JobPortalCandidatesPage() {
   const [tagsLoadError, setTagsLoadError] = useState(null);
   const [tagBusyId, setTagBusyId] = useState(null);
   const [updatingId, setUpdatingId] = useState(null);
+  // Penolakan wajib beralasan: modal alasan dibuka saat status diubah ke "Ditolak".
+  const [rejectApp, setRejectApp] = useState(null);
+  const [rejectPreset, setRejectPreset] = useState('');
+  const [rejectDetail, setRejectDetail] = useState('');
+  const [rejectSaving, setRejectSaving] = useState(false);
+  const [rejectError, setRejectError] = useState(null);
+  // Riwayat perubahan status (timeline) satu pelamar, dimuat saat modal dibuka.
+  const [historyApp, setHistoryApp] = useState(null);
+  const [historyList, setHistoryList] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
+  const historyAppIdRef = useRef(null); // buang respons basi kalau modal sudah ganti/tutup
+  // Status sudah berubah tetapi riwayatnya gagal tersimpan (mis. migrasi SQL belum dijalankan).
+  const [historyWarning, setHistoryWarning] = useState(null);
   // Akses penuh melihat semua pelamar; reviewer terbatas (job_portal_assigned)
   // hanya pelamar dari lowongan yang di-assign ke dia.
   const { status: accessStatus, employee, moduleKeys } = useModuleAccess(JOB_PORTAL_KEYS);
@@ -499,40 +517,102 @@ export default function JobPortalCandidatesPage() {
     return Array.from(byId.values()).sort((a, b) => a.nama.localeCompare(b.nama));
   };
 
-  const logStatusChange = (app, dari, ke) => {
-    if (!employee?.id) return;
-    logActivity(supabase, {
-      userId: employee.id,
-      aksi: 'ubah_status_pelamar',
-      targetTable: 'applications',
-      targetId: app.id,
-      detail: { nama: app.nama, posisi: app.job_listings?.title || 'CV Umum', dari, ke },
-    });
+  // Ubah status lewat route server: hak akses, riwayat, dan activity log
+  // ditangani di sana. Return { error? , skipped? }.
+  const requestStatusChange = async (app, newStatus, reason) => {
+    if (app.status === newStatus) return { skipped: true };
+    try {
+      const res = await fetch(`/api/applications/${app.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus, reason }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json.error || 'Gagal mengubah status.' };
+      if (json.warning) setHistoryWarning(json.warning);
+      setApplications((prev) => prev.map((a) => (a.id === app.id ? { ...a, status: json.status || newStatus } : a)));
+      return {};
+    } catch {
+      return { error: 'Gagal mengubah status. Periksa koneksi Anda.' };
+    }
   };
 
   const handleStatusChange = async (id, newStatus) => {
     const current = applications.find((a) => a.id === id);
     if (!current || current.status === newStatus) return;
-    const oldStatus = current.status;
+
+    // Penolakan wajib beralasan: tanya dulu lewat modal.
+    if (newStatus === 'Ditolak') {
+      setRejectError(null);
+      setRejectPreset('');
+      setRejectDetail('');
+      setRejectApp(current);
+      return;
+    }
 
     setUpdatingId(id);
-    const { error } = await supabase.from('applications').update({ status: newStatus }).eq('id', id);
-
-    if (!error) {
-      logStatusChange(current, oldStatus, newStatus);
-      const updatedApp = { ...current, status: newStatus };
-      setApplications((prev) => prev.map((a) => (a.id === id ? updatedApp : a)));
-      // Begitu status masuk "Interview" dan belum ada jadwal, langsung buka
-      // form jadwal — memudahkan alur, tidak perlu klik "Jadwalkan" lagi.
-      // Mengubah status TIDAK mengirim pesan ke pelamar; pengiriman hanya lewat
-      // tombol "Pesan" (email / WhatsApp).
-      if (newStatus === 'Interview' && !updatedApp.interview_at) {
-        openScheduleModal(updatedApp);
-      }
-    } else {
-      alert('Gagal update status: ' + error.message);
-    }
+    const res = await requestStatusChange(current, newStatus);
     setUpdatingId(null);
+    if (res.error) {
+      alert('Gagal update status: ' + res.error);
+      return;
+    }
+    // Begitu status masuk "Interview" dan belum ada jadwal, langsung buka
+    // form jadwal — memudahkan alur, tidak perlu klik "Jadwalkan" lagi.
+    // Mengubah status TIDAK mengirim pesan ke pelamar; pengiriman hanya lewat
+    // tombol "Pesan" (email / WhatsApp).
+    if (newStatus === 'Interview' && !current.interview_at) {
+      openScheduleModal({ ...current, status: newStatus });
+    }
+  };
+
+  const closeRejectModal = () => {
+    if (!rejectSaving) setRejectApp(null);
+  };
+
+  const handleConfirmReject = async () => {
+    if (!rejectApp) return;
+    const reason = buildRejectionReason(rejectPreset, rejectDetail);
+    if (!reason) {
+      setRejectError(rejectPreset === REJECTION_REASON_OTHER ? 'Isi keterangan alasan penolakan.' : 'Pilih alasan penolakan.');
+      return;
+    }
+    setRejectSaving(true);
+    setRejectError(null);
+    const res = await requestStatusChange(rejectApp, 'Ditolak', reason);
+    setRejectSaving(false);
+    if (res.error) {
+      setRejectError(res.error);
+      return;
+    }
+    setRejectApp(null);
+  };
+
+  const openHistory = async (app) => {
+    historyAppIdRef.current = app.id;
+    setHistoryApp(app);
+    setHistoryList([]);
+    setHistoryError(null);
+    setHistoryLoading(true);
+    let list = [];
+    let errMsg = null;
+    try {
+      const res = await fetch(`/api/applications/${app.id}/status`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) errMsg = json.error || 'Gagal memuat riwayat status.';
+      else list = json.history || [];
+    } catch {
+      errMsg = 'Gagal memuat riwayat status. Periksa koneksi Anda.';
+    }
+    if (historyAppIdRef.current !== app.id) return;
+    setHistoryList(list);
+    setHistoryError(errMsg);
+    setHistoryLoading(false);
+  };
+
+  const closeHistory = () => {
+    historyAppIdRef.current = null;
+    setHistoryApp(null);
   };
 
   // Tambah/hapus tag lewat route server. Return teks error, atau null kalau berhasil.
@@ -637,40 +717,36 @@ export default function JobPortalCandidatesPage() {
     setScheduleSaving(true);
     setScheduleError(null);
 
-    const payload = {
-      interview_at: new Date(scheduleForm.interview_at).toISOString(),
-      interview_interviewer_id: scheduleForm.interview_interviewer_id,
-      interview_mode: isOnline ? 'online' : 'offline',
-      interview_location: isOnline ? null : scheduleForm.interview_location.trim() || null,
-      interview_address: isOnline ? null : address,
-      interview_meeting_url: isOnline ? meetingUrl : null,
-      // Otomatis pindahkan status ke "Interview" kalau belum, biar sinkron
-      // dengan jadwal yang baru diisi — bisa diubah manual lagi kalau perlu.
-      status: schedulingApp.status === 'Interview' ? schedulingApp.status : 'Interview',
-    };
-
-    const { data, error } = await supabase
-      .from('applications')
-      .update(payload)
-      .eq('id', schedulingApp.id)
-      .select('id, status, interview_at, interview_interviewer_id, interview_mode, interview_location, interview_address, interview_meeting_url, interviewer:interview_interviewer_id ( nama )')
-      .single();
-
-    if (error) {
-      setScheduleError(error.message || 'Gagal menyimpan jadwal interview.');
+    // Validasi, cek interviewer, simpan, notifikasi, dan activity log dikerjakan
+    // route server; status pelamar harus sudah "Interview" (tombolnya sudah dikunci di UI).
+    let json = {};
+    try {
+      const res = await fetch(`/api/applications/${schedulingApp.id}/interview`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          interview_at: new Date(scheduleForm.interview_at).toISOString(),
+          interviewer_id: scheduleForm.interview_interviewer_id,
+          mode: isOnline ? 'online' : 'offline',
+          location: scheduleForm.interview_location,
+          address,
+          meeting_url: meetingUrl,
+        }),
+      });
+      json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setScheduleError(json.error || 'Gagal menyimpan jadwal interview.');
+        setScheduleSaving(false);
+        return;
+      }
+    } catch {
+      setScheduleError('Gagal menyimpan jadwal interview. Periksa koneksi Anda.');
       setScheduleSaving(false);
       return;
     }
 
-    setApplications((prev) => prev.map((a) => (a.id === data.id ? { ...a, ...data } : a)));
-
-    const interviewLabel = schedulingApp.job_listings?.title || 'CV Umum';
-    await notifyEmployee(supabase, {
-      userId: payload.interview_interviewer_id,
-      tipe: 'interview_dijadwalkan',
-      pesan: `Kamu dijadwalkan jadi interviewer untuk ${schedulingApp.nama} (${interviewLabel}) pada ${new Date(payload.interview_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}.`,
-      link: '/employee/job-portal/pelamar',
-    });
+    const saved = json.application;
+    setApplications((prev) => prev.map((a) => (a.id === saved.id ? { ...a, ...saved } : a)));
 
     setScheduleSaving(false);
     setSchedulingApp(null);
@@ -946,22 +1022,12 @@ export default function JobPortalCandidatesPage() {
   };
 
   // Tiga handler di bawah mengerjakan SATU pelamar dan mengembalikan { error? }.
-  // Alurnya sama dengan aksi satuan (update status langsung, tag & pesan lewat
-  // route server), sehingga hak akses dan pencatatan log tidak berubah.
-  const bulkChangeStatus = async (app, newStatus) => {
-    const oldStatus = app.status;
-    if (oldStatus === newStatus) return { skipped: true };
-    const { data, error } = await supabase
-      .from('applications')
-      .update({ status: newStatus })
-      .eq('id', app.id)
-      .select('id');
-    if (error) return { error: error.message };
-    // RLS yang menolak update biasanya tidak memberi error, hanya 0 baris berubah.
-    if (!data || data.length === 0) return { error: 'Tidak ada baris yang berubah (tidak punya izin atau data sudah dihapus).' };
-    logStatusChange(app, oldStatus, newStatus);
-    setApplications((prev) => prev.map((a) => (a.id === app.id ? { ...a, status: newStatus } : a)));
-    return {};
+  // Alurnya sama dengan aksi satuan (status, tag, dan pesan lewat route server),
+  // sehingga hak akses, riwayat, dan pencatatan log sama persis.
+  const bulkChangeStatus = async (app, newStatus, reason) => {
+    const res = await requestStatusChange(app, newStatus, reason);
+    if (res.error) return { error: res.error };
+    return res.skipped ? { skipped: true } : {};
   };
 
   const bulkAddTag = async (app, tags) => {
@@ -1107,6 +1173,10 @@ export default function JobPortalCandidatesPage() {
           Cari juga di jawaban screening
         </label>
       </div>
+
+      {historyWarning && (
+        <p className="mb-4 text-xs text-[#92700C] bg-[#FEF3C7] px-3 py-2">{historyWarning}</p>
+      )}
 
       {tagsLoadError && (
         <p className="mb-4 text-xs text-[#92700C] bg-[#FEF3C7] px-3 py-2">
@@ -1279,6 +1349,13 @@ export default function JobPortalCandidatesPage() {
                           >
                             <Send size={12} /> Pesan
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => openHistory(a)}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-madael-red hover:text-madael-dark"
+                          >
+                            <Clock size={12} /> Riwayat
+                          </button>
                         </div>
                       </td>
                       <td className="px-5 py-3.5 min-w-[160px]">
@@ -1373,6 +1450,95 @@ export default function JobPortalCandidatesPage() {
           subtitle={cvApp.job_listings?.title || 'CV Umum'}
           onClose={() => setCvApp(null)}
         />
+      )}
+
+      {rejectApp && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={closeRejectModal}>
+          <div className="bg-white w-full max-w-[440px] p-6 relative" onClick={(e) => e.stopPropagation()}>
+            <button onClick={closeRejectModal} disabled={rejectSaving} className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black disabled:opacity-40">
+              <X size={18} />
+            </button>
+            <h2 className="text-sm font-medium text-black mb-1">Tolak Pelamar</h2>
+            <p className="text-xs text-[#6B6B6B] mb-4">{rejectApp.nama} — {rejectApp.job_listings?.title || 'CV Umum'}</p>
+
+            <p className="text-xs text-[#6B6B6B] mb-1.5">Alasan penolakan</p>
+            <select
+              value={rejectPreset}
+              disabled={rejectSaving}
+              onChange={(e) => setRejectPreset(e.target.value)}
+              className="w-full border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors mb-3"
+            >
+              <option value="">Pilih alasan...</option>
+              {REJECTION_REASON_PRESETS.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+            <textarea
+              value={rejectDetail}
+              disabled={rejectSaving}
+              onChange={(e) => setRejectDetail(e.target.value)}
+              rows={3}
+              maxLength={200}
+              placeholder={rejectPreset === REJECTION_REASON_OTHER ? 'Jelaskan alasannya (wajib)' : 'Keterangan tambahan (opsional)'}
+              className="w-full border border-[#E0E0E0] px-3 py-2 text-xs text-black bg-white focus:outline-none focus:border-madael-red transition-colors resize-y mb-2"
+            />
+            <p className="text-[11px] text-[#9A9A9A] mb-3">
+              Alasan tersimpan di riwayat status pelamar dan hanya terlihat oleh tim rekrutmen. Tidak dikirim ke pelamar.
+            </p>
+
+            {rejectError && <p className="text-xs text-red-600 mb-2">{rejectError}</p>}
+            <button
+              onClick={handleConfirmReject}
+              disabled={rejectSaving}
+              className="w-full bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+            >
+              {rejectSaving ? 'Menyimpan...' : 'Tolak Pelamar'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {historyApp && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={closeHistory}>
+          <div className="bg-white w-full max-w-[480px] p-6 relative max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <button onClick={closeHistory} className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black">
+              <X size={18} />
+            </button>
+            <h2 className="text-sm font-medium text-black mb-1">Riwayat Status</h2>
+            <p className="text-xs text-[#6B6B6B] mb-4">{historyApp.nama} — {historyApp.job_listings?.title || 'CV Umum'}</p>
+
+            <div className="flex-1 overflow-y-auto space-y-3 min-h-[60px]">
+              {historyLoading && <p className="text-xs text-[#9A9A9A]">Memuat riwayat...</p>}
+              {historyError && <p className="text-xs text-red-600">{historyError}</p>}
+              {!historyLoading && !historyError && historyList.length === 0 && (
+                <p className="text-xs text-[#9A9A9A]">Belum ada perubahan status yang tercatat.</p>
+              )}
+              {historyList.map((h) => (
+                <div key={h.id} className="border border-[#F0F0F0] bg-[#FAFAFA] px-3 py-2.5">
+                  <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-medium">
+                    {h.from_status && (
+                      <>
+                        <span className={`px-1.5 py-0.5 ${STATUS_STYLES[h.from_status] || 'bg-[#F4F4F4] text-[#3D3D3D]'}`}>{h.from_status}</span>
+                        <span className="text-[#9A9A9A]">→</span>
+                      </>
+                    )}
+                    <span className={`px-1.5 py-0.5 ${STATUS_STYLES[h.to_status] || 'bg-[#F4F4F4] text-[#3D3D3D]'}`}>{h.to_status}</span>
+                  </div>
+                  {h.reason && (
+                    <p className="text-xs text-black whitespace-pre-wrap mt-1.5">Alasan: {h.reason}</p>
+                  )}
+                  <p className="text-[11px] text-[#9A9A9A] mt-1">{h.changed_by_nama || 'Tidak diketahui'} · {formatWaktu(h.created_at)}</p>
+                </div>
+              ))}
+              {!historyLoading && !historyError && (
+                <div className="border border-dashed border-[#E0E0E0] px-3 py-2.5">
+                  <p className="text-xs text-black">Lamaran masuk</p>
+                  <p className="text-[11px] text-[#9A9A9A] mt-1">{formatWaktu(historyApp.created_at)}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {notesApp && (
