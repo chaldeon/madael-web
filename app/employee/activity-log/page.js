@@ -21,6 +21,7 @@ const AKSI_LABEL = {
   approve_cuti: 'Approve Cuti',
   reject_cuti: 'Reject Cuti',
   cancel_cuti: 'Batalkan Cuti (Karyawan)',
+  revoke_cuti: 'Batalkan Cuti Disetujui (Admin)',
   cancel_koreksi_absensi: 'Batalkan Koreksi Absensi (Karyawan)',
   ubah_status_payroll: 'Ubah Status Payroll',
   edit_struktur_gaji: 'Edit Struktur Gaji',

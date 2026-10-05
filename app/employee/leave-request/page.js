@@ -6,7 +6,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { notifySuperadmins } from '@/lib/notify';
-import { hitungHariKerja } from '@/lib/leave';
+import { hitungHariKerja, tahunSekarang } from '@/lib/leave';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -36,7 +36,6 @@ function StatusBadge({ status }) {
 export default function LeaveRequestPage() {
   const supabase = createClient();
 
-  const [employeeId, setEmployeeId] = useState(null);
   const [employeeName, setEmployeeName] = useState('');
   const [hariKerja, setHariKerja] = useState(null); // null = belum diatur, pakai default Senin-Jumat
   const [requests, setRequests] = useState([]);
@@ -89,7 +88,6 @@ export default function LeaveRequestPage() {
       return;
     }
 
-    setEmployeeId(emp.id);
     setEmployeeName(emp.nama || '');
 
     const [reqRes, schedRes] = await Promise.all([
@@ -134,23 +132,30 @@ export default function LeaveRequestPage() {
     }
 
     setSubmitting(true);
-    const { data, error } = await supabase
-      .from('leave_requests')
-      .insert([{
-        employee_id: employeeId,
-        tanggal_mulai: form.tanggalMulai,
-        tanggal_selesai: form.tanggalSelesai,
-        alasan: form.alasan.trim(),
-        status: 'pending',
-      }])
-      .select()
-      .single();
-
-    setSubmitting(false);
-    if (error) {
-      setFormError(error.message || 'Gagal mengirim pengajuan cuti, coba lagi.');
+    let data;
+    try {
+      const res = await fetch('/api/leave-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tanggalMulai: form.tanggalMulai,
+          tanggalSelesai: form.tanggalSelesai,
+          alasan: form.alasan.trim(),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSubmitting(false);
+        setFormError(json.error || 'Gagal mengirim pengajuan cuti, coba lagi.');
+        return;
+      }
+      data = json.request;
+    } catch {
+      setSubmitting(false);
+      setFormError('Gagal mengirim pengajuan cuti. Periksa koneksi internet kamu.');
       return;
     }
+    setSubmitting(false);
 
     setRequests((prev) => [data, ...prev]);
     setForm({ tanggalMulai: '', tanggalSelesai: '', alasan: '' });
@@ -223,7 +228,7 @@ export default function LeaveRequestPage() {
     <div className="max-w-[700px] mx-auto px-6 py-10">
       <div className="mb-6">
         <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Ajukan Cuti</h1>
-        <p className="text-sm text-[#6B6B6B] mt-1">Isi form di bawah untuk mengajukan cuti. Atasan akan meninjau pengajuanmu. Sabtu/Minggu dan hari libur di jadwal kerjamu tidak dihitung sebagai hari cuti.</p>
+        <p className="text-sm text-[#6B6B6B] mt-1">Isi form di bawah untuk mengajukan cuti. Atasan akan meninjau pengajuanmu. Sabtu/Minggu dan hari libur di jadwal kerjamu tidak dihitung sebagai hari cuti. Pengajuan hanya untuk tahun berjalan, tidak boleh lintas tahun, dan tidak boleh melebihi sisa kuota.</p>
       </div>
 
       <div className="bg-white border border-[#E0E0E0] p-5 mb-8">
@@ -251,6 +256,8 @@ export default function LeaveRequestPage() {
             <span className="text-xs text-[#6B6B6B]">Tanggal Mulai</span>
             <input
               type="date"
+              min={`${tahunSekarang()}-01-01`}
+              max={`${tahunSekarang()}-12-31`}
               value={form.tanggalMulai}
               onChange={(e) => setForm((f) => ({ ...f, tanggalMulai: e.target.value }))}
               className={inputClass}
@@ -260,6 +267,8 @@ export default function LeaveRequestPage() {
             <span className="text-xs text-[#6B6B6B]">Tanggal Selesai</span>
             <input
               type="date"
+              min={`${tahunSekarang()}-01-01`}
+              max={`${tahunSekarang()}-12-31`}
               value={form.tanggalSelesai}
               onChange={(e) => setForm((f) => ({ ...f, tanggalSelesai: e.target.value }))}
               className={inputClass}
