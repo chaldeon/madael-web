@@ -8,6 +8,7 @@ import { formatNumberDisplay } from '@/lib/payrollConfig';
 import { WORK_MODES, EXPERIENCE_LEVELS } from '@/lib/jobListingOptions';
 import { getJobStatus, getDeadlineDate, isPastDeadline } from '@/lib/jobStatus';
 import { useModuleAccess } from '@/lib/useModuleAccess';
+import { logActivity } from '@/lib/activityLog';
 import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import JobReviewersPanel from '@/components/job-portal/JobReviewersPanel';
 
@@ -108,6 +109,41 @@ function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
   );
 }
 
+// ---- Audit log: perubahan lowongan ----
+// Field pendek dicatat dengan nilai lama -> baru. Deskripsi/persyaratan/pertanyaan
+// hanya ditandai "diubah" supaya detail log tidak membengkak.
+const AUDIT_FIELDS = [
+  'title', 'slug', 'department', 'client_industry', 'location', 'type', 'work_mode',
+  'experience_level', 'num_positions', 'salary_min', 'salary_max', 'show_salary',
+  'closes_at', 'is_active',
+];
+const AUDIT_BOOL_FIELDS = new Set(['show_salary', 'is_active']);
+const AUDIT_LONG_FIELDS = ['description', 'requirements'];
+
+function diffListing(before, after) {
+  const changes = {};
+  if (!before) return changes;
+  for (const f of AUDIT_FIELDS) {
+    const a = AUDIT_BOOL_FIELDS.has(f) ? !!before[f] : String(before[f] ?? '');
+    const b = AUDIT_BOOL_FIELDS.has(f) ? !!after[f] : String(after[f] ?? '');
+    if (a !== b) {
+      changes[f] = {
+        dari: before[f] ?? null,
+        ke: after[f] ?? null,
+      };
+    }
+  }
+  for (const f of AUDIT_LONG_FIELDS) {
+    if ((before[f] || '') !== (after[f] || '')) changes[f] = 'diubah';
+  }
+  const qBefore = Array.isArray(before.questions) ? before.questions : [];
+  const qAfter = Array.isArray(after.questions) ? after.questions : [];
+  if (JSON.stringify(qBefore) !== JSON.stringify(qAfter)) {
+    changes.questions = { jumlah_dari: qBefore.length, jumlah_ke: qAfter.length };
+  }
+  return changes;
+}
+
 export default function JobPortalLowonganPage() {
   const supabase = createClient();
 
@@ -117,6 +153,13 @@ export default function JobPortalLowonganPage() {
   const { status: accessStatus, employee, moduleKeys } = useModuleAccess(JOB_PORTAL_KEYS);
   const scoped = isJobPortalScoped(employee, moduleKeys);
   const employeeId = employee?.id || null;
+
+  // Fire-and-forget (lihat lib/activityLog.js): gagal mencatat log tidak
+  // membatalkan aksi lowongan yang sudah tersimpan.
+  const logJobActivity = (aksi, targetId, detail) => {
+    if (!employeeId) return;
+    logActivity(supabase, { userId: employeeId, aksi, targetTable: 'job_listings', targetId, detail });
+  };
 
   const [listings, setListings] = useState([]);
   const [reviewersByJob, setReviewersByJob] = useState({}); // job_id -> [{ id, nama }]
@@ -388,6 +431,8 @@ export default function JobPortalLowonganPage() {
       questions: cleanedQuestions,
     };
 
+    const listingBefore = editingId ? listings.find((j) => j.id === editingId) : null;
+
     let result;
     if (editingId) {
       result = await supabase.from('job_listings').update(payload).eq('id', editingId);
@@ -401,6 +446,22 @@ export default function JobPortalLowonganPage() {
       return;
     }
 
+    if (editingId) {
+      const perubahan = diffListing(listingBefore, payload);
+      if (Object.keys(perubahan).length > 0) {
+        logJobActivity('ubah_lowongan', editingId, { judul: payload.title, slug: payload.slug, perubahan });
+      }
+    } else {
+      // Tanpa .select() di insert (tidak mengubah perilaku simpan); slug unik,
+      // jadi lowongan tetap bisa dilacak dari detail log.
+      logJobActivity('buat_lowongan', null, {
+        judul: payload.title,
+        slug: payload.slug,
+        aktif: payload.is_active,
+        closes_at: payload.closes_at,
+      });
+    }
+
     setSaving(false);
     closeForm();
     fetchData();
@@ -412,6 +473,12 @@ export default function JobPortalLowonganPage() {
 
     if (!error) {
       setListings((prev) => prev.map((j) => (j.id === job.id ? { ...j, is_active: !j.is_active } : j)));
+      logJobActivity('ubah_status_lowongan', job.id, {
+        judul: job.title,
+        slug: job.slug,
+        dari: job.is_active ? 'aktif' : 'nonaktif',
+        ke: job.is_active ? 'nonaktif' : 'aktif',
+      });
     } else {
       alert('Gagal mengubah status: ' + error.message);
     }
@@ -450,6 +517,12 @@ export default function JobPortalLowonganPage() {
     if (error) {
       alert('Gagal menduplikat lowongan: ' + error.message);
     } else {
+      logJobActivity('duplikat_lowongan', null, {
+        judul: payload.title,
+        slug: payload.slug,
+        sumber_id: job.id,
+        sumber_judul: job.title,
+      });
       fetchData();
     }
     setDuplicatingId(null);
