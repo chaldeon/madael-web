@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { DEFAULT_MODULE_ACCESS } from '@/lib/employeeModules';
 import { highestEmployeeNumber, formatEmployeeId } from '@/lib/employeeId';
+import { logActivities } from '@/lib/activityLog';
 
 const VALID_STATUS = ['Aktif', 'Nonaktif'];
 
@@ -48,7 +49,7 @@ export async function POST(request) {
 
     const { data: requester } = await supabase
       .from('employees')
-      .select('is_superadmin')
+      .select('id, is_superadmin')
       .eq('email', user.email)
       .maybeSingle();
 
@@ -116,6 +117,8 @@ export async function POST(request) {
 
     const results = [];
     const seenEmailsInBatch = new Set();
+    // Bahan audit log: satu entri per employee yang berhasil dibuat.
+    const auditEntries = [];
 
     for (let i = 0; i < rows.length; i++) {
       const rowNum = i + 2; // baris 1 = header di Excel
@@ -216,6 +219,21 @@ export async function POST(request) {
         console.error(`Gagal buat draft employees_master untuk baris ${rowNum}:`, masterError.message);
       }
 
+      auditEntries.push({
+        userId: requester.id,
+        aksi: 'tambah_employee',
+        targetTable: 'employees',
+        targetId: empRow.id,
+        detail: {
+          nama: empRow.nama,
+          email: empRow.email,
+          is_superadmin: empRow.is_superadmin,
+          sumber: 'impor_massal',
+          baris: rowNum,
+          ...(masterError ? { employees_master_gagal: true } : {}),
+        },
+      });
+
       results.push({
         row: rowNum,
         email,
@@ -227,6 +245,31 @@ export async function POST(request) {
 
     const successCount = results.filter((r) => r.status === 'success').length;
     const errorCount = results.length - successCount;
+
+    // Audit log — fire-and-forget (gagal mencatat tidak menggagalkan impor yang
+    // sudah jalan). Satu ringkasan per upload + satu entri per employee, sama
+    // seperti pembuatan satuan di /api/employee/create. Ringkasan tetap dicatat
+    // walau seluruh baris gagal, supaya percobaan impor itu punya jejak.
+    const MAX_ERRORS_IN_LOG = 100;
+    const failedRows = results.filter((r) => r.status === 'error');
+    await logActivities(admin, [
+      {
+        userId: requester.id,
+        aksi: 'impor_employee_massal',
+        targetTable: 'employees',
+        targetId: null,
+        detail: {
+          total_baris: results.length,
+          berhasil: successCount,
+          gagal: errorCount,
+          gagal_detail: failedRows
+            .slice(0, MAX_ERRORS_IN_LOG)
+            .map((r) => ({ baris: r.row, email: r.email, error: r.error })),
+          ...(failedRows.length > MAX_ERRORS_IN_LOG ? { gagal_detail_dipotong: true } : {}),
+        },
+      },
+      ...auditEntries,
+    ]);
 
     return NextResponse.json(
       { success: true, total: results.length, successCount, errorCount, results },

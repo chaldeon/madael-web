@@ -27,6 +27,12 @@ const AKSI_LABEL = {
   tambah_employee_master: 'Tambah Employee Master',
   ubah_status_tiket_feedback: 'Ubah Status Tiket Feedback',
   kirim_pesan_kandidat: 'Kirim Pesan ke Kandidat',
+  buat_lowongan: 'Buat Lowongan',
+  ubah_lowongan: 'Ubah Lowongan',
+  ubah_status_lowongan: 'Aktifkan/Nonaktifkan Lowongan',
+  duplikat_lowongan: 'Duplikat Lowongan',
+  tambah_employee: 'Tambah Employee',
+  impor_employee_massal: 'Impor Employee Massal',
 };
 
 function formatWaktu(value) {
