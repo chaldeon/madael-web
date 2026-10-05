@@ -4,11 +4,9 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { Check, X as XIcon, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { Check, X as XIcon, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { notifyEmployee } from '@/lib/notify';
-import { logActivity } from '@/lib/activityLog';
 import { hitungHariKerja, hitungSisaCuti } from '@/lib/leave';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -163,77 +161,49 @@ export default function LeaveRequestAdminPage() {
     }
   };
 
+  // Semua perubahan (status + kuota + notifikasi + audit log) diproses atomik
+  // di server lewat /api/leave-requests/[id]/decision. decision:
+  // 'approved' | 'rejected' | 'cancelled' (batalkan cuti yang sudah disetujui).
   const handleDecision = async (row, decision) => {
+    if (decision === 'cancelled') {
+      const konfirmasi = window.confirm(
+        `Batalkan cuti yang sudah disetujui (${formatTanggal(row.tanggal_mulai)} — ${formatTanggal(row.tanggal_selesai)})?\n\nKuota cuti karyawan akan dikembalikan.`
+      );
+      if (!konfirmasi) return;
+    }
+
     setActionError(null);
     setActionWarning(null);
     setActingId(row.id);
 
-    const { data, error } = await supabase
-      .from('leave_requests')
-      .update({ status: decision, approved_by: employee.id, updated_at: new Date().toISOString() })
-      .eq('id', row.id)
-      .eq('status', 'pending') // jangan timpa pengajuan yang sudah dibatalkan karyawan / diproses admin lain
-      .select()
-      .maybeSingle();
+    try {
+      const res = await fetch(`/api/leave-requests/${row.id}/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision }),
+      });
+      const json = await res.json().catch(() => ({}));
 
-    if (error) {
-      setActingId(null);
-      setActionError(error.message || 'Gagal memperbarui status pengajuan.');
-      return;
-    }
-    if (!data) {
-      setActingId(null);
-      setActionError('Pengajuan ini sudah tidak berstatus menunggu (mungkin dibatalkan karyawan atau sudah diproses). Daftar dimuat ulang.');
-      loadData();
-      return;
-    }
-    setRequests((prev) => prev.map((r) => (r.id === data.id ? data : r)));
-
-    const jumlahHari = hitungHariKerja(row.tanggal_mulai, row.tanggal_selesai, hariKerjaByEmpId[row.employee_id]);
-    let warning = null;
-
-    if (decision === 'approved') {
-      const master = masterByEmpId[row.employee_id];
-      if (!master) {
-        warning = 'Cuti disetujui. Karyawan ini belum terhubung ke data master (Payroll), sisa kuota tidak diperbarui.';
-      } else {
-        const currentYear = new Date().getFullYear();
-        const { terpakai: terpakaiSebelum } = hitungSisaCuti(master, currentYear);
-        const terpakaiBaru = terpakaiSebelum + jumlahHari;
-
-        const { error: quotaError } = await supabase
-          .from('employees_master')
-          .update({ cuti_terpakai: terpakaiBaru, cuti_terpakai_tahun: currentYear })
-          .eq('id', master.id);
-
-        if (quotaError) {
-          warning = 'Cuti disetujui, tapi gagal update kuota: ' + quotaError.message;
-        } else {
-          setMasterList((prev) => prev.map((m) => (
-            m.id === master.id ? { ...m, cuti_terpakai: terpakaiBaru, cuti_terpakai_tahun: currentYear } : m
-          )));
-        }
+      if (!res.ok) {
+        setActionError(json.error || 'Gagal memperbarui status pengajuan.');
+        if (res.status === 409) loadData(); // status/kuota berubah di sisi lain — sinkronkan layar
+        return;
       }
+
+      setRequests((prev) => prev.map((r) => (r.id === json.request.id ? json.request : r)));
+      if (json.kuota) {
+        setMasterList((prev) => prev.map((m) => (
+          m.id === json.kuota.master_id
+            ? { ...m, cuti_terpakai: json.kuota.cuti_terpakai, cuti_terpakai_tahun: json.kuota.cuti_terpakai_tahun }
+            : m
+        )));
+      }
+      setActionWarning(json.warning || null);
+    } catch {
+      setActionError('Gagal memproses pengajuan. Periksa koneksi internet kamu.');
+    } finally {
+      setActingId(null);
     }
-
-    setActingId(null);
-    setActionWarning(warning);
-
-    const label = decision === 'approved' ? 'disetujui' : 'ditolak';
-    notifyEmployee(supabase, {
-      userId: row.employee_id,
-      tipe: `cuti_${decision}`,
-      pesan: `Pengajuan cuti kamu (${formatTanggal(row.tanggal_mulai)} – ${formatTanggal(row.tanggal_selesai)}, ${jumlahHari} hari kerja) telah ${label}.`,
-      link: '/employee/leave-request',
-    });
-
-    logActivity(supabase, {
-      userId: employee.id,
-      aksi: `${decision === 'approved' ? 'approve' : 'reject'}_cuti`,
-      targetTable: 'leave_requests',
-      targetId: row.id,
-      detail: { employee_id: row.employee_id, tanggal_mulai: row.tanggal_mulai, tanggal_selesai: row.tanggal_selesai, jumlah_hari_kerja: jumlahHari },
-    });
   };
 
   if (status === 'loading') {
@@ -350,6 +320,14 @@ export default function LeaveRequestAdminPage() {
                               <XIcon size={12} /> Tolak
                             </button>
                           </div>
+                        ) : row.status === 'approved' ? (
+                          <button
+                            onClick={() => handleDecision(row, 'cancelled')}
+                            disabled={actingId === row.id}
+                            className="inline-flex items-center gap-1 text-xs text-madael-red hover:text-madael-dark font-medium disabled:opacity-50"
+                          >
+                            <RotateCcw size={12} /> Batalkan
+                          </button>
                         ) : (
                           <span className="text-xs text-[#9A9A9A]">—</span>
                         )}
