@@ -295,7 +295,14 @@ export default function ReimbursementAdminPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
-                      {row.status === 'pending' && (
+                      {row.status === 'pending' && row.employee_id === employee?.id && (
+                        // Guard UI saja: persetujuan masih langsung dari browser, jadi
+                        // penegakan sebenarnya butuh route server / RLS (lihat #1).
+                        <span className="text-xs text-[#9A9A9A]" title="Tidak boleh memproses klaim milik sendiri.">
+                          Klaim sendiri
+                        </span>
+                      )}
+                      {row.status === 'pending' && row.employee_id !== employee?.id && (
                         <div className="flex items-center justify-end gap-3">
                           <button
                             onClick={() => handleDecision(row, 'approved')}

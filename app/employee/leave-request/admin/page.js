@@ -5,7 +5,6 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { Check, X as XIcon, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
-import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { hitungHariKerja, hitungSisaCuti, labelJenisCuti, potongKuota } from '@/lib/leave';
 import LoadingState from '@/components/LoadingState';
@@ -68,9 +67,7 @@ function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
 }
 
 export default function LeaveRequestAdminPage() {
-  const supabase = createClient();
-  const { status, employee } = useModuleAccess('leave_request_admin');
-  const isSuperadmin = !!employee?.is_superadmin;
+  const { status } = useModuleAccess('leave_request_admin');
 
   const [statusFilter, setStatusFilter] = useState('pending');
   const [sortField, setSortField] = useState('periode');
@@ -85,34 +82,34 @@ export default function LeaveRequestAdminPage() {
   const [actionError, setActionError] = useState(null);
   const [actionWarning, setActionWarning] = useState(null);
 
+  // Data dimuat lewat route server (bukan query browser) karena employees_master
+  // dibatasi RLS superadmin — lihat catatan di app/api/leave-requests/admin.
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
 
-    const [empRes, reqRes, schedRes, masterRes] = await Promise.all([
-      supabase.from('employees').select('id, nama').order('nama'),
-      supabase.from('leave_requests').select('*').order('created_at', { ascending: false }),
-      supabase.from('work_schedule').select('employee_id, hari_kerja'),
-      supabase.from('employees_master').select('id, linked_employee_id, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun'),
-    ]);
+    try {
+      const res = await fetch('/api/leave-requests/admin');
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLoadError(json.error || 'Gagal memuat data pengajuan cuti.');
+        return;
+      }
 
-    const firstError = empRes.error || reqRes.error || schedRes.error || masterRes.error;
-    if (firstError) {
-      setLoadError(firstError.message || 'Gagal memuat data pengajuan cuti.');
+      setEmployees(json.employees || []);
+      setRequests(json.requests || []);
+      setSchedules(json.schedules || []);
+      setMasterList(json.master || []);
+    } catch {
+      setLoadError('Gagal memuat data pengajuan cuti. Periksa koneksi internet kamu.');
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setEmployees(empRes.data || []);
-    setRequests(reqRes.data || []);
-    setSchedules(schedRes.data || []);
-    setMasterList(masterRes.data || []);
-    setLoading(false);
-  }, [supabase]);
+  }, []);
 
   useEffect(() => {
-    if (status === 'allowed' && isSuperadmin) loadData();
-  }, [status, isSuperadmin, loadData]);
+    if (status === 'allowed') loadData();
+  }, [status, loadData]);
 
   const empById = useMemo(() => {
     const map = {};
@@ -214,11 +211,11 @@ export default function LeaveRequestAdminPage() {
     );
   }
 
-  if (status === 'denied' || !isSuperadmin) {
+  if (status === 'denied') {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
         <div className="w-full max-w-[420px] border-t-4 border-madael-red bg-white p-8 text-center">
-          <p className="text-sm text-black mb-6">Halaman ini khusus superadmin.</p>
+          <p className="text-sm text-black mb-6">Kamu tidak punya akses ke halaman ini.</p>
           <Link
             href="/employee/leave-request"
             className="inline-block bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
