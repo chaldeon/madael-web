@@ -335,10 +335,16 @@ export default function EmployeeListPage() {
         // Update baris terkait langsung di state lokal — tidak perlu refetch
         // penuh (yang tadinya bikin seluruh tabel sempat blank "Memuat data...").
         setEmployees((prev) => prev.map((e) => (e.id === emp.id ? { ...e, status: nextStatus } : e)));
-        setToast({
-          type: 'success',
-          message: nextStatus === 'Aktif' ? `${emp.nama} diaktifkan kembali.` : `${emp.nama} dinonaktifkan.`,
-        });
+        // Status sudah tersimpan, tapi sinkron blokir login di Supabase Auth
+        // bisa gagal — tampilkan peringatannya, jangan diam-diam sukses.
+        if (data.warning) {
+          setToast({ type: 'error', message: data.warning });
+        } else {
+          setToast({
+            type: 'success',
+            message: nextStatus === 'Aktif' ? `${emp.nama} diaktifkan kembali.` : `${emp.nama} dinonaktifkan.`,
+          });
+        }
       }
     } catch (err) {
       setToast({ type: 'error', message: 'Terjadi kesalahan. Coba lagi.' });
