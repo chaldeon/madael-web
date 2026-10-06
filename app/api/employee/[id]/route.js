@@ -65,7 +65,7 @@ export async function PATCH(request, { params }) {
     // lewat useModuleAccess.
     const { data: target, error: targetError } = await admin
       .from('employees')
-      .select('id, is_superadmin, status')
+      .select('id, email, is_superadmin, status')
       .eq('id', id)
       .maybeSingle();
 
@@ -115,6 +115,47 @@ export async function PATCH(request, { params }) {
       );
     }
 
+    // Samakan status dengan Supabase Auth: karyawan non-aktif diblokir dari
+    // login baru dan perpanjangan sesi (refresh token). Hanya dijalankan kalau
+    // status benar-benar berubah, supaya edit nama biasa tidak memicu
+    // listUsers() yang O(n). Access token yang sudah terbit tetap valid sampai
+    // kedaluwarsa (default Supabase ~1 jam) — ini bukan pencabutan instan.
+    // Kegagalan di sini tidak boleh menggagalkan perubahan status yang sudah
+    // tersimpan, jadi hasilnya dikembalikan sebagai warning.
+    let authBan = 'tidak_berubah';
+    let warning;
+    if (target.status !== nextStatus) {
+      const shouldBan = nextStatus !== 'Aktif';
+      try {
+        const authUserId = target.email
+          ? await findAuthUserIdByEmail(admin, target.email)
+          : null;
+        if (!authUserId) {
+          authBan = 'gagal';
+          console.error('Sinkron ban Auth: user Auth tidak ditemukan untuk employee', id);
+        } else {
+          const { error: banError } = await admin.auth.admin.updateUserById(authUserId, {
+            ban_duration: shouldBan ? '876000h' : 'none',
+          });
+          if (banError) {
+            authBan = 'gagal';
+            console.error('Sinkron ban Auth gagal untuk employee', id, banError);
+          } else {
+            authBan = shouldBan ? 'banned' : 'unbanned';
+          }
+        }
+      } catch (banErr) {
+        authBan = 'gagal';
+        console.error('Sinkron ban Auth error untuk employee', id, banErr);
+      }
+
+      if (authBan === 'gagal') {
+        warning = shouldBan
+          ? 'Status karyawan sudah diubah, tetapi sesi login-nya di Supabase Auth gagal diblokir. Karyawan ini mungkin masih bisa login — coba ulangi atau blokir manual dari Supabase Dashboard.'
+          : 'Status karyawan sudah diubah, tetapi blokir login-nya di Supabase Auth gagal dicabut. Karyawan ini mungkin belum bisa login — coba ulangi atau cabut blokir manual dari Supabase Dashboard.';
+      }
+    }
+
     // Fire-and-forget — kegagalan mencatat log tidak boleh menggagalkan
     // perubahan yang sudah tersimpan.
     logActivity(admin, {
@@ -125,10 +166,14 @@ export async function PATCH(request, { params }) {
       detail: {
         before: { status: target.status, is_superadmin: target.is_superadmin },
         after: { nama, status: nextStatus, is_superadmin: nextIsSuperadmin },
+        auth_ban: authBan,
       },
     });
 
-    return NextResponse.json({ success: true, employee: empRow }, { status: 200 });
+    return NextResponse.json(
+      { success: true, employee: empRow, ...(warning ? { warning } : {}) },
+      { status: 200 }
+    );
   } catch (err) {
     return NextResponse.json({ error: 'Terjadi kesalahan server.' }, { status: 500 });
   }
