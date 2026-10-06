@@ -33,7 +33,6 @@ export async function middleware(request) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
-  const isAdminRoute = pathname.startsWith('/admin');
   const PUBLIC_EMPLOYEE_PATHS = [
     '/employee/login',
     '/employee/forgot-password',
@@ -47,13 +46,6 @@ export async function middleware(request) {
   const isEmployeeRoute =
     pathname.startsWith('/employee') && !PUBLIC_EMPLOYEE_PATHS.includes(pathname);
 
-  if (isAdminRoute && !user) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = '/login';
-    redirectUrl.searchParams.set('redirectedFrom', pathname);
-    return NextResponse.redirect(redirectUrl);
-  }
-
   if (isEmployeeRoute && !user) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = '/employee/login';
@@ -65,5 +57,5 @@ export async function middleware(request) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/employee/:path*'],
+  matcher: ['/employee/:path*'],
 };
