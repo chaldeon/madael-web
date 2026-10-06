@@ -5,12 +5,10 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Check, X as XIcon, ArrowLeft } from 'lucide-react';
+import { Check, X as XIcon, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { notifyEmployee } from '@/lib/notify';
-import { logActivity } from '@/lib/activityLog';
-import { PROFILE_EDITABLE_FIELDS, fieldLabel } from '@/lib/profileFields';
+import { fieldLabel, isAllowedProfileField } from '@/lib/profileFields';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -29,9 +27,30 @@ function StatusBadge({ status }) {
   );
 }
 
+// field_changes dikirim karyawan dari browser (JSON bebas), jadi bentuknya
+// tidak boleh dipercaya begitu saja saat dirender.
+function getChangeEntries(row) {
+  const fc = row.field_changes;
+  return fc && typeof fc === 'object' && !Array.isArray(fc) ? Object.entries(fc) : [];
+}
+
+// Sama dengan aturan di route: minimal satu key dan semuanya whitelist.
+function getBlockedKeys(row) {
+  return getChangeEntries(row).map(([key]) => key).filter((key) => !isAllowedProfileField(key));
+}
+
+function canApprove(row) {
+  return getChangeEntries(row).length > 0 && getBlockedKeys(row).length === 0;
+}
+
+function tampilNilai(v) {
+  if (v === null || v === undefined || v === '') return '(kosong)';
+  return typeof v === 'string' || typeof v === 'number' ? String(v) : JSON.stringify(v);
+}
+
 export default function ProfileRequestsAdminPage() {
   const supabase = createClient();
-  const { status, employee } = useModuleAccess('profile_admin');
+  const { status } = useModuleAccess('profile_admin');
   const searchParams = useSearchParams();
   const filterEmployeeId = searchParams.get('employee');
   const filterEmployeeName = searchParams.get('nama');
@@ -79,64 +98,31 @@ export default function ProfileRequestsAdminPage() {
 
     const catatanReviewer = (noteById[row.id] || '').trim() || null;
 
-    // Kalau disetujui, apply field_changes ke employees_master dulu — kalau
-    // gagal, jangan lanjut ubah status request (biar tidak "disetujui" tapi
-    // datanya sebenarnya belum ke-update).
-    if (decision === 'approved') {
-      const updates = {};
-      Object.entries(row.field_changes || {}).forEach(([key, change]) => {
-        updates[key] = change.after;
+    // Whitelist field, penurunan baris master, klaim status, update master,
+    // audit log, dan notifikasi semuanya diproses di server (lihat
+    // app/api/profile-change-requests/[id]/decision), bukan dari browser.
+    try {
+      const res = await fetch(`/api/profile-change-requests/${row.id}/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision, catatan: catatanReviewer }),
       });
+      const body = await res.json().catch(() => ({}));
 
-      const { error: masterError } = await supabase
-        .from('employees_master')
-        .update(updates)
-        .eq('id', row.master_id);
-
-      if (masterError) {
-        setActingId(null);
-        setActionError('Gagal menerapkan perubahan ke data master: ' + masterError.message);
+      if (!res.ok) {
+        setActionError(body.error || 'Gagal memproses pengajuan, coba lagi.');
+        // Bentrok (mis. sudah diproses admin lain): muat ulang biar daftar akurat.
+        if (res.status === 409) loadData();
         return;
       }
+
+      setRequests((prev) => prev.map((r) => (r.id === body.request.id ? body.request : r)));
+    } catch (err) {
+      console.error('Proses pengajuan profil error:', err);
+      setActionError('Gagal menghubungi server, coba lagi.');
+    } finally {
+      setActingId(null);
     }
-
-    const { data, error } = await supabase
-      .from('profile_change_requests')
-      .update({
-        status: decision,
-        catatan_reviewer: catatanReviewer,
-        reviewed_by: employee.id,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq('id', row.id)
-      .select('*, employees:employee_id ( nama, employee_id )')
-      .single();
-
-    setActingId(null);
-
-    if (error) {
-      setActionError('Data master ' + (decision === 'approved' ? 'sudah' : '') + ' terupdate, tapi gagal update status pengajuan: ' + error.message);
-      return;
-    }
-
-    setRequests((prev) => prev.map((r) => (r.id === data.id ? data : r)));
-
-    const label = decision === 'approved' ? 'disetujui' : 'ditolak';
-    const fieldsLabel = Object.keys(row.field_changes || {}).map(fieldLabel).join(', ');
-    notifyEmployee(supabase, {
-      userId: row.employee_id,
-      tipe: `profil_${decision}`,
-      pesan: `Pengajuan perubahan profil kamu (${fieldsLabel}) telah ${label}.${catatanReviewer ? ' Catatan: ' + catatanReviewer : ''}`,
-      link: '/employee/profile',
-    });
-
-    logActivity(supabase, {
-      userId: employee.id,
-      aksi: `${decision === 'approved' ? 'approve' : 'reject'}_profil`,
-      targetTable: 'profile_change_requests',
-      targetId: row.id,
-      detail: { employee_id: row.employee_id, field_changes: row.field_changes, catatan_reviewer: catatanReviewer },
-    });
   };
 
   if (status === 'loading' || (status === 'allowed' && loading)) {
@@ -210,17 +196,33 @@ export default function ProfileRequestsAdminPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                {Object.entries(row.field_changes || {}).map(([key, change]) => (
+                {getChangeEntries(row).map(([key, change]) => (
                   <div key={key} className="text-sm">
-                    <span className="text-[#6B6B6B] text-xs block">{fieldLabel(key)}</span>
-                    <span className="text-[#9A9A9A] line-through mr-2">{change.before || '(kosong)'}</span>
-                    <span className="text-black font-medium">{change.after || '(kosong)'}</span>
+                    <span className="text-[#6B6B6B] text-xs block">
+                      {fieldLabel(key)}
+                      {!isAllowedProfileField(key) && (
+                        <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-medium tracking-[0.04em] px-1.5 py-0.5 bg-amber-100 text-amber-800">
+                          <AlertTriangle size={10} /> TIDAK DIIZINKAN
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-[#9A9A9A] line-through mr-2">{tampilNilai(change?.before)}</span>
+                    <span className="text-black font-medium">{tampilNilai(change?.after)}</span>
                   </div>
                 ))}
               </div>
 
               {row.catatan_karyawan && (
                 <p className="text-xs text-[#6B6B6B] mb-3">Catatan karyawan: {row.catatan_karyawan}</p>
+              )}
+
+              {row.status === 'pending' && !canApprove(row) && (
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mb-3">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  {getBlockedKeys(row).length > 0
+                    ? 'Pengajuan ini memuat field yang tidak diizinkan, jadi tidak bisa disetujui. Kamu masih bisa menolaknya.'
+                    : 'Pengajuan ini tidak memuat perubahan yang bisa diterapkan, jadi tidak bisa disetujui. Kamu masih bisa menolaknya.'}
+                </div>
               )}
 
               {row.status === 'pending' ? (
@@ -234,7 +236,7 @@ export default function ProfileRequestsAdminPage() {
                   <div className="flex gap-2 shrink-0">
                     <button
                       type="button"
-                      disabled={actingId === row.id}
+                      disabled={actingId === row.id || !canApprove(row)}
                       onClick={() => handleDecision(row, 'approved')}
                       className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-green-600 hover:bg-green-700 transition-colors disabled:opacity-50"
                     >
