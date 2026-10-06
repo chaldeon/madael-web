@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { getSessionEmployee } from '@/lib/sessionEmployee';
+import { requireModuleAccess } from '@/lib/moduleAccessServer';
 import { logActivity } from '@/lib/activityLog';
 import { notifyEmployee } from '@/lib/notify';
-import { hitungHariKerja, tahunSekarang, tahunDariTanggal, potongKuota, labelJenisCuti } from '@/lib/leave';
+import {
+  hitungHariKerja, tahunSekarang, tahunDariTanggal, potongKuota, labelJenisCuti,
+  SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN,
+} from '@/lib/leave';
 import { ambilKonteksCuti, cariCutiBentrok, formatTanggal, ubahKuotaTerpakai } from '@/lib/leaveServer';
 
 // POST /api/leave-requests/[id]/decision   body: { decision }
@@ -16,7 +19,11 @@ import { ambilKonteksCuti, cariCutiBentrok, formatTanggal, ubahKuotaTerpakai } f
 // (lihat JENIS_CUTI di lib/leave.js). Hanya jenis yang memotong kuota
 // (tahunan) yang menyentuh employees_master.
 //
-// Hanya superadmin aktif. Dulu approve dilakukan dari browser dengan dua
+// Hanya akun aktif dengan modul leave_request_admin (superadmin lolos otomatis
+// lewat isModuleGranted). Approve/tolak pengajuan milik sendiri ditolak (lihat
+// SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN di lib/leave.js).
+//
+// Dulu approve dilakukan dari browser dengan dua
 // UPDATE terpisah (status, lalu kuota) tanpa cek sisa kuota. Di sini kuota
 // diubah lebih dulu lewat compare-and-swap, baru status; kalau langkah kedua
 // gagal, kuota dikembalikan — jadi salah satu berhasil keduanya atau tidak
@@ -25,22 +32,18 @@ export async function POST(request, { params }) {
   try {
     const { id } = await params;
 
-    const session = await getSessionEmployee('id, nama, status, is_superadmin');
-    if (session.error) {
-      return NextResponse.json({ error: session.error }, { status: session.status });
+    const admin = createAdminClient();
+    const access = await requireModuleAccess(admin, ['leave_request_admin']);
+    if (access.error) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
     }
-    const { emp } = session;
-    if (!emp.is_superadmin) {
-      return NextResponse.json({ error: 'Hanya superadmin yang boleh memproses pengajuan cuti.' }, { status: 403 });
-    }
+    const { emp } = access;
 
     const body = await request.json().catch(() => ({}));
     const decision = body?.decision;
     if (!['approved', 'rejected', 'cancelled'].includes(decision)) {
       return NextResponse.json({ error: 'Keputusan tidak valid.' }, { status: 400 });
     }
-
-    const admin = createAdminClient();
 
     const { data: row, error: rowError } = await admin
       .from('leave_requests')
@@ -52,6 +55,16 @@ export async function POST(request, { params }) {
     }
     if (!row) {
       return NextResponse.json({ error: 'Pengajuan cuti tidak ditemukan.' }, { status: 404 });
+    }
+
+    // Tidak boleh menyetujui/menolak pengajuan sendiri. Pembatalan cuti yang
+    // sudah disetujui ('cancelled') sengaja tidak dikunci di sini.
+    if (
+      (decision === 'approved' || decision === 'rejected') &&
+      row.employee_id === emp.id &&
+      !(SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN && emp.is_superadmin)
+    ) {
+      return NextResponse.json({ error: 'Tidak boleh memproses pengajuan cuti milik sendiri.' }, { status: 403 });
     }
 
     const statusAwal = decision === 'cancelled' ? 'approved' : 'pending';
