@@ -37,6 +37,8 @@ export default function PayrollRunDetailPage() {
   const [confirmIncomplete, setConfirmIncomplete] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState(null);
+  const [lemburLoading, setLemburLoading] = useState(false);
+  const [lemburNote, setLemburNote] = useState(null);
   const [sortField, setSortField] = useState('nama');
   const [sortDir, setSortDir] = useState('asc');
 
@@ -135,6 +137,50 @@ export default function PayrollRunDetailPage() {
 
   const setEditValue = (itemId, field, val) => {
     setEditValues((prev) => ({ ...prev, [itemId]: { ...prev[itemId], [field]: val } }));
+  };
+
+  // Isi kolom Overtime di layar dari lembur yang sudah disetujui pada periode
+  // run ini (saran dihitung server: /api/payroll/overtime-suggestion). Hanya
+  // mengubah nilai edit di layar — TIDAK menyimpan. Admin tetap menekan
+  // "Hitung Ulang" per baris (alur simpan yang sudah ada) untuk menyimpannya.
+  const handleIsiDariLembur = async () => {
+    setLemburLoading(true);
+    setLemburNote(null);
+    try {
+      const res = await fetch(`/api/payroll/overtime-suggestion?periode=${encodeURIComponent(run.periode)}`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLemburNote({ error: true, text: json.error || 'Gagal mengambil saran lembur.' });
+        setLemburLoading(false);
+        return;
+      }
+
+      const itemByMasterId = new Map(items.map((i) => [i.employee_master_id, i]));
+      let terisi = 0;
+      let tanpaItem = 0;
+      (json.suggestions || []).forEach((sug) => {
+        const item = itemByMasterId.get(sug.employee_master_id);
+        if (!item) { tanpaItem += 1; return; }
+        setEditValue(item.id, 'overtime', String(sug.nominal));
+        terisi += 1;
+      });
+
+      const tidakTerhubung = json.tidak_terhubung || [];
+      if (terisi === 0 && tanpaItem === 0 && tidakTerhubung.length === 0) {
+        setLemburNote({ text: `Tidak ada lembur yang disetujui pada periode ${periodeLabel(run.periode)}.` });
+      } else {
+        let text = `${terisi} employee diisi dari lembur disetujui. Nilai belum tersimpan — klik "Hitung Ulang" di tiap baris untuk menyimpan.`;
+        if (tanpaItem > 0) text += ` ${tanpaItem} employee punya lembur disetujui tetapi tidak ada di run ini (coba "Sync Employee Baru").`;
+        if (tidakTerhubung.length > 0) {
+          text += ` ${tidakTerhubung.length} karyawan punya lembur disetujui tetapi belum terhubung ke Payroll Manager: ${tidakTerhubung.map((t) => t.nama).join(', ')}.`;
+        }
+        setLemburNote({ text });
+      }
+    } catch (err) {
+      console.error('Isi dari lembur error:', err);
+      setLemburNote({ error: true, text: 'Gagal mengambil saran lembur. Periksa koneksi lalu coba lagi.' });
+    }
+    setLemburLoading(false);
   };
 
   // Hitung ulang PPh21/THP persis rumus yang sama dengan Payslip:
@@ -405,6 +451,15 @@ export default function PayrollRunDetailPage() {
             {syncing ? 'Mengecek...' : 'Sync Employee Baru'}
           </button>
         )}
+        {run.status !== 'Approved' && (
+          <button
+            onClick={handleIsiDariLembur}
+            disabled={lemburLoading || statusDraft === 'Approved'}
+            className="border border-[#E0E0E0] text-black px-5 py-2 text-sm font-medium tracking-[0.02em] hover:border-madael-red transition-colors disabled:opacity-40"
+          >
+            {lemburLoading ? 'Mengambil...' : 'Isi dari lembur disetujui'}
+          </button>
+        )}
         {run.status === 'Approved' && (
           <button
             onClick={() => downloadTransferCsv(items, run.periode)}
@@ -453,6 +508,15 @@ export default function PayrollRunDetailPage() {
         <div className="flex items-start gap-2 bg-[#F4F4F4] border border-[#E0E0E0] text-[#3D3D3D] text-xs px-4 py-3 mb-6">
           <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-madael-red" />
           {syncNote}
+        </div>
+      )}
+
+      {lemburNote && (
+        <div className={`flex items-start gap-2 border text-xs px-4 py-3 mb-6 ${lemburNote.error ? 'bg-red-50 border-red-200 text-red-700' : 'bg-[#F4F4F4] border-[#E0E0E0] text-[#3D3D3D]'}`}>
+          {lemburNote.error
+            ? <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            : <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-madael-red" />}
+          {lemburNote.text}
         </div>
       )}
 
