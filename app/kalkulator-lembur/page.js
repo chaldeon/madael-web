@@ -3,62 +3,7 @@
 import { useState } from 'react';
 import { useLanguage } from '@/context/LanguageContext';
 import CalculatorDevWarning from '@/components/CalculatorDevWarning';
-
-const OVERTIME_RULES = {
-  biasa: [
-    { upTo: 1, multiplier: 1.5 },
-    { upTo: Infinity, multiplier: 2 },
-  ],
-  istirahat6: [
-    { upTo: 7, multiplier: 2 },
-    { upTo: 8, multiplier: 3 },
-    { upTo: Infinity, multiplier: 4 },
-  ],
-  istirahat5: [
-    { upTo: 8, multiplier: 2 },
-    { upTo: 9, multiplier: 3 },
-    { upTo: Infinity, multiplier: 4 },
-  ],
-  liburNasional: [
-    { upTo: 5, multiplier: 2 },
-    { upTo: 6, multiplier: 3 },
-    { upTo: Infinity, multiplier: 4 },
-  ],
-};
-
-// Batas maksimal lembur harian sesuai Pasal 26 PP No. 35 Tahun 2021
-// (turunan UU Cipta Kerja / UU No. 6 Tahun 2023) — berlaku untuk hari kerja biasa.
-const MAX_JAM_LEMBUR_HARIAN = 4;
-const MAX_JAM_LEMBUR_MINGGUAN = 18;
-
-function getMultiplier(dayType, hour) {
-  const rules = OVERTIME_RULES[dayType];
-  for (const r of rules) {
-    if (hour <= r.upTo) return r.multiplier;
-  }
-  return rules[rules.length - 1].multiplier;
-}
-
-function computeBreakdown(dayType, jamLembur, upahPerJam) {
-  const segments = [];
-  let current = null;
-  for (let h = 1; h <= jamLembur; h++) {
-    const multiplier = getMultiplier(dayType, h);
-    if (current && current.multiplier === multiplier) {
-      current.count += 1;
-      current.to = h;
-    } else {
-      if (current) segments.push(current);
-      current = { from: h, to: h, count: 1, multiplier };
-    }
-  }
-  if (current) segments.push(current);
-  return segments.map((seg) => ({
-    ...seg,
-    ratePerJam: upahPerJam * seg.multiplier,
-    subtotal: upahPerJam * seg.multiplier * seg.count,
-  }));
-}
+import { computeBreakdown, MAX_JAM_LEMBUR_HARIAN, MAX_JAM_LEMBUR_MINGGUAN } from '@/lib/overtimeRules';
 
 function formatRupiah(num) {
   return new Intl.NumberFormat('id-ID', {
