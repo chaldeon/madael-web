@@ -81,6 +81,9 @@ export async function POST(request) {
       );
     }
 
+    // Field `posisi` dari client hanya dipertahankan sebagai syarat (agar klien
+    // lama tidak rusak); nilainya TIDAK dipakai. Nama posisi untuk folder Drive
+    // dan notifikasi diambil dari job_listings.title hasil lookup di bawah.
     if (!isGeneral && !positionName) {
       return NextResponse.json({ error: 'Posisi wajib diisi.' }, { status: 400 });
     }
@@ -108,8 +111,9 @@ export async function POST(request) {
     // Dicek di server (bukan hanya disembunyikan di halaman publik) supaya link
     // lama / request langsung tidak bisa menembus lowongan yang sudah tutup.
     // Dilakukan SEBELUM upload ke Drive agar tidak menyisakan CV yatim.
-    // Judul lowongan dari database dipakai juga untuk email konfirmasi
-    // (bukan `posisi` dari form, yang bisa diisi sembarang oleh pengunjung).
+    // Judul lowongan dari database dipakai untuk nama folder Drive, notifikasi
+    // staf, dan email konfirmasi (bukan `posisi` dari form, yang bisa diisi
+    // sembarang oleh pengunjung).
     let jobTitle = null;
     if (!isGeneral) {
       const { data: job, error: jobError } = await createAdminClient()
@@ -140,6 +144,9 @@ export async function POST(request) {
       jobTitle = job.title;
     }
 
+    // Nama posisi yang tepercaya (dari database) untuk lamaran spesifik.
+    const positionLabel = jobTitle || 'Lainnya';
+
     // Siapkan file untuk diupload
     const arrayBuffer = await file.arrayBuffer();
     const fileBuffer = Buffer.from(arrayBuffer);
@@ -148,7 +155,7 @@ export async function POST(request) {
 
     // Upload ke Google Drive — folder per posisi untuk apply spesifik,
     // atau folder tetap "Umum" untuk lamaran umum.
-    const driveFolderName = isGeneral ? GENERAL_FOLDER_NAME : positionName || 'Lainnya';
+    const driveFolderName = isGeneral ? GENERAL_FOLDER_NAME : positionLabel;
 
     let cvDriveId;
     try {
@@ -198,7 +205,7 @@ export async function POST(request) {
       await notifyByModule(admin, {
         moduleKey: 'job_portal',
         tipe: 'pelamar_baru',
-        pesan: `Lamaran baru dari ${nama} untuk posisi ${isGeneral ? (posisiMinat || 'Umum') : positionName}.`,
+        pesan: `Lamaran baru dari ${nama} untuk posisi ${isGeneral ? (posisiMinat || 'Umum') : positionLabel}.`,
         link: '/employee/job-portal/pelamar',
       });
 
@@ -212,7 +219,7 @@ export async function POST(request) {
         await notifyEmployees(admin, {
           userIds: (reviewers || []).map((r) => r.employee_id),
           tipe: 'pelamar_baru',
-          pesan: `Lamaran baru dari ${nama} untuk posisi ${positionName}.`,
+          pesan: `Lamaran baru dari ${nama} untuk posisi ${positionLabel}.`,
           link: '/employee/job-portal/pelamar',
         });
       }
