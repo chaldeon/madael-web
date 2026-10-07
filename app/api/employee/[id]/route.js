@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { logActivity } from '@/lib/activityLog';
+import { friendlyError } from '@/lib/errorMessage';
 
 // PATCH /api/employee/[id]
 // Update data karyawan (nama, employee_id, client_id, status, is_superadmin).
@@ -110,7 +111,7 @@ export async function PATCH(request, { params }) {
 
     if (empError) {
       return NextResponse.json(
-        { error: 'Gagal mengubah data employee: ' + empError.message },
+        { error: 'Gagal mengubah data employee: ' + friendlyError(empError, 'terjadi kesalahan pada server.', { context: 'Ubah data employee', showField: true }) },
         { status: 500 }
       );
     }
@@ -340,7 +341,7 @@ export async function DELETE(request, { params }) {
     const { error: deleteError } = await admin.from('employees').delete().eq('id', id);
     if (deleteError) {
       return NextResponse.json(
-        { error: 'Gagal menghapus data employee: ' + deleteError.message },
+        { error: 'Gagal menghapus data employee: ' + friendlyError(deleteError, 'terjadi kesalahan pada server.', { context: 'Hapus data employee' }) },
         { status: 500 }
       );
     }

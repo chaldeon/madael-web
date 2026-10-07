@@ -19,7 +19,7 @@ const translations = {
   id: {
     back: '← Kembali ke daftar lowongan',
     loading: 'Memuat lowongan...',
-    errorPrefix: 'Gagal memuat data: ',
+    errorLoad: 'Gagal memuat data. Silakan coba lagi.',
     notFound: 'Lowongan tidak ditemukan atau sudah tidak aktif.',
     closed: 'Lowongan ini sudah ditutup karena melewati batas waktu pendaftaran.',
     closes: 'Deadline: ',
@@ -32,7 +32,7 @@ const translations = {
   en: {
     back: '← Back to job listings',
     loading: 'Loading job...',
-    errorPrefix: 'Failed to load data: ',
+    errorLoad: 'Failed to load data. Please try again.',
     notFound: 'Job not found or no longer active.',
     closed: 'This job is closed because the application deadline has passed.',
     closes: 'Closes: ',
@@ -66,7 +66,8 @@ export default function KarirDetailPage() {
         .single();
 
       if (error) {
-        setError(error.message);
+        console.error('Muat lowongan publik:', error);
+        setError(true);
       } else {
         setJob(data);
       }
@@ -106,7 +107,7 @@ export default function KarirDetailPage() {
       <section className="px-10 py-16 bg-white">
         <div className="max-w-[900px] mx-auto">
           <p className="text-sm text-madael-red mb-4">
-            {error ? `${t.errorPrefix}${error}` : closed ? t.closed : t.notFound}
+            {error ? t.errorLoad : closed ? t.closed : t.notFound}
           </p>
           <Link href="/karir" className="text-sm text-madael-red hover:text-madael-dark no-underline">
             {t.back}

@@ -12,6 +12,7 @@ import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { friendlyError } from '@/lib/errorMessage';
 
 function currentMonthValue() {
   const d = new Date();
@@ -77,7 +78,7 @@ export default function PayrollRunListPage() {
 
     const firstError = clRes.error || runRes.error || empRes.error;
     if (firstError) {
-      setLoadError(firstError.message || 'Gagal memuat data payroll run.');
+      setLoadError(friendlyError(firstError, 'Gagal memuat data payroll run.'));
       setLoading(false);
       return;
     }
@@ -125,7 +126,7 @@ export default function PayrollRunListPage() {
 
     if (runError) {
       setCreatingClientId(null);
-      setCreateError(`Gagal membuat payroll run: ${runError.message}`);
+      setCreateError(`Gagal membuat payroll run: ${friendlyError(runError, 'terjadi kesalahan.')}`);
       return;
     }
 
@@ -136,7 +137,7 @@ export default function PayrollRunListPage() {
     setCreatingClientId(null);
 
     if (itemsError) {
-      setCreateError(`Run dibuat tapi gagal hitung item: ${itemsError.message}. Buka Detail untuk cek manual.`);
+      setCreateError(`Run dibuat tapi gagal hitung item: ${friendlyError(itemsError, 'terjadi kesalahan.')} Buka Detail untuk cek manual.`);
     }
 
     router.push(`/employee/payroll/run/${run.id}`);
@@ -153,7 +154,7 @@ export default function PayrollRunListPage() {
 
     if (empError) {
       setCreatingClientId(null);
-      setCreateError(`Gagal memuat employee klien "${client.nama_perusahaan}": ${empError.message}`);
+      setCreateError(`Gagal memuat employee klien "${client.nama_perusahaan}": ${friendlyError(empError, 'terjadi kesalahan.')}`);
       return;
     }
 
@@ -178,7 +179,7 @@ export default function PayrollRunListPage() {
 
       if (linkedError) {
         setCreatingClientId(null);
-        setCreateError(`Gagal cek status akun absensi: ${linkedError.message}`);
+        setCreateError(`Gagal cek status akun absensi: ${friendlyError(linkedError, 'terjadi kesalahan.')}`);
         return;
       }
 

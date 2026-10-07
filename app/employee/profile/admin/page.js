@@ -12,6 +12,7 @@ import { fieldLabel, isAllowedProfileField } from '@/lib/profileFields';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { friendlyError } from '@/lib/errorMessage';
 
 function StatusBadge({ status }) {
   const map = {
@@ -79,7 +80,7 @@ export default function ProfileRequestsAdminPage() {
     const { data, error } = await query;
 
     if (error) {
-      setLoadError(error.message || 'Gagal memuat pengajuan.');
+      setLoadError(friendlyError(error, 'Gagal memuat pengajuan.'));
       setLoading(false);
       return;
     }

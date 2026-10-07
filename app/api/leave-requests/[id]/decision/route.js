@@ -8,6 +8,7 @@ import {
   SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN,
 } from '@/lib/leave';
 import { ambilKonteksCuti, cariCutiBentrok, formatTanggal, ubahKuotaTerpakai } from '@/lib/leaveServer';
+import { friendlyError } from '@/lib/errorMessage';
 
 // POST /api/leave-requests/[id]/decision   body: { decision }
 //   'approved'  : pending  -> approved  (kuota berkurang)
@@ -51,7 +52,7 @@ export async function POST(request, { params }) {
       .eq('id', id)
       .maybeSingle();
     if (rowError) {
-      return NextResponse.json({ error: `Gagal memuat pengajuan: ${rowError.message}` }, { status: 500 });
+      return NextResponse.json({ error: `Gagal memuat pengajuan: ${friendlyError(rowError, 'terjadi kesalahan pada server.', { context: 'Muat pengajuan cuti' })}` }, { status: 500 });
     }
     if (!row) {
       return NextResponse.json({ error: 'Pengajuan cuti tidak ditemukan.' }, { status: 404 });
@@ -82,7 +83,7 @@ export async function POST(request, { params }) {
 
     const ctx = await ambilKonteksCuti(admin, row.employee_id);
     if (ctx.error) {
-      return NextResponse.json({ error: `Gagal memuat data cuti: ${ctx.error.message}` }, { status: 500 });
+      return NextResponse.json({ error: `Gagal memuat data cuti: ${friendlyError(ctx.error, 'terjadi kesalahan pada server.', { context: 'Muat data cuti' })}` }, { status: 500 });
     }
 
     const potong = potongKuota(row.jenis);
@@ -132,7 +133,7 @@ export async function POST(request, { params }) {
         statuses: ['approved'],
       });
       if (bentrokError) {
-        return NextResponse.json({ error: `Gagal memeriksa pengajuan lain: ${bentrokError.message}` }, { status: 500 });
+        return NextResponse.json({ error: `Gagal memeriksa pengajuan lain: ${friendlyError(bentrokError, 'terjadi kesalahan pada server.', { context: 'Cek pengajuan cuti bentrok' })}` }, { status: 500 });
       }
       if (bentrok) {
         return NextResponse.json(
@@ -155,7 +156,7 @@ export async function POST(request, { params }) {
           if (q.reason === 'konflik') {
             return NextResponse.json({ error: 'Kuota sedang diubah proses lain. Coba lagi.' }, { status: 409 });
           }
-          return NextResponse.json({ error: `Gagal memperbarui kuota: ${q.message}` }, { status: 500 });
+          return NextResponse.json({ error: `Gagal memperbarui kuota: ${friendlyError(q.error ?? q.message, 'terjadi kesalahan pada server.', { context: 'Ubah kuota cuti' })}` }, { status: 500 });
         }
         kuota = { master_id: ctx.master.id, cuti_terpakai: q.terpakai, cuti_terpakai_tahun: q.tahun };
       } else {
@@ -181,7 +182,7 @@ export async function POST(request, { params }) {
       if (potong && ctx.master && tahunSama && jumlahHari > 0) {
         const q = await ubahKuotaTerpakai(admin, ctx.master.id, tahun, -jumlahHari);
         if (!q.ok) {
-          const pesan = q.reason === 'konflik' ? 'Kuota sedang diubah proses lain. Coba lagi.' : `Gagal mengembalikan kuota: ${q.message}`;
+          const pesan = q.reason === 'konflik' ? 'Kuota sedang diubah proses lain. Coba lagi.' : `Gagal mengembalikan kuota: ${friendlyError(q.error ?? q.message, 'terjadi kesalahan pada server.', { context: 'Kembalikan kuota cuti' })}`;
           return NextResponse.json({ error: pesan }, { status: q.reason === 'konflik' ? 409 : 500 });
         }
         kuota = { master_id: ctx.master.id, cuti_terpakai: q.terpakai, cuti_terpakai_tahun: q.tahun };
@@ -202,7 +203,7 @@ export async function POST(request, { params }) {
 
     if (hasil.error) {
       console.error('Proses cuti error:', hasil.error);
-      return NextResponse.json({ error: `Gagal memperbarui status pengajuan: ${hasil.error.message}` }, { status: 500 });
+      return NextResponse.json({ error: `Gagal memperbarui status pengajuan: ${friendlyError(hasil.error, 'terjadi kesalahan pada server.', { context: 'Perbarui status pengajuan cuti' })}` }, { status: 500 });
     }
     if (!hasil.data) {
       return NextResponse.json(

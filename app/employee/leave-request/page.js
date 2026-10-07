@@ -14,6 +14,7 @@ import {
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { friendlyError } from '@/lib/errorMessage';
 
 function formatTanggal(value) {
   if (!value) return '—';
@@ -89,7 +90,7 @@ export default function LeaveRequestPage() {
       .maybeSingle();
 
     if (empError || !emp) {
-      setLoadError(empError?.message || 'Data karyawan tidak ditemukan.');
+      setLoadError(friendlyError(empError, 'Data karyawan tidak ditemukan.'));
       setLoading(false);
       return;
     }
@@ -102,7 +103,7 @@ export default function LeaveRequestPage() {
     ]);
 
     if (reqRes.error) {
-      setLoadError(reqRes.error.message || 'Gagal memuat riwayat pengajuan cuti.');
+      setLoadError(friendlyError(reqRes.error, 'Gagal memuat riwayat pengajuan cuti.'));
       setLoading(false);
       return;
     }

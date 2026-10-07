@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { Plus, X, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
+import { friendlyError } from '@/lib/errorMessage';
 
 const STAGES = [
   'Prospek',
@@ -153,7 +154,7 @@ export default function CrmClientListPage() {
       .order('created_at', { ascending: false });
 
     if (error) {
-      setError(error.message);
+      setError(friendlyError(error, 'Gagal memuat data klien.'));
     } else {
       setClients(data || []);
     }
@@ -264,7 +265,7 @@ export default function CrmClientListPage() {
     const { error } = await supabase.from('companies').insert(payload);
 
     if (error) {
-      setFormError(error.message);
+      setFormError(friendlyError(error, 'Gagal menyimpan klien.'));
       setSubmitting(false);
       return;
     }

@@ -12,6 +12,7 @@ import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { friendlyError } from '@/lib/errorMessage';
 
 const EMPTY_FORM = { judul: '', isi: '', expired_at: '' };
 
@@ -65,7 +66,7 @@ export default function AnnouncementsAdminPage() {
       .order('created_at', { ascending: false });
 
     if (error) {
-      setLoadError(error.message || 'Gagal memuat daftar pengumuman.');
+      setLoadError(friendlyError(error, 'Gagal memuat daftar pengumuman.'));
       setLoading(false);
       return;
     }
@@ -109,7 +110,7 @@ export default function AnnouncementsAdminPage() {
 
       setSaving(false);
       if (error) {
-        setFormError(error.message || 'Gagal menyimpan perubahan pengumuman.');
+        setFormError(friendlyError(error, 'Gagal menyimpan perubahan pengumuman.'));
         return;
       }
 
@@ -136,7 +137,7 @@ export default function AnnouncementsAdminPage() {
 
     if (error) {
       setSaving(false);
-      setFormError(error.message || 'Gagal menyimpan pengumuman.');
+      setFormError(friendlyError(error, 'Gagal menyimpan pengumuman.'));
       return;
     }
 
@@ -195,7 +196,7 @@ export default function AnnouncementsAdminPage() {
 
     setActingId(null);
     if (error) {
-      setActionError(error.message || 'Gagal menonaktifkan pengumuman.');
+      setActionError(friendlyError(error, 'Gagal menonaktifkan pengumuman.'));
       return;
     }
     setRows((prev) => prev.map((r) => (r.id === data.id ? data : r)));
@@ -219,7 +220,7 @@ export default function AnnouncementsAdminPage() {
 
     setActingId(null);
     if (error) {
-      setActionError(error.message || 'Gagal menghapus pengumuman.');
+      setActionError(friendlyError(error, 'Gagal menghapus pengumuman.'));
       return;
     }
     setRows((prev) => prev.filter((r) => r.id !== row.id));

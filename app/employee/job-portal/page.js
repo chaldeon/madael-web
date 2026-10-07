@@ -11,6 +11,7 @@ import { useModuleAccess } from '@/lib/useModuleAccess';
 import { logActivity } from '@/lib/activityLog';
 import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import JobReviewersPanel from '@/components/job-portal/JobReviewersPanel';
+import { friendlyError } from '@/lib/errorMessage';
 
 const emptyForm = {
   title: '',
@@ -197,7 +198,7 @@ export default function JobPortalLowonganPage() {
         .select('job_id')
         .eq('employee_id', employeeId);
       if (mineError) {
-        setError(mineError.message);
+        setError(friendlyError(mineError, 'Gagal memuat data lowongan.'));
         setLoading(false);
         return;
       }
@@ -215,7 +216,7 @@ export default function JobPortalLowonganPage() {
     const { data: jobs, error: jobsError } = await jobsQuery;
 
     if (jobsError) {
-      setError(jobsError.message);
+      setError(friendlyError(jobsError, 'Gagal memuat data lowongan.'));
       setLoading(false);
       return;
     }
@@ -441,7 +442,7 @@ export default function JobPortalLowonganPage() {
     }
 
     if (result.error) {
-      setFormError('Gagal menyimpan: ' + result.error.message);
+      setFormError('Gagal menyimpan: ' + friendlyError(result.error, 'terjadi kesalahan.'));
       setSaving(false);
       return;
     }
@@ -480,7 +481,7 @@ export default function JobPortalLowonganPage() {
         ke: job.is_active ? 'nonaktif' : 'aktif',
       });
     } else {
-      alert('Gagal mengubah status: ' + error.message);
+      alert('Gagal mengubah status: ' + friendlyError(error, 'terjadi kesalahan.'));
     }
     setTogglingId(null);
   };
@@ -515,7 +516,7 @@ export default function JobPortalLowonganPage() {
     const { error } = await supabase.from('job_listings').insert([payload]);
 
     if (error) {
-      alert('Gagal menduplikat lowongan: ' + error.message);
+      alert('Gagal menduplikat lowongan: ' + friendlyError(error, 'terjadi kesalahan.'));
     } else {
       logJobActivity('duplikat_lowongan', null, {
         judul: payload.title,

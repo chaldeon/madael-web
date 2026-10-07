@@ -11,6 +11,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { formatRupiah } from '@/lib/format';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 
 const STATUS_OPTIONS = ['draft', 'terkirim', 'lunas'];
 const STATUS_LABEL = { draft: 'Draft', terkirim: 'Terkirim', lunas: 'Lunas' };
@@ -104,7 +105,7 @@ export default function InvoiceTrackerPage() {
 
     const firstError = clientRes.error || invRes.error;
     if (firstError) {
-      setLoadError(firstError.message || 'Gagal memuat data invoice.');
+      setLoadError(friendlyError(firstError, 'Gagal memuat data invoice.'));
       setLoading(false);
       return;
     }
@@ -187,7 +188,7 @@ export default function InvoiceTrackerPage() {
 
     setSubmitting(false);
     if (error) {
-      setFormError(error.message || 'Gagal menambahkan invoice.');
+      setFormError(friendlyError(error, 'Gagal menambahkan invoice.'));
       return;
     }
 
@@ -212,7 +213,7 @@ export default function InvoiceTrackerPage() {
 
     setUpdatingId(null);
     if (error) {
-      setUpdateError(error.message || 'Gagal memperbarui status invoice.');
+      setUpdateError(friendlyError(error, 'Gagal memperbarui status invoice.'));
       return;
     }
     setInvoices((prev) => prev.map((i) => (i.id === data.id ? data : i)));
@@ -240,7 +241,7 @@ export default function InvoiceTrackerPage() {
       if (!res.ok) throw new Error(body.error || 'Gagal mengupload lampiran.');
       setInvoices((prev) => prev.map((i) => (i.id === body.invoice.id ? body.invoice : i)));
     } catch (err) {
-      setAttachError(err.message || 'Gagal mengupload lampiran.');
+      setAttachError(friendlyCaught(err, 'Gagal mengupload lampiran.'));
     } finally {
       setAttachingId(null);
     }
@@ -256,7 +257,7 @@ export default function InvoiceTrackerPage() {
       if (!res.ok) throw new Error(body.error || 'Gagal menghapus lampiran.');
       setInvoices((prev) => prev.map((i) => (i.id === body.invoice.id ? body.invoice : i)));
     } catch (err) {
-      setAttachError(err.message || 'Gagal menghapus lampiran.');
+      setAttachError(friendlyCaught(err, 'Gagal menghapus lampiran.'));
     } finally {
       setAttachingId(null);
     }

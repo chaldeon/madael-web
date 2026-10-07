@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { createClient } from '@/lib/supabase-browser';
+import { friendlyError } from '@/lib/errorMessage';
 
 function toBullets(text) {
   return (text || '')
@@ -64,7 +65,7 @@ export default function CetakLowonganPage() {
       .maybeSingle();
 
     if (error) {
-      setError(error.message);
+      setError(friendlyError(error, 'Gagal memuat lowongan.'));
     } else if (!data) {
       setError('Lowongan tidak ditemukan.');
     } else {

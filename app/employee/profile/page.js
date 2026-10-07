@@ -14,6 +14,7 @@ import EmptyState from '@/components/EmptyState';
 import CameraCapture from '@/components/CameraCapture';
 import EmployeeDocumentsPanel from '@/components/EmployeeDocumentsPanel';
 import AttendancePreferenceCard from '@/components/AttendancePreferenceCard';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 
 function StatusBadge({ status }) {
   const map = {
@@ -74,7 +75,7 @@ export default function ProfilePage() {
       .maybeSingle();
 
     if (empError || !emp) {
-      setLoadError(empError?.message || 'Data karyawan tidak ditemukan.');
+      setLoadError(friendlyError(empError, 'Data karyawan tidak ditemukan.'));
       setLoading(false);
       return;
     }
@@ -103,7 +104,7 @@ export default function ProfilePage() {
     ]);
 
     if (reqRes.error) {
-      setLoadError(reqRes.error.message || 'Gagal memuat riwayat pengajuan.');
+      setLoadError(friendlyError(reqRes.error, 'Gagal memuat riwayat pengajuan.'));
       setLoading(false);
       return;
     }
@@ -159,7 +160,7 @@ export default function ProfilePage() {
       setPhotoSuccess(true);
       setShowCamera(false);
     } catch (err) {
-      setPhotoError(err.message || 'Gagal menyimpan foto referensi, coba lagi.');
+      setPhotoError(friendlyCaught(err, 'Gagal menyimpan foto referensi, coba lagi.'));
     } finally {
       setPhotoSaving(false);
     }
@@ -205,7 +206,7 @@ export default function ProfilePage() {
 
     setSubmitting(false);
     if (error) {
-      setFormError(error.message || 'Gagal mengirim pengajuan, coba lagi.');
+      setFormError(friendlyError(error, 'Gagal mengirim pengajuan, coba lagi.'));
       return;
     }
 

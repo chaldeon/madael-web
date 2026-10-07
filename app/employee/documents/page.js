@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase-browser';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { friendlyError } from '@/lib/errorMessage';
 
 const JENIS_OPTIONS = [
   { kode: 'PRO', label: 'Proposal' },
@@ -148,7 +149,7 @@ export default function DocumentsListPage() {
       .order('created_at', { ascending: false });
 
     if (error) {
-      setError(error.message);
+      setError(friendlyError(error, 'Gagal memuat dokumen.'));
     } else {
       setDocuments(data || []);
     }

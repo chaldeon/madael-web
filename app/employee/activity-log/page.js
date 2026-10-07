@@ -9,6 +9,7 @@ import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { friendlyError } from '@/lib/errorMessage';
 
 function currentMonthValue() {
   const d = new Date();
@@ -171,7 +172,7 @@ export default function ActivityLogPage() {
 
     const firstError = empRes.error || logRes.error;
     if (firstError) {
-      setLoadError(firstError.message || 'Gagal memuat activity log.');
+      setLoadError(friendlyError(firstError, 'Gagal memuat activity log.'));
       setLoading(false);
       return;
     }

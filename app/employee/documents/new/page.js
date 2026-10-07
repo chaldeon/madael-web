@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 
 const JENIS_LABEL = {
   PRO: 'Proposal',
@@ -532,11 +533,11 @@ export default function NewDocumentPage() {
         .select('id')
         .single();
 
-      if (insertError) throw new Error(insertError.message);
+      if (insertError) throw new Error(friendlyError(insertError, 'Gagal menyimpan dokumen.'));
 
       router.push(`/employee/documents/${inserted.id}`);
     } catch (err) {
-      setError(err.message);
+      setError(friendlyCaught(err, 'Gagal menyimpan dokumen.'));
       setSaving(false);
     }
   };

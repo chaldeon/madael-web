@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { friendlyError } from '@/lib/errorMessage';
 
 // Jenis dokumen yang boleh diminta form -> label kode di nomor surat + counter yang dipakai
 const JENIS_CONFIG = {
@@ -70,7 +71,7 @@ export async function POST(request) {
 
     if (rpcError) {
       return NextResponse.json(
-        { error: 'Gagal generate nomor surat: ' + rpcError.message },
+        { error: 'Gagal generate nomor surat: ' + friendlyError(rpcError, 'terjadi kesalahan pada server.', { context: 'Generate nomor surat' }) },
         { status: 500 }
       );
     }

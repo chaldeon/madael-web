@@ -18,6 +18,7 @@ import SelectField from '@/components/payroll/SelectField';
 import HitungModal from '@/components/payroll/HitungModal';
 import { currentMonthValue, EMPTY_FORM, totalTunjangan, SORT_COLUMNS, objToPairs, pairsToObj } from '@/lib/payrollConfig';
 import { formatRupiah } from '@/lib/format';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 
 export default function PayrollManagerPage() {
   const supabase = createClient();
@@ -82,7 +83,7 @@ export default function PayrollManagerPage() {
     ]);
 
     if (clRes.error || empRes.error || linkableRes.error || scheduleRes.error) {
-      setLoadError((clRes.error || empRes.error || linkableRes.error || scheduleRes.error).message || 'Gagal memuat data payroll.');
+      setLoadError(friendlyError((clRes.error || empRes.error || linkableRes.error || scheduleRes.error), 'Gagal memuat data payroll.'));
       setLoading(false);
       return;
     }
@@ -203,7 +204,7 @@ export default function PayrollManagerPage() {
     setSaving(false);
 
     if (error) {
-      setSaveError(error.message || 'Gagal menyimpan, coba lagi.');
+      setSaveError(friendlyError(error, 'Gagal menyimpan, coba lagi.'));
       return;
     }
 
@@ -237,7 +238,7 @@ export default function PayrollManagerPage() {
       if (!res.ok) throw new Error(body.error || 'Gagal mengupload dokumen.');
       setEmployees((prev) => prev.map((e) => (e.id === body.employee.id ? { ...e, ...body.employee } : e)));
     } catch (err) {
-      setAttachError(err.message || 'Gagal mengupload dokumen.');
+      setAttachError(friendlyCaught(err, 'Gagal mengupload dokumen.'));
     } finally {
       setAttachingId(null);
     }
@@ -255,7 +256,7 @@ export default function PayrollManagerPage() {
       if (!res.ok) throw new Error(body.error || 'Gagal menghapus dokumen.');
       setEmployees((prev) => prev.map((e) => (e.id === body.employee.id ? { ...e, ...body.employee } : e)));
     } catch (err) {
-      setAttachError(err.message || 'Gagal menghapus dokumen.');
+      setAttachError(friendlyCaught(err, 'Gagal menghapus dokumen.'));
     } finally {
       setAttachingId(null);
     }

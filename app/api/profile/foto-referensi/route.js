@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { friendlyError } from '@/lib/errorMessage';
 
 // POST /api/profile/foto-referensi
 // Body JSON: { path, descriptor } — path = lokasi file di bucket
@@ -57,7 +58,7 @@ export async function POST(request) {
       .eq('id', emp.id);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: friendlyError(error, 'Gagal menyimpan foto referensi.', { context: 'Simpan foto referensi' }) }, { status: 500 });
     }
 
     return NextResponse.json({ success: true }, { status: 200 });

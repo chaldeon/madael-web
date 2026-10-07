@@ -12,6 +12,7 @@ import { Upload, Trash2, FileText, X, ExternalLink } from 'lucide-react';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { friendlyError } from '@/lib/errorMessage';
 
 const JENIS_OPTIONS = ['KTP', 'NPWP', 'Ijazah', 'Kontrak Kerja', 'Lainnya'];
 
@@ -42,7 +43,7 @@ export default function EmployeeDocumentsPanel({ supabase, employeeId, canUpload
       .eq('employee_id', employeeId)
       .order('created_at', { ascending: false });
     if (error) {
-      setLoadError(error.message || 'Gagal memuat daftar dokumen.');
+      setLoadError(friendlyError(error, 'Gagal memuat daftar dokumen.'));
     } else {
       setDocs(data || []);
     }
@@ -70,7 +71,7 @@ export default function EmployeeDocumentsPanel({ supabase, employeeId, canUpload
       contentType: file.type || 'application/octet-stream',
     });
     if (uploadError) {
-      setFormError(uploadError.message || 'Gagal upload file.');
+      setFormError(friendlyError(uploadError, 'Gagal upload file.'));
       setUploading(false);
       return;
     }
@@ -84,7 +85,7 @@ export default function EmployeeDocumentsPanel({ supabase, employeeId, canUpload
       uploaded_by: employeeId,
     }]);
     if (insertError) {
-      setFormError(insertError.message || 'Gagal menyimpan data dokumen.');
+      setFormError(friendlyError(insertError, 'Gagal menyimpan data dokumen.'));
       setUploading(false);
       return;
     }
@@ -102,7 +103,7 @@ export default function EmployeeDocumentsPanel({ supabase, employeeId, canUpload
     const { data, error } = await supabase.storage.from('employee-documents').createSignedUrl(doc.file_path, 60 * 5);
     setBusyId(null);
     if (error || !data?.signedUrl) {
-      alert('Gagal membuka dokumen: ' + (error?.message || 'terjadi kesalahan'));
+      alert('Gagal membuka dokumen: ' + friendlyError(error, 'terjadi kesalahan.'));
       return;
     }
     window.open(data.signedUrl, '_blank', 'noopener,noreferrer');

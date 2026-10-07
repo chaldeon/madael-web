@@ -10,6 +10,7 @@ import { missingImportantFields } from '@/lib/dataCompleteness';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { friendlyError } from '@/lib/errorMessage';
 
 // Field payroll & personal yang dianggap "penting" untuk keperluan Seksi 3
 // sekarang didefinisikan di satu tempat: lib/dataCompleteness.js — dipakai
@@ -63,7 +64,7 @@ export default function DataAuditPage() {
 
     const firstError = empRes.error || scheduleRes.error || masterRes.error || clientRes.error;
     if (firstError) {
-      setLoadError(firstError.message || 'Gagal memuat data audit.');
+      setLoadError(friendlyError(firstError, 'Gagal memuat data audit.'));
       setLoading(false);
       return;
     }

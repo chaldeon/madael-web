@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { hitungSisaCuti } from '@/lib/leave';
+import { friendlyError } from '@/lib/errorMessage';
 
 // GET /api/leave-balance
 // Sisa jatah cuti tahun berjalan untuk employee yang sedang login. Pakai
@@ -46,7 +47,7 @@ export async function GET() {
       .maybeSingle();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: friendlyError(error, 'Gagal memuat sisa cuti.', { context: 'Muat sisa cuti' }) }, { status: 500 });
     }
 
     if (!master) {

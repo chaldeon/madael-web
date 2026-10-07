@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
+import { friendlyError } from '@/lib/errorMessage';
 
 // Sengaja pakai vocabulary stage yang sama dengan Kanban Perusahaan yang
 // sudah ada (bukan daftar stage baru), biar konsisten buat tim.
@@ -86,7 +87,7 @@ export default function CrmDealsPage() {
       .order('created_at', { ascending: false });
 
     if (error) {
-      setError(error.message);
+      setError(friendlyError(error, 'Gagal memuat data deal.'));
     } else {
       setDeals(data || []);
     }
@@ -133,7 +134,7 @@ export default function CrmDealsPage() {
     const { error } = await supabase.from('crm_deals').update({ stage: newStage, updated_at: new Date().toISOString() }).eq('id', dealId);
     if (error) {
       setDeals(prev);
-      alert('Gagal update stage: ' + error.message);
+      alert('Gagal update stage: ' + friendlyError(error, 'terjadi kesalahan.'));
     }
   };
 
@@ -198,7 +199,7 @@ export default function CrmDealsPage() {
     setSubmitting(false);
 
     if (error) {
-      setFormError(error.message);
+      setFormError(friendlyError(error, 'Gagal menyimpan deal.'));
       return;
     }
     setShowAddModal(false);

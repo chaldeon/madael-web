@@ -18,6 +18,7 @@ import { computeSnapshot } from '@/lib/payroll/runSnapshot';
 import RunItemsTable from '@/components/payroll-run/RunItemsTable';
 import { STATUS_OPTIONS, STATUS_STYLE, SORT_COLUMNS, periodeLabel, downloadTransferCsv } from '@/lib/payrollRunConfig';
 import { formatRupiah } from '@/lib/format';
+import { friendlyError } from '@/lib/errorMessage';
 
 export default function PayrollRunDetailPage() {
   const { runId } = useParams();
@@ -53,7 +54,7 @@ export default function PayrollRunDetailPage() {
       .maybeSingle();
 
     if (runError || !runData) {
-      setLoadError(runError?.message || 'Payroll run tidak ditemukan.');
+      setLoadError(friendlyError(runError, 'Payroll run tidak ditemukan.'));
       setLoading(false);
       return;
     }
@@ -68,7 +69,7 @@ export default function PayrollRunDetailPage() {
       .eq('payroll_run_id', runId);
 
     if (itemsError) {
-      setLoadError(itemsError.message || 'Gagal memuat item payroll run.');
+      setLoadError(friendlyError(itemsError, 'Gagal memuat item payroll run.'));
       setLoading(false);
       return;
     }
@@ -99,7 +100,7 @@ export default function PayrollRunDetailPage() {
 
     if (empError) {
       setSyncing(false);
-      setLoadError(`Gagal cek employee baru: ${empError.message}`);
+      setLoadError(`Gagal cek employee baru: ${friendlyError(empError, 'terjadi kesalahan.')}`);
       return;
     }
 
@@ -119,7 +120,7 @@ export default function PayrollRunDetailPage() {
     setSyncing(false);
 
     if (insertError) {
-      setLoadError(`Gagal tambah employee baru ke run: ${insertError.message}`);
+      setLoadError(`Gagal tambah employee baru ke run: ${friendlyError(insertError, 'terjadi kesalahan.')}`);
       return;
     }
 
@@ -214,7 +215,7 @@ export default function PayrollRunDetailPage() {
     const { error } = await supabase.from('payroll_run_items').update(payload).eq('id', item.id);
     setRecalcSaving(null);
     if (error) {
-      setLoadError(`Gagal simpan Overtime/Insentif/Kompensasi: ${error.message}`);
+      setLoadError(`Gagal simpan Overtime/Insentif/Kompensasi: ${friendlyError(error, 'terjadi kesalahan.')}`);
       return;
     }
     setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...payload } : i)));
@@ -305,7 +306,7 @@ export default function PayrollRunDetailPage() {
 
       if (existingPayslipId) {
         const { error } = await supabase.from('payslips').update(payload).eq('id', existingPayslipId);
-        if (error) { errors.push(`${item.employees_master?.nama}: ${error.message}`); continue; }
+        if (error) { errors.push(`${item.employees_master?.nama}: ${friendlyError(error, 'terjadi kesalahan.')}`); continue; }
       } else {
         const res = await fetch('/api/documents/generate-number', {
           method: 'POST',
@@ -320,7 +321,7 @@ export default function PayrollRunDetailPage() {
           .insert([{ ...payload, nomor_dokumen: numberData.nomor_surat }])
           .select()
           .single();
-        if (error) { errors.push(`${item.employees_master?.nama}: ${error.message}`); continue; }
+        if (error) { errors.push(`${item.employees_master?.nama}: ${friendlyError(error, 'terjadi kesalahan.')}`); continue; }
         existingPayslipId = inserted.id;
       }
 
@@ -346,7 +347,7 @@ export default function PayrollRunDetailPage() {
 
     if (error) {
       setSaving(false);
-      setSaveError(error.message || 'Gagal menyimpan status.');
+      setSaveError(friendlyError(error, 'Gagal menyimpan status.'));
       return;
     }
     setRun(data);

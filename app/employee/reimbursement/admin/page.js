@@ -13,6 +13,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { formatRupiah } from '@/lib/format';
+import { friendlyError } from '@/lib/errorMessage';
 
 function formatTanggal(value) {
   if (!value) return '—';
@@ -57,7 +58,7 @@ export default function ReimbursementAdminPage() {
 
     const firstError = empRes.error || reqRes.error;
     if (firstError) {
-      setLoadError(firstError.message || 'Gagal memuat data reimbursement.');
+      setLoadError(friendlyError(firstError, 'Gagal memuat data reimbursement.'));
       setLoading(false);
       return;
     }
@@ -116,7 +117,7 @@ export default function ReimbursementAdminPage() {
 
     setActingId(null);
     if (error) {
-      setActionError(error.message || 'Gagal memperbarui status klaim.');
+      setActionError(friendlyError(error, 'Gagal memperbarui status klaim.'));
       return;
     }
     setRequests((prev) => prev.map((r) => (r.id === data.id ? data : r)));
@@ -158,7 +159,7 @@ export default function ReimbursementAdminPage() {
 
     setActingId(null);
     if (error) {
-      setActionError(error.message || 'Gagal menandai klaim sebagai sudah dibayar.');
+      setActionError(friendlyError(error, 'Gagal menandai klaim sebagai sudah dibayar.'));
       return;
     }
     setRequests((prev) => prev.map((r) => (r.id === data.id ? data : r)));
@@ -176,7 +177,7 @@ export default function ReimbursementAdminPage() {
     if (!row.bukti_path) return;
     const { data, error } = await supabase.storage.from('reimbursement-bukti').createSignedUrl(row.bukti_path, 60 * 5);
     if (error || !data?.signedUrl) {
-      alert('Gagal membuka bukti: ' + (error?.message || 'terjadi kesalahan'));
+      alert('Gagal membuka bukti: ' + friendlyError(error, 'terjadi kesalahan.'));
       return;
     }
     window.open(data.signedUrl, '_blank', 'noopener,noreferrer');

@@ -14,6 +14,7 @@ import EmptyState from '@/components/EmptyState';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
 import { durasiIstirahatMenit, formatDurasi } from '@/lib/attendanceBreak';
 import { isDriveRef, driveFotoUrl } from '@/lib/attendancePhotoUrl';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 
 function currentMonthValue() {
   const d = new Date();
@@ -109,7 +110,7 @@ export default function RekapDetailPage() {
     ]);
 
     if (empRes.error || attRes.error) {
-      setLoadError((empRes.error || attRes.error).message || 'Gagal memuat data rekap karyawan.');
+      setLoadError(friendlyError((empRes.error || attRes.error), 'Gagal memuat data rekap karyawan.'));
       setLoading(false);
       return;
     }
@@ -161,7 +162,7 @@ export default function RekapDetailPage() {
       if (!res.ok) throw new Error(json.error || 'Gagal menyimpan keputusan.');
       setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, ...json.data } : r)));
     } catch (err) {
-      setJustifyError(err.message || 'Gagal menyimpan keputusan. Periksa koneksi internet kamu.');
+      setJustifyError(friendlyCaught(err, 'Gagal menyimpan keputusan. Periksa koneksi internet kamu.'));
     } finally {
       setJustifyingId(null);
     }

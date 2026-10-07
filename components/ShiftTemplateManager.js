@@ -17,6 +17,7 @@ import {
   validateShiftForm, scheduleFieldsFromTemplate,
 } from '@/lib/shifts';
 import EmptyState from '@/components/EmptyState';
+import { friendlyError } from '@/lib/errorMessage';
 
 const EMPTY_FORM = {
   nama: '',
@@ -110,7 +111,7 @@ export default function ShiftTemplateManager({ supabase, userId, templates, link
       const { data, error } = await supabase.from('shift_templates').insert([value]).select().single();
       setSaving(false);
       if (error) {
-        setFormError(error.code === '23505' ? 'Nama shift itu sudah dipakai.' : error.message || 'Gagal menyimpan shift.');
+        setFormError(error.code === '23505' ? 'Nama shift itu sudah dipakai.' : friendlyError(error, 'Gagal menyimpan shift.'));
         return;
       }
       logActivity(supabase, {
@@ -127,7 +128,7 @@ export default function ShiftTemplateManager({ supabase, userId, templates, link
       .from('shift_templates').update(value).eq('id', editing.id).select().single();
     if (error) {
       setSaving(false);
-      setFormError(error.code === '23505' ? 'Nama shift itu sudah dipakai.' : error.message || 'Gagal menyimpan shift.');
+      setFormError(error.code === '23505' ? 'Nama shift itu sudah dipakai.' : friendlyError(error, 'Gagal menyimpan shift.'));
       return;
     }
 
@@ -142,7 +143,7 @@ export default function ShiftTemplateManager({ supabase, userId, templates, link
         .select('employee_id');
       if (sync.error) {
         setSaving(false);
-        setFormError(`Template tersimpan, tapi gagal menyebar ke karyawan: ${sync.error.message}. Klik Simpan lagi untuk mengulang.`);
+        setFormError(`Template tersimpan, tapi gagal menyebar ke karyawan: ${friendlyError(sync.error, 'terjadi kesalahan.')} Klik Simpan lagi untuk mengulang.`);
         await onChanged();
         return;
       }
@@ -170,7 +171,7 @@ export default function ShiftTemplateManager({ supabase, userId, templates, link
     if (!window.confirm(`Hapus shift "${tpl.nama}"? Tindakan ini tidak bisa dibatalkan.`)) return;
     const { error } = await supabase.from('shift_templates').delete().eq('id', tpl.id);
     if (error) {
-      setListMsg({ type: 'error', text: error.message || 'Gagal menghapus shift.' });
+      setListMsg({ type: 'error', text: friendlyError(error, 'Gagal menghapus shift.') });
       return;
     }
     logActivity(supabase, {

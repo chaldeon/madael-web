@@ -14,6 +14,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
+import { friendlyError } from '@/lib/errorMessage';
 
 function currentMonthValue() {
   const d = new Date();
@@ -98,7 +99,7 @@ export default function KoreksiAbsensiPage() {
 
     const firstError = empRes.error || attRes.error;
     if (firstError) {
-      setLoadError(firstError.message || 'Gagal memuat data absensi.');
+      setLoadError(friendlyError(firstError, 'Gagal memuat data absensi.'));
       setLoading(false);
       return;
     }
@@ -162,7 +163,7 @@ export default function KoreksiAbsensiPage() {
     setCheckingAdd(false);
 
     if (error) {
-      setAddError(error.message || 'Gagal mengecek record yang sudah ada.');
+      setAddError(friendlyError(error, 'Gagal mengecek record yang sudah ada.'));
       return;
     }
     if (existing) {
@@ -229,7 +230,7 @@ export default function KoreksiAbsensiPage() {
 
       if (insertError) {
         setSaving(false);
-        setSaveError(insertError.message || 'Gagal membuat record baru.');
+        setSaveError(friendlyError(insertError, 'Gagal membuat record baru.'));
         return;
       }
 
@@ -250,7 +251,7 @@ export default function KoreksiAbsensiPage() {
       if (logError) {
         // Record attendance sudah kebuat — jejak log gagal disimpan, tapi
         // jangan rollback attendance-nya sendiri (butuh manual cleanup kalau ini terjadi).
-        setSaveError(`Record dibuat tapi log koreksi gagal disimpan: ${logError.message}`);
+        setSaveError(`Record dibuat tapi log koreksi gagal disimpan: ${friendlyError(logError, 'terjadi kesalahan.')}`);
       }
       setAttendance((prev) => [inserted, ...prev]);
       setAddForm({ employeeId: '', tanggal: '' });
@@ -291,7 +292,7 @@ export default function KoreksiAbsensiPage() {
 
     if (logError) {
       setSaving(false);
-      setSaveError(logError.message || 'Gagal menyimpan log koreksi. Koreksi dibatalkan.');
+      setSaveError(friendlyError(logError, 'Gagal menyimpan log koreksi. Koreksi dibatalkan.'));
       return;
     }
 
@@ -308,7 +309,7 @@ export default function KoreksiAbsensiPage() {
 
     setSaving(false);
     if (error) {
-      setSaveError(error.message || 'Gagal menyimpan koreksi, coba lagi.');
+      setSaveError(friendlyError(error, 'Gagal menyimpan koreksi, coba lagi.'));
       return;
     }
 

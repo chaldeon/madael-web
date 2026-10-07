@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { MAX_TAG_LENGTH, MAX_TAGS_PER_CANDIDATE, parseTagList } from '@/lib/talentPoolTags';
 import { REJECTION_REASON_OTHER, REJECTION_REASON_PRESETS, buildRejectionReason } from '@/lib/applicationStatus';
+import { friendlyCaught } from '@/lib/errorMessage';
 
 // Aksi massal di halaman Pelamar (/employee/job-portal/pelamar).
 //
@@ -156,7 +157,7 @@ export default function BulkApplicantActions({
       try {
         await worker(app);
       } catch (err) {
-        failed.push({ id: app.id, nama: app.nama, error: err?.message || 'Terjadi kesalahan.' });
+        failed.push({ id: app.id, nama: app.nama, error: friendlyCaught(err, 'Terjadi kesalahan.') });
       }
       setProgress((p) => ({ ...p, done: p.done + 1 }));
     });

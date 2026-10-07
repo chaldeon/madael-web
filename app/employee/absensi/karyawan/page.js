@@ -21,6 +21,7 @@ import ShiftTemplateManager from '@/components/ShiftTemplateManager';
 import SortableHeader from '@/components/SortableHeader';
 import { parseToleransi, currentMonthValue, formatJam, formatTanggal, formatWaktu, countScheduledWorkdays, downloadRekapCsv, computeStatusTelat, HARI_OPTIONS, DEFAULT_HARI, EMPTY_JADWAL_FORM, JADWAL_SORT_COLUMNS, REKAP_SORT_COLUMNS, TABS } from '@/lib/absensiKaryawanConfig';
 import { durasiMenit, formatDurasi, scheduleFieldsFromTemplate, shiftLabel } from '@/lib/shifts';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 
 export default function SemuaKaryawanPage() {
   const supabase = createClient();
@@ -110,7 +111,7 @@ export default function SemuaKaryawanPage() {
 
     const firstError = empRes.error || schedRes.error;
     if (firstError) {
-      setLoadError(firstError.message || 'Gagal memuat data karyawan.');
+      setLoadError(friendlyError(firstError, 'Gagal memuat data karyawan.'));
       setLoadingBase(false);
       return;
     }
@@ -198,7 +199,7 @@ export default function SemuaKaryawanPage() {
 
     setRekapLoading(false);
     if (error) {
-      setRekapError(error.message || 'Gagal memuat data rekap.');
+      setRekapError(friendlyError(error, 'Gagal memuat data rekap.'));
       return;
     }
     setAttendance(data || []);
@@ -229,7 +230,7 @@ export default function SemuaKaryawanPage() {
     const { data, error } = await query;
     setKoreksiLoading(false);
     if (error) {
-      setKoreksiError(error.message || 'Gagal memuat pengajuan koreksi.');
+      setKoreksiError(friendlyError(error, 'Gagal memuat pengajuan koreksi.'));
       return;
     }
     setCorrections(data || []);
@@ -356,7 +357,7 @@ export default function SemuaKaryawanPage() {
 
     setJadwalSaving(false);
     if (error) {
-      setJadwalSaveError(error.message || 'Gagal menyimpan jadwal, coba lagi.');
+      setJadwalSaveError(friendlyError(error, 'Gagal menyimpan jadwal, coba lagi.'));
       return;
     }
     setSchedules((s) => ({ ...s, [editingEmp.id]: data }));
@@ -394,7 +395,7 @@ export default function SemuaKaryawanPage() {
     setBulkSaving(false);
 
     if (error) {
-      setBulkMsg({ type: 'error', text: error.message || 'Gagal menerapkan toleransi, coba lagi.' });
+      setBulkMsg({ type: 'error', text: friendlyError(error, 'Gagal menerapkan toleransi, coba lagi.') });
       return;
     }
     setSchedules((prev) => {
@@ -446,7 +447,7 @@ export default function SemuaKaryawanPage() {
     setBulkShiftSaving(false);
 
     if (error) {
-      setBulkShiftMsg({ type: 'error', text: error.message || 'Gagal memasang shift, coba lagi.' });
+      setBulkShiftMsg({ type: 'error', text: friendlyError(error, 'Gagal memasang shift, coba lagi.') });
       return;
     }
     setSchedules((prev) => {
@@ -594,7 +595,7 @@ export default function SemuaKaryawanPage() {
         detail: { employee_id: row.employee_id, tanggal: row.tanggal },
       });
     } catch (err) {
-      setKoreksiError(err.message || 'Gagal menyetujui pengajuan koreksi.');
+      setKoreksiError(friendlyCaught(err, 'Gagal menyetujui pengajuan koreksi.'));
     } finally {
       setProcessingId(null);
     }
@@ -644,7 +645,7 @@ export default function SemuaKaryawanPage() {
       });
       setRejectingRow(null);
     } catch (err) {
-      setKoreksiError(err.message || 'Gagal menolak pengajuan koreksi.');
+      setKoreksiError(friendlyCaught(err, 'Gagal menolak pengajuan koreksi.'));
     } finally {
       setProcessingId(null);
     }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { friendlyError } from '@/lib/errorMessage';
 
 const VALID_KODE = ['PRO', 'QUO', 'AGR', 'ADM', 'INV'];
 const ROMAWI_BULAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
@@ -60,7 +61,7 @@ export async function POST(request) {
 
     if (rpcError) {
       return NextResponse.json(
-        { error: 'Gagal generate nomor surat: ' + rpcError.message },
+        { error: 'Gagal generate nomor surat: ' + friendlyError(rpcError, 'terjadi kesalahan pada server.', { context: 'Generate nomor surat' }) },
         { status: 500 }
       );
     }

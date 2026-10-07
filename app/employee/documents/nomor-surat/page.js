@@ -11,6 +11,7 @@ import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { friendlyError } from '@/lib/errorMessage';
 
 const STATUS_STYLES = {
   Draft: 'bg-[#F3F4F6] text-[#4B5563]',
@@ -122,7 +123,7 @@ export default function NomorSuratPage() {
     ]);
 
     if (cntRes.error || docsRes.error) {
-      setLoadError((cntRes.error || docsRes.error).message || 'Gagal memuat data nomor surat.');
+      setLoadError(friendlyError((cntRes.error || docsRes.error), 'Gagal memuat data nomor surat.'));
       setLoading(false);
       return;
     }
@@ -148,7 +149,7 @@ export default function NomorSuratPage() {
     setSaving(false);
 
     if (error) {
-      setSaveError(error.message || 'Gagal update nomor, coba lagi.');
+      setSaveError(friendlyError(error, 'Gagal update nomor, coba lagi.'));
       return;
     }
     setEditingCounter(null);

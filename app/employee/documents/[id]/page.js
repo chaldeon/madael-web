@@ -11,6 +11,7 @@ import { createClient } from '@/lib/supabase-browser';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import { formatRupiahOrDash } from '@/lib/format';
+import { friendlyError } from '@/lib/errorMessage';
 
 const TYPE_LABEL = {
   PRO: 'Proposal',
@@ -267,7 +268,7 @@ export default function DocumentDetailPage() {
       .maybeSingle();
 
     if (error) {
-      setError(error.message);
+      setError(friendlyError(error, 'Gagal memuat dokumen.'));
     } else if (!data) {
       setError('Dokumen tidak ditemukan.');
     } else {
@@ -308,7 +309,7 @@ export default function DocumentDetailPage() {
     const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id);
     setUpdatingStatus(false);
     if (error) {
-      setStatusError(error.message || 'Gagal update status, coba lagi.');
+      setStatusError(friendlyError(error, 'Gagal update status, coba lagi.'));
       return;
     }
     setDoc((d) => ({ ...d, status: newStatus }));

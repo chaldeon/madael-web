@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase-admin';
 import { DEFAULT_MODULE_ACCESS } from '@/lib/employeeModules';
 import { highestEmployeeNumber, formatEmployeeId } from '@/lib/employeeId';
 import { logActivities } from '@/lib/activityLog';
+import { friendlyError, friendlyAuthError } from '@/lib/errorMessage';
 
 const VALID_STATUS = ['Aktif', 'Nonaktif'];
 
@@ -158,7 +159,7 @@ export async function POST(request) {
       });
 
       if (authError) {
-        results.push({ row: rowNum, email, status: 'error', error: 'Gagal buat akun: ' + authError.message });
+        results.push({ row: rowNum, email, status: 'error', error: 'Gagal buat akun: ' + friendlyAuthError(authError, 'terjadi kesalahan pada server.', { context: `Bulk create baris ${rowNum} (Auth)` }) });
         continue;
       }
 
@@ -184,7 +185,7 @@ export async function POST(request) {
 
       if (empError) {
         await admin.auth.admin.deleteUser(authUser.user.id);
-        results.push({ row: rowNum, email, status: 'error', error: 'Gagal simpan data: ' + empError.message });
+        results.push({ row: rowNum, email, status: 'error', error: 'Gagal simpan data: ' + friendlyError(empError, 'terjadi kesalahan pada server.', { context: `Bulk create baris ${rowNum} (employees)`, showField: true }) });
         continue;
       }
 
@@ -276,6 +277,7 @@ export async function POST(request) {
       { status: 200 }
     );
   } catch (err) {
-    return NextResponse.json({ error: 'Terjadi kesalahan server: ' + err.message }, { status: 500 });
+    console.error('Bulk create employee error:', err);
+    return NextResponse.json({ error: 'Terjadi kesalahan server. Silakan coba lagi.' }, { status: 500 });
   }
 }

@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { MODULE_OPTIONS } from '@/lib/employeeModules';
 import { logActivity } from '@/lib/activityLog';
+import { friendlyError } from '@/lib/errorMessage';
 
 const VALID_MODULE_KEYS = new Set(MODULE_OPTIONS.map((m) => m.key));
 
@@ -89,7 +90,7 @@ export async function POST(request, { params }) {
       // idempoten daripada dilempar sebagai error ke UI.
       if (insertError.code !== '23505') {
         return NextResponse.json(
-          { error: 'Gagal menambah akses modul: ' + insertError.message },
+          { error: 'Gagal menambah akses modul: ' + friendlyError(insertError, 'terjadi kesalahan pada server.', { context: 'Tambah akses modul' }) },
           { status: 500 }
         );
       }
@@ -140,7 +141,7 @@ export async function DELETE(request, { params }) {
 
     if (deleteError) {
       return NextResponse.json(
-        { error: 'Gagal menghapus akses modul: ' + deleteError.message },
+        { error: 'Gagal menghapus akses modul: ' + friendlyError(deleteError, 'terjadi kesalahan pada server.', { context: 'Hapus akses modul' }) },
         { status: 500 }
       );
     }

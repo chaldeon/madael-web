@@ -13,6 +13,7 @@ import ExportCsvButton from '@/components/ExportCsvButton';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import { formatRupiah } from '@/lib/format';
+import { friendlyError } from '@/lib/errorMessage';
 
 const MADAEL_RED = '#C1272D';
 const STATUS_COLOR = { Draft: '#9CA3AF', Review: '#F59E0B', Approved: '#16A34A' };
@@ -99,7 +100,7 @@ export default function ReportsDashboardPage() {
 
     const criticalError = attendanceRes.error || payrollRes.error || applicationsRes.error;
     if (criticalError) {
-      setLoadError(criticalError.message || 'Gagal memuat data ringkasan.');
+      setLoadError(friendlyError(criticalError, 'Gagal memuat data ringkasan.'));
       setLoading(false);
       return;
     }
@@ -134,7 +135,7 @@ export default function ReportsDashboardPage() {
       .gte('tanggal', firstDay);
 
     if (error) {
-      setTrendError(error.message || 'Gagal memuat tren kehadiran.');
+      setTrendError(friendlyError(error, 'Gagal memuat tren kehadiran.'));
       setTrendLoading(false);
       return;
     }
@@ -154,7 +155,7 @@ export default function ReportsDashboardPage() {
       .eq('periode', periode);
 
     if (error) {
-      setPayrollError(error.message || 'Gagal memuat breakdown payroll.');
+      setPayrollError(friendlyError(error, 'Gagal memuat breakdown payroll.'));
       setPayrollLoading(false);
       return;
     }

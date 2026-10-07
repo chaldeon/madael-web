@@ -16,6 +16,7 @@ import ExportCsvButton from '@/components/ExportCsvButton';
 import { isTelatEfektif } from '@/lib/attendanceStatus';
 import { formatRupiah } from '@/lib/format';
 import { isJobOpen } from '@/lib/jobStatus';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 
 const PERIODS = [
   { value: 'weekly', label: 'Mingguan' },
@@ -111,7 +112,7 @@ function HrAnalyticsSection({ supabase }) {
 
     const criticalError = empRes.error || masterRes.error || attendanceRes.error || runsRes.error;
     if (criticalError) {
-      setLoadError(criticalError.message || 'Gagal memuat data HR analytics.');
+      setLoadError(friendlyError(criticalError, 'Gagal memuat data HR analytics.'));
       setLoading(false);
       return;
     }
@@ -137,7 +138,7 @@ function HrAnalyticsSection({ supabase }) {
         .in('payroll_run_id', runIds);
 
       if (itemsError) {
-        setLoadError(itemsError.message || 'Gagal memuat biaya payroll.');
+        setLoadError(friendlyError(itemsError, 'Gagal memuat biaya payroll.'));
       } else {
         const totals = {};
         (items || []).forEach((item) => {
@@ -357,7 +358,7 @@ export default function StatisticsPage() {
       if (!res.ok) throw new Error(json.error || 'Gagal memuat data analytics');
       setGaData(json);
     } catch (err) {
-      setGaError(err.message);
+      setGaError(friendlyCaught(err, 'Gagal memuat data analytics.'));
     } finally {
       setGaLoading(false);
     }
