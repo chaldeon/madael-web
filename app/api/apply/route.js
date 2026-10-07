@@ -1,13 +1,18 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { uploadCVToDrive } from '@/lib/googleDrive';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { notifyByModule, notifyEmployees } from '@/lib/notify';
 import { isJobOpen } from '@/lib/jobStatus';
+import { EMAIL_RE, isMailConfigured, sendApplicationReceivedEmail } from '@/lib/applicationEmail';
 import { APPLY_RATE_LIMIT, HONEYPOT_FIELD, getClientIp, rateLimit } from '@/lib/antiSpam';
 
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 const GENERAL_FOLDER_NAME = 'Umum';
+
+// Maksimal satu email konfirmasi per alamat email dalam jendela ini, supaya
+// endpoint publik tidak bisa dipakai membanjiri kotak masuk orang lain.
+const CONFIRMATION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 // Batas lamaran per IP per jam bisa diubah lewat env APPLY_RATE_LIMIT_PER_HOUR
 // (0 = matikan rate limit). Berguna kalau hosting tidak meneruskan IP asli
@@ -103,10 +108,13 @@ export async function POST(request) {
     // Dicek di server (bukan hanya disembunyikan di halaman publik) supaya link
     // lama / request langsung tidak bisa menembus lowongan yang sudah tutup.
     // Dilakukan SEBELUM upload ke Drive agar tidak menyisakan CV yatim.
+    // Judul lowongan dari database dipakai juga untuk email konfirmasi
+    // (bukan `posisi` dari form, yang bisa diisi sembarang oleh pengunjung).
+    let jobTitle = null;
     if (!isGeneral) {
       const { data: job, error: jobError } = await createAdminClient()
         .from('job_listings')
-        .select('id, is_active, closes_at')
+        .select('id, title, is_active, closes_at')
         .eq('id', jobId)
         .maybeSingle();
 
@@ -128,6 +136,8 @@ export async function POST(request) {
           { status: 410 }
         );
       }
+
+      jobTitle = job.title;
     }
 
     // Siapkan file untuk diupload
@@ -208,6 +218,40 @@ export async function POST(request) {
       }
     } catch (notifyErr) {
       console.error('Gagal mengirim notifikasi pelamar baru:', notifyErr);
+    }
+
+    // Email konfirmasi ke pelamar. Dijalankan lewat after() supaya tidak
+    // memperlambat respons, dan seluruh kegagalannya (SMTP, query) hanya
+    // dicatat di log — lamaran sudah tersimpan dan respons sukses tidak berubah.
+    // Dilewati tanpa error bila SMTP belum dikonfigurasi atau email tidak valid.
+    if (isMailConfigured() && EMAIL_RE.test(email)) {
+      const posisiEmail = isGeneral ? posisiMinat : jobTitle;
+      after(async () => {
+        try {
+          // Batasi 1 konfirmasi per alamat per 24 jam. Baris yang baru saja
+          // disisipkan ikut terhitung, jadi lebih dari 1 berarti sudah pernah
+          // ada lamaran dari alamat ini. Dicocokkan tanpa membedakan huruf besar/
+          // kecil agar variasi kapitalisasi tidak melewati batas; karakter
+          // wildcard LIKE (% _ \) di-escape supaya dicocokkan apa adanya.
+          const since = new Date(Date.now() - CONFIRMATION_WINDOW_MS).toISOString();
+          const { count, error: countError } = await createAdminClient()
+            .from('applications')
+            .select('id', { count: 'exact', head: true })
+            .ilike('email', email.replace(/[\\%_]/g, '\\$&'))
+            .gte('created_at', since);
+
+          // Gagal menghitung → jangan kirim (lebih aman daripada membuka celah spam).
+          if (countError) {
+            console.error('Gagal memeriksa batas email konfirmasi lamaran:', countError);
+            return;
+          }
+          if ((count ?? 0) > 1) return;
+
+          await sendApplicationReceivedEmail({ to: email, nama, posisi: posisiEmail });
+        } catch (mailErr) {
+          console.error('Gagal mengirim email konfirmasi lamaran:', mailErr);
+        }
+      });
     }
 
     return NextResponse.json({ success: true }, { status: 200 });

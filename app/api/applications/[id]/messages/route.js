@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { logActivity } from '@/lib/activityLog';
-import { isMailConfigured, sendApplicantStatusEmail } from '@/lib/applicationEmail';
+import { EMAIL_RE, isMailConfigured, sendApplicantStatusEmail } from '@/lib/applicationEmail';
 import { canAccessJob, checkApplicationScope, OUT_OF_SCOPE_ERROR } from '@/lib/jobPortalServer';
 import {
   MESSAGE_COLUMNS,
@@ -18,8 +18,6 @@ import {
   getInterviewVenue,
   hasInterviewVenue,
 } from '@/lib/candidateMessages';
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // GET /api/applications/[id]/messages
 // Riwayat pesan ke satu pelamar (terbaru di atas).
