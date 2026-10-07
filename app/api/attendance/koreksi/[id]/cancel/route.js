@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { logActivity } from '@/lib/activityLog';
+import { friendlyError } from '@/lib/errorMessage';
 
 const STATUS_LABEL = {
   approved: 'disetujui',
@@ -68,7 +69,7 @@ export async function POST(request, { params }) {
     if (updateError) {
       console.error('Batalkan koreksi absensi error:', updateError);
       return NextResponse.json(
-        { error: `Gagal membatalkan pengajuan koreksi: ${updateError.message}` },
+        { error: `Gagal membatalkan pengajuan koreksi: ${friendlyError(updateError, 'terjadi kesalahan pada server.', { context: 'Batalkan koreksi absensi' })}` },
         { status: 500 }
       );
     }

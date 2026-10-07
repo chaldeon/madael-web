@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase-admin';
 import { DEFAULT_MODULE_ACCESS } from '@/lib/employeeModules';
 import { nextEmployeeId } from '@/lib/employeeId';
 import { logActivity } from '@/lib/activityLog';
+import { friendlyError, friendlyAuthError } from '@/lib/errorMessage';
 
 export async function POST(request) {
   try {
@@ -74,7 +75,7 @@ export async function POST(request) {
 
     if (authError) {
       return NextResponse.json(
-        { error: 'Gagal membuat akun Auth: ' + authError.message },
+        { error: 'Gagal membuat akun Auth: ' + friendlyAuthError(authError, 'terjadi kesalahan pada server.', { context: 'Buat akun Auth' }) },
         { status: 500 }
       );
     }
@@ -98,7 +99,7 @@ export async function POST(request) {
       // rollback akun auth kalau insert ke tabel employees gagal
       await admin.auth.admin.deleteUser(authUser.user.id);
       return NextResponse.json(
-        { error: 'Gagal menyimpan data employee: ' + empError.message },
+        { error: 'Gagal menyimpan data employee: ' + friendlyError(empError, 'terjadi kesalahan pada server.', { context: 'Simpan data employee', showField: true }) },
         { status: 500 }
       );
     }

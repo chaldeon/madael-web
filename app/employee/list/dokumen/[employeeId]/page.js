@@ -11,6 +11,7 @@ import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmployeeDocumentsPanel from '@/components/EmployeeDocumentsPanel';
+import { friendlyError } from '@/lib/errorMessage';
 
 // Dibuka dari menu aksi (⋯) di /employee/list — dokumen bersifat self-service
 // (employee upload sendiri lewat halaman Profil), jadi di sini superadmin
@@ -34,7 +35,7 @@ export default function DokumenKaryawanPage() {
       .maybeSingle();
 
     if (error || !data) {
-      setLoadError(error?.message || 'Karyawan tidak ditemukan.');
+      setLoadError(friendlyError(error, 'Karyawan tidak ditemukan.'));
     } else {
       setTarget(data);
     }

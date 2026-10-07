@@ -9,6 +9,7 @@ import { ArrowLeft, Pencil, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { formatRupiahOrDash } from '@/lib/format';
+import { friendlyError } from '@/lib/errorMessage';
 
 const inputClass =
   'w-full border border-[#E0E0E0] px-3 py-2 text-sm text-black focus:outline-none focus:border-madael-red';
@@ -78,7 +79,7 @@ export default function EmployeeDetailPage() {
     ]);
 
     if (empError || !empData) {
-      setError(empError?.message || 'Karyawan tidak ditemukan.');
+      setError(friendlyError(empError, 'Karyawan tidak ditemukan.'));
       setLoading(false);
       return;
     }
@@ -159,7 +160,7 @@ export default function EmployeeDetailPage() {
           .eq('id', master.id);
 
         if (masterError) {
-          setEditError('Data akun tersimpan, tapi gagal menyimpan data HR/payroll: ' + masterError.message);
+          setEditError('Data akun tersimpan, tapi gagal menyimpan data HR/payroll: ' + friendlyError(masterError, 'terjadi kesalahan.'));
           setSavingEdit(false);
           return;
         }

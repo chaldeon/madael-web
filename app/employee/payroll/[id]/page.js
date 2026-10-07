@@ -12,6 +12,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { formatRupiahOrDash } from '@/lib/format';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 
 const DOKUMEN_OPTIONS = ['KTP', 'PKWT', 'Ijazah', 'Lainnya'];
 
@@ -70,7 +71,7 @@ export default function EmployeeDetailPage() {
       .maybeSingle();
 
     if (error) {
-      setLoadError(error.message || 'Gagal memuat data employee.');
+      setLoadError(friendlyError(error, 'Gagal memuat data employee.'));
       setLoading(false);
       return;
     }
@@ -95,7 +96,7 @@ export default function EmployeeDetailPage() {
       .order('uploaded_at', { ascending: false });
 
     if (error) {
-      setDocsError(error.message || 'Gagal memuat daftar dokumen.');
+      setDocsError(friendlyError(error, 'Gagal memuat daftar dokumen.'));
     } else {
       setDocuments(data || []);
     }
@@ -143,7 +144,7 @@ export default function EmployeeDetailPage() {
       if (fileInput) fileInput.value = '';
       loadDocuments();
     } catch (err) {
-      setUploadError(err.message);
+      setUploadError(friendlyCaught(err, 'Gagal mengupload dokumen.'));
     } finally {
       setUploading(false);
     }
@@ -158,7 +159,7 @@ export default function EmployeeDetailPage() {
       if (!res.ok) throw new Error(data.error || 'Gagal menghapus dokumen.');
       setDocuments((prev) => prev.filter((d) => d.id !== docId));
     } catch (err) {
-      alert(err.message);
+      alert(friendlyCaught(err, 'Gagal menghapus dokumen.'));
     } finally {
       setDeletingId(null);
     }

@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { uploadPayrollDocumentToDrive, deletePayrollDocumentFromDrive } from '@/lib/googleDrive';
+import { friendlyError } from '@/lib/errorMessage';
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_MIME = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
@@ -122,7 +123,7 @@ export async function POST(request, { params }) {
 
     if (updateError) {
       return NextResponse.json(
-        { error: 'Dokumen berhasil diupload, tetapi gagal menyimpan metadata: ' + updateError.message },
+        { error: 'Dokumen berhasil diupload, tetapi gagal menyimpan metadata: ' + friendlyError(updateError, 'terjadi kesalahan pada server.', { context: 'Simpan metadata dokumen payroll' }) },
         { status: 500 }
       );
     }
@@ -174,7 +175,7 @@ export async function DELETE(request, { params }) {
       .single();
 
     if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
+      return NextResponse.json({ error: friendlyError(updateError, 'Gagal menghapus dokumen payroll.', { context: 'Hapus dokumen payroll' }) }, { status: 500 });
     }
 
     return NextResponse.json({ employee: updated });

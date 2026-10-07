@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { uploadEmployeeDocumentToDrive, deleteEmployeeDocumentFromDrive } from '@/lib/googleDrive';
+import { friendlyError } from '@/lib/errorMessage';
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB — KTP/ijazah kadang hasil scan agak besar
 const ALLOWED_MIME = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
@@ -117,7 +118,7 @@ export async function POST(request, { params }) {
 
     if (insertError) {
       return NextResponse.json(
-        { error: 'Dokumen berhasil diupload, tetapi gagal menyimpan metadata: ' + insertError.message },
+        { error: 'Dokumen berhasil diupload, tetapi gagal menyimpan metadata: ' + friendlyError(insertError, 'terjadi kesalahan pada server.', { context: 'Simpan metadata dokumen employee' }) },
         { status: 500 }
       );
     }
@@ -164,7 +165,7 @@ export async function DELETE(request, { params }) {
     const { error: deleteError } = await admin.from('employee_documents').delete().eq('id', docId);
     if (deleteError) {
       return NextResponse.json(
-        { error: 'Gagal menghapus data dokumen: ' + deleteError.message },
+        { error: 'Gagal menghapus data dokumen: ' + friendlyError(deleteError, 'terjadi kesalahan pada server.', { context: 'Hapus data dokumen employee' }) },
         { status: 500 }
       );
     }

@@ -11,6 +11,7 @@ import { similarityPercent } from '@/lib/faceVerification';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { friendlyError } from '@/lib/errorMessage';
 
 function currentMonthValue() {
   const d = new Date();
@@ -52,7 +53,7 @@ export default function AbsensiReviewPanel({ supabase }) {
       .order('tanggal', { ascending: false });
 
     if (error) {
-      setLoadError(error.message || 'Gagal memuat data yang perlu direview. Pastikan migrasi geofencing sudah dijalankan.');
+      setLoadError(friendlyError(error, 'Gagal memuat data yang perlu direview. Pastikan migrasi geofencing sudah dijalankan.'));
       setLoading(false);
       return;
     }

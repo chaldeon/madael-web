@@ -39,7 +39,7 @@ const translations = {
     allDept: 'Semua Departemen',
     allLoc: 'Semua Lokasi',
     loading: 'Memuat lowongan...',
-    errorPrefix: 'Gagal memuat data: ',
+    errorLoad: 'Gagal memuat data. Silakan coba lagi.',
     empty: 'Belum ada lowongan yang sesuai filter.',
     closes: 'Deadline: ',
     viewDetail: 'Lihat Detail',
@@ -62,7 +62,7 @@ const translations = {
     allDept: 'All Departments',
     allLoc: 'All Locations',
     loading: 'Loading jobs...',
-    errorPrefix: 'Failed to load data: ',
+    errorLoad: 'Failed to load data. Please try again.',
     empty: 'No jobs match the current filter.',
     closes: 'Closes: ',
     viewDetail: 'View Detail',
@@ -101,7 +101,8 @@ export default function KarirPage() {
         .order('created_at', { ascending: false });
 
       if (error) {
-        setError(error.message);
+        console.error('Muat daftar lowongan publik:', error);
+        setError(true);
       } else {
         // Lowongan yang deadline-nya sudah lewat otomatis tidak ditampilkan.
         setJobs((data || []).filter((job) => !isPastDeadline(job)));
@@ -265,8 +266,7 @@ export default function KarirPage() {
 
           {error && (
             <p className="text-sm text-madael-red">
-              {t.errorPrefix}
-              {error}
+              {t.errorLoad}
             </p>
           )}
 

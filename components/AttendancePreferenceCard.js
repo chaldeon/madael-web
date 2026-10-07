@@ -8,6 +8,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { CheckCircle2 } from 'lucide-react';
+import { friendlyCaught } from '@/lib/errorMessage';
 
 export default function AttendancePreferenceCard() {
   const [pref, setPref] = useState(null); // { adminDefault, override, lewati, tersedia }
@@ -24,7 +25,7 @@ export default function AttendancePreferenceCard() {
       if (!res.ok) throw new Error(json.error || 'Gagal memuat preferensi absensi.');
       setPref(json);
     } catch (err) {
-      setLoadError(err.message || 'Gagal memuat preferensi absensi. Periksa koneksi internet kamu.');
+      setLoadError(friendlyCaught(err, 'Gagal memuat preferensi absensi. Periksa koneksi internet kamu.'));
     }
   }, []);
 
@@ -49,7 +50,7 @@ export default function AttendancePreferenceCard() {
       setPref(json);
       setSaved(true);
     } catch (err) {
-      setSaveError(err.message || 'Gagal menyimpan preferensi. Periksa koneksi internet kamu.');
+      setSaveError(friendlyCaught(err, 'Gagal menyimpan preferensi. Periksa koneksi internet kamu.'));
     } finally {
       setSaving(false);
     }

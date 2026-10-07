@@ -12,6 +12,7 @@ import { MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import { friendlyError } from '@/lib/errorMessage';
 
 const HARI_OPTIONS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
 const DEFAULT_HARI = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
@@ -60,7 +61,7 @@ export default function JadwalKerjaPage() {
 
     const firstError = empRes.error || schedRes.error;
     if (firstError) {
-      setLoadError(firstError.message || 'Gagal memuat data jadwal kerja.');
+      setLoadError(friendlyError(firstError, 'Gagal memuat data jadwal kerja.'));
       setLoading(false);
       return;
     }
@@ -121,7 +122,7 @@ export default function JadwalKerjaPage() {
 
     setSaving(false);
     if (error) {
-      setSaveError(error.message || 'Gagal menyimpan jadwal, coba lagi.');
+      setSaveError(friendlyError(error, 'Gagal menyimpan jadwal, coba lagi.'));
       return;
     }
     setSchedules((s) => ({ ...s, [editingEmp.id]: data }));

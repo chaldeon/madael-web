@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { MAX_ALASAN_TELAT } from '@/lib/attendanceStatus';
+import { friendlyCaught } from '@/lib/errorMessage';
 
 // Kotak "Alasan keterlambatan (opsional)" di layar Absensi karyawan.
 // Ditampilkan hanya kalau absensi hari ini berstatus telat (status_telat dihitung
@@ -53,7 +54,7 @@ export default function LateReasonBox({ row, onSaved }) {
       setEditing(false);
       onSaved?.(json.data);
     } catch (err) {
-      setError(err.message || 'Gagal menyimpan alasan. Periksa koneksi internet kamu.');
+      setError(friendlyCaught(err, 'Gagal menyimpan alasan. Periksa koneksi internet kamu.'));
     } finally {
       setSaving(false);
     }

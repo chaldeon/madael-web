@@ -11,6 +11,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { isTelatEfektif } from '@/lib/attendanceStatus';
+import { friendlyError } from '@/lib/errorMessage';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -106,7 +107,7 @@ export default function RekapAbsensiPage() {
 
     const firstError = empRes.error || schedRes.error || attRes.error;
     if (firstError) {
-      setLoadError(firstError.message || 'Gagal memuat data rekap.');
+      setLoadError(friendlyError(firstError, 'Gagal memuat data rekap.'));
       setLoading(false);
       return;
     }

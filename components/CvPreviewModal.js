@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Download, X } from 'lucide-react';
+import { friendlyCaught } from '@/lib/errorMessage';
 
 // Preview CV pelamar langsung di halaman (iframe), tanpa buka tab baru dan
 // tanpa akses Drive pribadi. PDF diambil lewat /api/applications/[id]/cv,
@@ -29,7 +30,7 @@ export default function CvPreviewModal({ applicationId, title, subtitle, onClose
         objectUrl = URL.createObjectURL(blob);
         setBlobUrl(objectUrl);
       } catch (err) {
-        if (err.name !== 'AbortError') setError(err.message || 'Gagal memuat CV.');
+        if (err.name !== 'AbortError') setError(friendlyCaught(err, 'Gagal memuat CV.'));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }

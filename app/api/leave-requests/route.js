@@ -8,6 +8,7 @@ import {
 } from '@/lib/leave';
 import { ambilKonteksCuti, cariCutiBentrok, formatTanggal } from '@/lib/leaveServer';
 import { uploadLeaveAttachmentToDrive, deleteEmployeeDocumentFromDrive } from '@/lib/googleDrive';
+import { friendlyError } from '@/lib/errorMessage';
 
 const MAKS_ALASAN = 500;
 
@@ -94,7 +95,7 @@ export async function POST(request) {
     const ctx = await ambilKonteksCuti(admin, emp.id);
     if (ctx.error) {
       console.error('Ajukan cuti — konteks error:', ctx.error);
-      return NextResponse.json({ error: `Gagal memuat data cuti: ${ctx.error.message}` }, { status: 500 });
+      return NextResponse.json({ error: `Gagal memuat data cuti: ${friendlyError(ctx.error, 'terjadi kesalahan pada server.', { context: 'Muat data cuti' })}` }, { status: 500 });
     }
 
     const jumlahHari = hitungHariKerja(tanggalMulai, tanggalSelesai, ctx.hariKerja);
@@ -118,7 +119,7 @@ export async function POST(request) {
       tanggalSelesai,
     });
     if (bentrokError) {
-      return NextResponse.json({ error: `Gagal memeriksa pengajuan lain: ${bentrokError.message}` }, { status: 500 });
+      return NextResponse.json({ error: `Gagal memeriksa pengajuan lain: ${friendlyError(bentrokError, 'terjadi kesalahan pada server.', { context: 'Cek pengajuan cuti bentrok' })}` }, { status: 500 });
     }
     if (bentrok) {
       return NextResponse.json(
@@ -145,7 +146,7 @@ export async function POST(request) {
         .gte('tanggal_mulai', `${tahun}-01-01`)
         .lte('tanggal_mulai', `${tahun}-12-31`);
       if (pendingError) {
-        return NextResponse.json({ error: `Gagal memeriksa kuota: ${pendingError.message}` }, { status: 500 });
+        return NextResponse.json({ error: `Gagal memeriksa kuota: ${friendlyError(pendingError, 'terjadi kesalahan pada server.', { context: 'Cek kuota cuti' })}` }, { status: 500 });
       }
 
       const hariPending = (pendingRows || []).reduce(
@@ -202,7 +203,7 @@ export async function POST(request) {
         }
       }
       console.error('Ajukan cuti error:', insertError);
-      return NextResponse.json({ error: `Gagal mengirim pengajuan cuti: ${insertError.message}` }, { status: 500 });
+      return NextResponse.json({ error: `Gagal mengirim pengajuan cuti: ${friendlyError(insertError, 'terjadi kesalahan pada server.', { context: 'Kirim pengajuan cuti' })}` }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, request: data, jumlahHari }, { status: 201 });

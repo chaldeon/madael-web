@@ -15,6 +15,7 @@ import CompletenessBadge from '@/components/employee-list/CompletenessBadge';
 import SortableHeader from '@/components/SortableHeader';
 import { emptyForm, TEMPLATE_URL, MODULE_GROUPS, PAGE_SIZE_OPTIONS, SORT_COLUMNS } from '@/lib/employeeListConfig';
 import { EXPLICIT_ONLY_MODULES } from '@/lib/employeeModules';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 
 export default function EmployeeListPage() {
   const supabase = createClient();
@@ -160,7 +161,7 @@ export default function EmployeeListPage() {
     const { data, error, count } = await query.range(from, to);
 
     if (error) {
-      setError(error.message);
+      setError(friendlyError(error, 'Gagal memuat data karyawan.'));
       setEmployees([]);
       setTotalCount(0);
       setMasterByEmployeeId({});
@@ -445,7 +446,7 @@ export default function EmployeeListPage() {
         setAccessModules((prev) => [...prev, moduleKey]);
       }
     } catch (err) {
-      setToast({ type: 'error', message: 'Terjadi kesalahan: ' + (err?.message || 'tidak diketahui') + '. Coba lagi.' });
+      setToast({ type: 'error', message: friendlyCaught(err, 'Terjadi kesalahan.') + ' Coba lagi.' });
     }
 
     setAccessSavingKey(null);

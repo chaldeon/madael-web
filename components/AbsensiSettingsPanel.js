@@ -10,6 +10,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
+import { friendlyCaught } from '@/lib/errorMessage';
 
 function formatDiubah(iso) {
   if (!iso) return null;
@@ -35,7 +36,7 @@ export default function AbsensiSettingsPanel() {
       if (!res.ok) throw new Error(json.error || 'Gagal memuat pengaturan absensi.');
       setData(json);
     } catch (err) {
-      setLoadError(err.message || 'Gagal memuat pengaturan absensi. Periksa koneksi internet kamu.');
+      setLoadError(friendlyCaught(err, 'Gagal memuat pengaturan absensi. Periksa koneksi internet kamu.'));
     } finally {
       setLoading(false);
     }
@@ -63,7 +64,7 @@ export default function AbsensiSettingsPanel() {
       setData((prev) => ({ ...prev, lewatiKonfirmasi: json.lewatiKonfirmasi, updatedAt: json.updatedAt }));
       setSaved(true);
     } catch (err) {
-      setSaveError(err.message || 'Gagal menyimpan pengaturan. Periksa koneksi internet kamu.');
+      setSaveError(friendlyCaught(err, 'Gagal menyimpan pengaturan. Periksa koneksi internet kamu.'));
     } finally {
       setSaving(false);
     }

@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase-browser';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import { formatRupiah } from '@/lib/format';
+import { friendlyError } from '@/lib/errorMessage';
 
 function calculateTHP(p) {
   const pendapatanTunai =
@@ -43,7 +44,7 @@ export default function PayslipListPage() {
       .maybeSingle();
 
     if (empError) {
-      setLoadError(empError.message || 'Gagal memuat data karyawan.');
+      setLoadError(friendlyError(empError, 'Gagal memuat data karyawan.'));
       setLoading(false);
       return;
     }
@@ -61,7 +62,7 @@ export default function PayslipListPage() {
       .order('periode', { ascending: false });
 
     if (slipsError) {
-      setLoadError(slipsError.message || 'Gagal memuat slip gaji.');
+      setLoadError(friendlyError(slipsError, 'Gagal memuat slip gaji.'));
       setLoading(false);
       return;
     }

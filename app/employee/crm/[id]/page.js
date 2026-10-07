@@ -9,6 +9,7 @@ import { ArrowLeft, Plus, X, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { formatRupiahOrDash } from '@/lib/format';
+import { friendlyError } from '@/lib/errorMessage';
 
 const STAGES = [
   'Prospek',
@@ -171,7 +172,7 @@ export default function ClientDetailPage() {
     ]);
 
     if (clientError || !clientData) {
-      setError(clientError?.message || 'Klien tidak ditemukan.');
+      setError(friendlyError(clientError, 'Klien tidak ditemukan.'));
       setLoading(false);
       return;
     }
@@ -248,7 +249,7 @@ export default function ClientDetailPage() {
     const { error } = await supabase.from('companies').update(payload).eq('id', clientId);
     setSavingEdit(false);
     if (error) {
-      alert('Gagal menyimpan: ' + error.message);
+      alert('Gagal menyimpan: ' + friendlyError(error, 'terjadi kesalahan.'));
       return;
     }
     setShowEditModal(false);
@@ -267,7 +268,7 @@ export default function ClientDetailPage() {
     const { error } = await supabase.from('companies').update({ stage: stageDraft }).eq('id', clientId);
     setSavingStage(false);
     if (error) {
-      alert('Gagal ganti stage: ' + error.message);
+      alert('Gagal ganti stage: ' + friendlyError(error, 'terjadi kesalahan.'));
       return;
     }
     setShowStageModal(false);
@@ -300,7 +301,7 @@ export default function ClientDetailPage() {
     const { error } = await supabase.from('client_activities').insert(payload);
     setSavingActivity(false);
     if (error) {
-      alert('Gagal menyimpan aktivitas: ' + error.message);
+      alert('Gagal menyimpan aktivitas: ' + friendlyError(error, 'terjadi kesalahan.'));
       return;
     }
     setShowActivityModal(false);
@@ -333,7 +334,7 @@ export default function ClientDetailPage() {
     const { error } = await supabase.from('client_projects').insert(payload);
     setSavingProject(false);
     if (error) {
-      alert('Gagal menyimpan project: ' + error.message);
+      alert('Gagal menyimpan project: ' + friendlyError(error, 'terjadi kesalahan.'));
       return;
     }
     setShowProjectModal(false);
@@ -361,7 +362,7 @@ export default function ClientDetailPage() {
     const { error } = await supabase.from('crm_deals').insert(payload);
     setSavingDeal(false);
     if (error) {
-      alert('Gagal menyimpan deal: ' + error.message);
+      alert('Gagal menyimpan deal: ' + friendlyError(error, 'terjadi kesalahan.'));
       return;
     }
     setShowDealModal(false);
@@ -374,7 +375,7 @@ export default function ClientDetailPage() {
     const { error } = await supabase.from('crm_deals').update({ stage: newStage, updated_at: new Date().toISOString() }).eq('id', dealId);
     if (error) {
       setDeals(prevDeals);
-      alert('Gagal update stage deal: ' + error.message);
+      alert('Gagal update stage deal: ' + friendlyError(error, 'terjadi kesalahan.'));
     }
   };
 

@@ -10,6 +10,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { formatRupiah } from '@/lib/format';
+import { friendlyError } from '@/lib/errorMessage';
 
 const KATEGORI_OPTIONS = [
   { value: 'transport', label: 'Transport' },
@@ -84,7 +85,7 @@ export default function ReimbursementPage() {
       .maybeSingle();
 
     if (empError || !emp) {
-      setLoadError(empError?.message || 'Data karyawan tidak ditemukan.');
+      setLoadError(friendlyError(empError, 'Data karyawan tidak ditemukan.'));
       setLoading(false);
       return;
     }
@@ -99,7 +100,7 @@ export default function ReimbursementPage() {
       .order('created_at', { ascending: false });
 
     if (error) {
-      setLoadError(error.message || 'Gagal memuat riwayat reimbursement.');
+      setLoadError(friendlyError(error, 'Gagal memuat riwayat reimbursement.'));
       setLoading(false);
       return;
     }
@@ -148,7 +149,7 @@ export default function ReimbursementPage() {
         .upload(buktiPath, file, { contentType: file.type || 'application/octet-stream' });
       if (uploadError) {
         setSubmitting(false);
-        setFormError(uploadError.message || 'Gagal upload bukti.');
+        setFormError(friendlyError(uploadError, 'Gagal upload bukti.'));
         return;
       }
     }
@@ -168,7 +169,7 @@ export default function ReimbursementPage() {
 
     setSubmitting(false);
     if (error) {
-      setFormError(error.message || 'Gagal mengirim klaim, coba lagi.');
+      setFormError(friendlyError(error, 'Gagal mengirim klaim, coba lagi.'));
       return;
     }
 

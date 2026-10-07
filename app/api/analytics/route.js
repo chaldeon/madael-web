@@ -134,7 +134,7 @@ export async function GET(request) {
   } catch (err) {
     console.error('GA analytics error:', err);
     return NextResponse.json(
-      { error: 'Gagal mengambil data Google Analytics', detail: err.message },
+      { error: 'Gagal mengambil data Google Analytics' },
       { status: 500 }
     );
   }

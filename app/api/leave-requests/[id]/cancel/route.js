@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { logActivity } from '@/lib/activityLog';
 import { notifySuperadmins } from '@/lib/notify';
+import { friendlyError } from '@/lib/errorMessage';
 
 const STATUS_LABEL = {
   approved: 'disetujui',
@@ -77,7 +78,7 @@ export async function POST(request, { params }) {
     if (updateError) {
       console.error('Batalkan cuti error:', updateError);
       return NextResponse.json(
-        { error: `Gagal membatalkan pengajuan cuti: ${updateError.message}` },
+        { error: `Gagal membatalkan pengajuan cuti: ${friendlyError(updateError, 'terjadi kesalahan pada server.', { context: 'Batalkan cuti' })}` },
         { status: 500 }
       );
     }

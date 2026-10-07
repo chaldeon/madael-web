@@ -19,6 +19,7 @@ import SortableHeader from '@/components/SortableHeader';
 import PayslipFormModal from '@/components/payslip-admin/PayslipFormModal';
 import { buildPeriodeLabel, previewNomorDokumen, NUMERIC_KEYS, EMPTY_FORM, calcTHP, SORT_COLUMNS } from '@/lib/payslipAdminConfig';
 import { formatRupiah } from '@/lib/format';
+import { friendlyError } from '@/lib/errorMessage';
 
 export default function PayslipAdminPage() {
   const supabase = createClient();
@@ -59,7 +60,7 @@ export default function PayslipAdminPage() {
     ]);
 
     if (slipsRes.error || empsRes.error) {
-      setLoadError((slipsRes.error || empsRes.error).message || 'Gagal memuat data slip gaji.');
+      setLoadError(friendlyError((slipsRes.error || empsRes.error), 'Gagal memuat data slip gaji.'));
       setLoading(false);
       return;
     }
@@ -181,7 +182,7 @@ export default function PayslipAdminPage() {
 
     setSaving(false);
     if (error) {
-      setSaveError(error.message || 'Gagal menyimpan, coba lagi.');
+      setSaveError(friendlyError(error, 'Gagal menyimpan, coba lagi.'));
       return;
     }
     setModalOpen(false);
@@ -196,7 +197,7 @@ export default function PayslipAdminPage() {
       .update({ is_published: willPublish })
       .eq('id', p.id);
     if (error) {
-      setActionError(`Gagal update status "${p.employees?.nama || 'slip ini'}": ${error.message}`);
+      setActionError(`Gagal update status "${p.employees?.nama || 'slip ini'}": ${friendlyError(error, 'terjadi kesalahan.')}`);
       return;
     }
 

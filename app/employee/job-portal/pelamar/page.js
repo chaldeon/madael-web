@@ -17,6 +17,7 @@ import CvPreviewModal from '@/components/CvPreviewModal';
 import BulkApplicantActions from '@/components/job-portal/BulkApplicantActions';
 import { findDuplicateApplications } from '@/lib/candidateDuplicates';
 import { MAX_TAG_LENGTH, normalizeTags } from '@/lib/talentPoolTags';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import {
   MESSAGE_TEMPLATES,
   TEMPLATE_STATUS,
@@ -413,7 +414,7 @@ export default function JobPortalCandidatesPage() {
         .select('job_id')
         .eq('employee_id', employeeId);
       if (mineError) {
-        setError(mineError.message);
+        setError(friendlyError(mineError, 'Gagal memuat data pelamar.'));
         setLoading(false);
         return;
       }
@@ -436,7 +437,7 @@ export default function JobPortalCandidatesPage() {
     const { data, error } = await query;
 
     if (error) {
-      setError(error.message);
+      setError(friendlyError(error, 'Gagal memuat data pelamar.'));
     } else {
       setApplications(data || []);
       const uniqueJobs = new Map();
@@ -457,7 +458,7 @@ export default function JobPortalCandidatesPage() {
     }
     const { data, error } = await supabase.from('applications').select('id, tags').is('job_id', null);
     if (error) {
-      setTagsLoadError(error.message);
+      setTagsLoadError(friendlyError(error, 'Gagal memuat tag.'));
       return;
     }
     setTagsLoadError(null);
@@ -659,7 +660,7 @@ export default function JobPortalCandidatesPage() {
       .single();
 
     if (error) {
-      setNoteError(error.message || 'Gagal menyimpan catatan.');
+      setNoteError(friendlyError(error, 'Gagal menyimpan catatan.'));
       setNoteSaving(false);
       return;
     }
@@ -777,7 +778,7 @@ export default function JobPortalCandidatesPage() {
       if (!res.ok) throw new Error(json.error || 'Gagal memuat riwayat pesan.');
       messages = json.messages || [];
     } catch (err) {
-      errMsg = err.message;
+      errMsg = friendlyCaught(err, 'Gagal memuat riwayat pesan.');
     }
     if (msgAppIdRef.current !== appId) return;
     setMsgHistory(messages);
@@ -859,7 +860,7 @@ export default function JobPortalCandidatesPage() {
       }
     } catch (err) {
       if (msgAppIdRef.current === appId) {
-        setMsgError(err.message);
+        setMsgError(friendlyCaught(err, 'Gagal mengirim pesan.'));
         loadMessageHistory(appId); // percobaan gagal ikut tercatat di server
       }
     }
@@ -889,7 +890,7 @@ export default function JobPortalCandidatesPage() {
         );
       })
       .catch((err) => {
-        if (msgAppIdRef.current === appId) setMsgError('WhatsApp dibuka, tetapi tidak tercatat di riwayat: ' + err.message);
+        if (msgAppIdRef.current === appId) setMsgError('WhatsApp dibuka, tetapi tidak tercatat di riwayat: ' + friendlyCaught(err, 'terjadi kesalahan.'));
       })
       .finally(() => setMsgSending(false));
   };
@@ -906,7 +907,7 @@ export default function JobPortalCandidatesPage() {
         setMsgHistory((prev) => prev.map((m) => (m.id === messageId ? json.message : m)));
       }
     } catch (err) {
-      if (msgAppIdRef.current === appId) setMsgError(err.message);
+      if (msgAppIdRef.current === appId) setMsgError(friendlyCaught(err, 'Gagal menyimpan konfirmasi.'));
     }
   };
 

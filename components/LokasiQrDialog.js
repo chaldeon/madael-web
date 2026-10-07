@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { X, Printer, RefreshCw } from 'lucide-react';
 import QRCode from 'qrcode';
+import { friendlyCaught } from '@/lib/errorMessage';
 
 function esc(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -38,7 +39,7 @@ export default function LokasiQrDialog({ loc, onClose, onChanged }) {
         if (!res.ok) throw new Error(json.error || 'Gagal memuat QR.');
         if (!cancelled) await applyInfo(json);
       } catch (err) {
-        if (!cancelled) setError(err.message || 'Gagal memuat QR.');
+        if (!cancelled) setError(friendlyCaught(err, 'Gagal memuat QR.'));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -60,7 +61,7 @@ export default function LokasiQrDialog({ loc, onClose, onChanged }) {
       await applyInfo(json);
       onChanged?.();
     } catch (err) {
-      setError(err.message || 'Gagal menyimpan perubahan QR.');
+      setError(friendlyCaught(err, 'Gagal menyimpan perubahan QR.'));
     } finally {
       setBusy(false);
     }

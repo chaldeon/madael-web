@@ -10,6 +10,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import LokasiQrDialog from '@/components/LokasiQrDialog';
+import { friendlyError } from '@/lib/errorMessage';
 
 const EMPTY_FORM = { nama: '', latitude: '', longitude: '', radius_meter: 150, aktif: true };
 
@@ -49,7 +50,7 @@ export default function LokasiKerjaManager({ supabase }) {
       supabase.from('employee_work_locations').select('work_location_id'),
     ]);
     if (locRes.error) {
-      setLoadError(locRes.error.message || 'Gagal memuat daftar lokasi kerja.');
+      setLoadError(friendlyError(locRes.error, 'Gagal memuat daftar lokasi kerja.'));
       setLoading(false);
       return;
     }
@@ -74,7 +75,7 @@ export default function LokasiKerjaManager({ supabase }) {
       .select('employee_id')
       .eq('work_location_id', loc.id);
     if (error) {
-      setAssignError(error.message || 'Gagal memuat karyawan yang sudah di-assign.');
+      setAssignError(friendlyError(error, 'Gagal memuat karyawan yang sudah di-assign.'));
       setAssignedIds(new Set());
     } else {
       setAssignedIds(new Set((data || []).map((r) => r.employee_id)));
@@ -101,7 +102,7 @@ export default function LokasiKerjaManager({ supabase }) {
     // & aman daripada diff manual, dan datanya kecil (per lokasi per karyawan).
     const del = await supabase.from('employee_work_locations').delete().eq('work_location_id', assigningLoc.id);
     if (del.error) {
-      setAssignError(del.error.message || 'Gagal menyimpan assignment.');
+      setAssignError(friendlyError(del.error, 'Gagal menyimpan assignment.'));
       setAssignSaving(false);
       return;
     }
@@ -113,7 +114,7 @@ export default function LokasiKerjaManager({ supabase }) {
     if (rows.length > 0) {
       const ins = await supabase.from('employee_work_locations').insert(rows);
       if (ins.error) {
-        setAssignError(ins.error.message || 'Gagal menyimpan assignment.');
+        setAssignError(friendlyError(ins.error, 'Gagal menyimpan assignment.'));
         setAssignSaving(false);
         return;
       }
@@ -197,7 +198,7 @@ export default function LokasiKerjaManager({ supabase }) {
 
     setSaving(false);
     if (error) {
-      setFormError(error.message || 'Gagal menyimpan lokasi.');
+      setFormError(friendlyError(error, 'Gagal menyimpan lokasi.'));
       return;
     }
 

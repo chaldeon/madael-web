@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { uploadInvoiceFileToDrive, deleteInvoiceFileFromDrive } from '@/lib/googleDrive';
+import { friendlyError } from '@/lib/errorMessage';
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_MIME = ['application/pdf'];
@@ -119,7 +120,7 @@ export async function POST(request, { params }) {
 
     if (updateError) {
       return NextResponse.json(
-        { error: 'File berhasil diupload, tetapi gagal menyimpan metadata: ' + updateError.message },
+        { error: 'File berhasil diupload, tetapi gagal menyimpan metadata: ' + friendlyError(updateError, 'terjadi kesalahan pada server.', { context: 'Simpan metadata lampiran invoice' }) },
         { status: 500 }
       );
     }
@@ -172,7 +173,7 @@ export async function DELETE(request, { params }) {
       .single();
 
     if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
+      return NextResponse.json({ error: friendlyError(updateError, 'Gagal menghapus lampiran invoice.', { context: 'Hapus lampiran invoice' }) }, { status: 500 });
     }
 
     return NextResponse.json({ invoice: updated });

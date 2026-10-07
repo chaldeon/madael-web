@@ -9,6 +9,7 @@ import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 
 const JENIS_LABEL = {
   PRO: 'Proposal',
@@ -444,7 +445,7 @@ export default function EditDocumentPage() {
       .maybeSingle();
 
     if (error) {
-      setLoadError(error.message || 'Gagal memuat data dokumen.');
+      setLoadError(friendlyError(error, 'Gagal memuat data dokumen.'));
       setLoading(false);
       return;
     }
@@ -512,11 +513,11 @@ export default function EditDocumentPage() {
         })
         .eq('id', docMeta.id);
 
-      if (updateError) throw new Error(updateError.message);
+      if (updateError) throw new Error(friendlyError(updateError, 'Gagal memperbarui dokumen.'));
 
       router.push(`/employee/documents/${docMeta.id}`);
     } catch (err) {
-      setError(err.message);
+      setError(friendlyCaught(err, 'Gagal memperbarui dokumen.'));
       setSaving(false);
     }
   };

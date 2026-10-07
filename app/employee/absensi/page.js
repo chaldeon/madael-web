@@ -22,6 +22,7 @@ import LiveClock from '@/components/LiveClock';
 import BreakControl from '@/components/BreakControl';
 import { getBreakState, durasiIstirahatMenit, formatDurasi } from '@/lib/attendanceBreak';
 import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -179,7 +180,7 @@ export default function AbsensiPage() {
 
     const firstError = attRes.error || leaveRes.error;
     if (firstError) {
-      setMonthError(firstError.message || 'Gagal memuat riwayat absensi. Periksa koneksi internet kamu.');
+      setMonthError(friendlyError(firstError, 'Gagal memuat riwayat absensi. Periksa koneksi internet kamu.'));
       setMonthLoading(false);
       return;
     }
@@ -284,7 +285,7 @@ export default function AbsensiPage() {
       setMyCorrections((prev) => [inserted, ...prev]);
       setShowKoreksiForm(false);
     } catch (err) {
-      setKoreksiError(err.message || 'Gagal mengirim pengajuan koreksi.');
+      setKoreksiError(friendlyCaught(err, 'Gagal mengirim pengajuan koreksi.'));
     } finally {
       setKoreksiSaving(false);
     }
