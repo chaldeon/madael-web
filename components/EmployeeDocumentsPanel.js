@@ -13,6 +13,8 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { friendlyError } from '@/lib/errorMessage';
+import Toast from '@/components/employee-list/Toast';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 const JENIS_OPTIONS = ['KTP', 'NPWP', 'Ijazah', 'Kontrak Kerja', 'Lainnya'];
 
@@ -33,6 +35,11 @@ export default function EmployeeDocumentsPanel({ supabase, employeeId, canUpload
   const [formError, setFormError] = useState(null);
 
   const [busyId, setBusyId] = useState(null); // dipakai buat tombol "Lihat" & "Hapus"
+  // Dokumen yang mau dihapus — membuka dialog konfirmasi (pengganti window.confirm()).
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  // Notifikasi non-blocking (pengganti alert()) — { type: 'error'|'success', message }
+  const [toast, setToast] = useState(null);
+  const dismissToast = useCallback(() => setToast(null), []);
 
   const loadDocs = useCallback(async () => {
     setLoading(true);
@@ -103,18 +110,23 @@ export default function EmployeeDocumentsPanel({ supabase, employeeId, canUpload
     const { data, error } = await supabase.storage.from('employee-documents').createSignedUrl(doc.file_path, 60 * 5);
     setBusyId(null);
     if (error || !data?.signedUrl) {
-      alert('Gagal membuka dokumen: ' + friendlyError(error, 'terjadi kesalahan.'));
+      setToast({ type: 'error', message: 'Gagal membuka dokumen: ' + friendlyError(error, 'terjadi kesalahan.') });
       return;
     }
     window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
   };
 
-  const handleDelete = async (doc) => {
-    if (!window.confirm(`Hapus dokumen "${doc.file_name}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+  const handleDelete = (doc) => setDeleteTarget(doc);
+
+  // Dialog tetap terbuka (tombol busy) selama penghapusan berjalan, lalu menutup.
+  const handleConfirmDelete = async () => {
+    const doc = deleteTarget;
+    if (!doc) return;
     setBusyId(doc.id);
     await supabase.storage.from('employee-documents').remove([doc.file_path]);
     await supabase.from('employee_documents').delete().eq('id', doc.id);
     setBusyId(null);
+    setDeleteTarget(null);
     loadDocs();
   };
 
@@ -123,6 +135,7 @@ export default function EmployeeDocumentsPanel({ supabase, employeeId, canUpload
 
   return (
     <div>
+      <Toast toast={toast} onDismiss={dismissToast} />
       {canUpload && (
         <div className="flex justify-end mb-4">
           <button
@@ -240,6 +253,16 @@ export default function EmployeeDocumentsPanel({ supabase, employeeId, canUpload
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Hapus Dokumen"
+        message={deleteTarget ? `Hapus dokumen "${deleteTarget.file_name}"? Tindakan ini tidak bisa dibatalkan.` : ''}
+        confirmLabel="Hapus"
+        busy={Boolean(deleteTarget) && busyId === deleteTarget.id}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

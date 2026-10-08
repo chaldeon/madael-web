@@ -12,6 +12,7 @@ import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import { friendlyError } from '@/lib/errorMessage';
 
 const EMPTY_FORM = { judul: '', isi: '', expired_at: '' };
@@ -55,6 +56,8 @@ export default function AnnouncementsAdminPage() {
 
   const [actingId, setActingId] = useState(null);
   const [actionError, setActionError] = useState(null);
+  // Pengumuman yang mau dihapus — membuka dialog konfirmasi (pengganti window.confirm()).
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -210,8 +213,13 @@ export default function AnnouncementsAdminPage() {
     });
   };
 
-  const handleDelete = async (row) => {
-    if (!window.confirm(`Hapus pengumuman "${row.judul}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+  const handleDelete = (row) => setDeleteTarget(row);
+
+  // Dialog tetap terbuka (tombol busy) selama penghapusan berjalan, lalu menutup.
+  // Kalau gagal, pesan error tampil inline lewat actionError seperti sebelumnya.
+  const handleConfirmDelete = async () => {
+    const row = deleteTarget;
+    if (!row) return;
 
     setActionError(null);
     setActingId(row.id);
@@ -219,6 +227,7 @@ export default function AnnouncementsAdminPage() {
     const { error } = await supabase.from('announcements').delete().eq('id', row.id);
 
     setActingId(null);
+    setDeleteTarget(null);
     if (error) {
       setActionError(friendlyError(error, 'Gagal menghapus pengumuman.'));
       return;
@@ -380,6 +389,16 @@ export default function AnnouncementsAdminPage() {
           })}
         </div>
       )}
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Hapus Pengumuman"
+        message={deleteTarget ? `Hapus pengumuman "${deleteTarget.judul}"? Tindakan ini tidak bisa dibatalkan.` : ''}
+        confirmLabel="Hapus"
+        busy={Boolean(deleteTarget) && actingId === deleteTarget.id}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
