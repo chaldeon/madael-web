@@ -17,6 +17,7 @@ import { isTelatEfektif } from '@/lib/attendanceStatus';
 import { formatRupiah } from '@/lib/format';
 import { isJobOpen } from '@/lib/jobStatus';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 const PERIODS = [
   { value: 'weekly', label: 'Mingguan' },
@@ -106,7 +107,10 @@ function HrAnalyticsSection({ supabase }) {
     const [empRes, masterRes, attendanceRes, runsRes] = await Promise.all([
       supabase.from('employees').select('id, status, created_at'),
       supabase.from('employees_master').select('status, linked_employee_id'),
-      supabase.from('attendance').select('tanggal, status_telat, justified').gte('tanggal', firstDay),
+      // Enam bulan absensi jauh melewati 1.000 baris (batas max-rows PostgREST).
+      fetchAllRows(() =>
+        supabase.from('attendance').select('tanggal, status_telat, justified').gte('tanggal', firstDay)
+      ),
       supabase.from('payroll_runs').select('id, periode').eq('status', 'Approved').gte('periode', months[0]),
     ]);
 
@@ -373,9 +377,12 @@ export default function StatisticsPage() {
     (async () => {
       setSupabaseLoading(true);
       const [{ data: apps }, { data: jobs }] = await Promise.all([
-        supabase
-          .from('applications')
-          .select('id, created_at, job_id, job_listings(title)'),
+        // Seluruh lamaran bisa > 1.000 baris (batas max-rows PostgREST): ambil semua halaman.
+        fetchAllRows(() =>
+          supabase
+            .from('applications')
+            .select('id, created_at, job_id, job_listings(title)')
+        ),
         supabase
           .from('job_listings')
           .select('id, title, is_active, closes_at'),

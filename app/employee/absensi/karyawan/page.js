@@ -22,6 +22,7 @@ import SortableHeader from '@/components/SortableHeader';
 import { parseToleransi, currentMonthValue, formatJam, formatTanggal, formatWaktu, countScheduledWorkdays, downloadRekapCsv, computeStatusTelat, HARI_OPTIONS, DEFAULT_HARI, EMPTY_JADWAL_FORM, JADWAL_SORT_COLUMNS, REKAP_SORT_COLUMNS, TABS } from '@/lib/absensiKaryawanConfig';
 import { durasiMenit, formatDurasi, scheduleFieldsFromTemplate, shiftLabel } from '@/lib/shifts';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 export default function SemuaKaryawanPage() {
   const supabase = createClient();
@@ -191,11 +192,15 @@ export default function SemuaKaryawanPage() {
     const lastDayNum = new Date(year, month, 0).getDate();
     const lastDay = `${monthValue}-${String(lastDayNum).padStart(2, '0')}`;
 
-    const { data, error } = await supabase
-      .from('attendance')
-      .select('employee_id, tanggal, clock_in, status_telat, justified')
-      .gte('tanggal', firstDay)
-      .lte('tanggal', lastDay);
+    // Sebulan penuh untuk semua karyawan bisa > 1.000 baris (batas max-rows
+    // PostgREST), jadi diambil per halaman sampai habis.
+    const { data, error } = await fetchAllRows(() =>
+      supabase
+        .from('attendance')
+        .select('employee_id, tanggal, clock_in, status_telat, justified')
+        .gte('tanggal', firstDay)
+        .lte('tanggal', lastDay)
+    );
 
     setRekapLoading(false);
     if (error) {

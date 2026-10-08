@@ -14,6 +14,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import { formatRupiah } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 const MADAEL_RED = '#C1272D';
 const STATUS_COLOR = { Draft: '#9CA3AF', Review: '#F59E0B', Approved: '#16A34A' };
@@ -129,10 +130,14 @@ export default function ReportsDashboardPage() {
     const months = last6Months();
     const firstDay = `${months[0]}-01`;
 
-    const { data, error } = await supabase
-      .from('attendance')
-      .select('tanggal')
-      .gte('tanggal', firstDay);
+    // Enam bulan absensi jauh melewati 1.000 baris (batas max-rows PostgREST),
+    // sehingga grafik tren akan kurang tanpa paginasi.
+    const { data, error } = await fetchAllRows(() =>
+      supabase
+        .from('attendance')
+        .select('tanggal')
+        .gte('tanggal', firstDay)
+    );
 
     if (error) {
       setTrendError(friendlyError(error, 'Gagal memuat tren kehadiran.'));

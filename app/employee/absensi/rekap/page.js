@@ -12,6 +12,7 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { isTelatEfektif } from '@/lib/attendanceStatus';
 import { friendlyError } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -98,11 +99,15 @@ export default function RekapAbsensiPage() {
         .eq('status', 'Aktif')
         .order('nama'),
       supabase.from('work_schedule').select('*'),
-      supabase
-        .from('attendance')
-        .select('employee_id, tanggal, clock_in, status_telat, justified')
-        .gte('tanggal', firstDay)
-        .lte('tanggal', lastDay),
+      // Sebulan penuh untuk semua karyawan bisa > 1.000 baris (batas max-rows
+      // PostgREST), jadi diambil per halaman sampai habis.
+      fetchAllRows(() =>
+        supabase
+          .from('attendance')
+          .select('employee_id, tanggal, clock_in, status_telat, justified')
+          .gte('tanggal', firstDay)
+          .lte('tanggal', lastDay)
+      ),
     ]);
 
     const firstError = empRes.error || schedRes.error || attRes.error;
