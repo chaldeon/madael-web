@@ -13,6 +13,8 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { formatRupiahOrDash } from '@/lib/format';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import Toast from '@/components/employee-list/Toast';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 const DOKUMEN_OPTIONS = ['KTP', 'PKWT', 'Ijazah', 'Lainnya'];
 
@@ -56,6 +58,11 @@ export default function EmployeeDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  // Dokumen yang mau dihapus — membuka dialog konfirmasi (pengganti confirm()).
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
+  // Notifikasi non-blocking (pengganti alert()) — { type: 'error'|'success', message }
+  const [toast, setToast] = useState(null);
+  const dismissToast = useCallback(() => setToast(null), []);
 
   const isSuperadmin = !!actingEmployee?.is_superadmin;
 
@@ -150,8 +157,12 @@ export default function EmployeeDetailPage() {
     }
   };
 
-  const handleDelete = async (docId) => {
-    if (!confirm('Hapus dokumen ini? File di Google Drive juga akan dihapus.')) return;
+  const handleDelete = (docId) => setDeleteTargetId(docId);
+
+  // Dialog tetap terbuka (tombol busy) selama penghapusan berjalan, lalu menutup.
+  const handleConfirmDelete = async () => {
+    const docId = deleteTargetId;
+    if (!docId) return;
     setDeletingId(docId);
     try {
       const res = await fetch(`/api/employee/${params.id}/documents?docId=${docId}`, { method: 'DELETE' });
@@ -159,9 +170,10 @@ export default function EmployeeDetailPage() {
       if (!res.ok) throw new Error(data.error || 'Gagal menghapus dokumen.');
       setDocuments((prev) => prev.filter((d) => d.id !== docId));
     } catch (err) {
-      alert(friendlyCaught(err, 'Gagal menghapus dokumen.'));
+      setToast({ type: 'error', message: friendlyCaught(err, 'Gagal menghapus dokumen.') });
     } finally {
       setDeletingId(null);
+      setDeleteTargetId(null);
     }
   };
 
@@ -215,6 +227,7 @@ export default function EmployeeDetailPage() {
 
   return (
     <div className="max-w-[900px] mx-auto px-6 py-10">
+      <Toast toast={toast} onDismiss={dismissToast} />
       <Link href="/employee/payroll" className="inline-flex items-center gap-1.5 text-sm text-[#6B6B6B] hover:text-madael-red transition-colors mb-6">
         <ArrowLeft size={15} /> Kembali ke Payroll
       </Link>
@@ -349,6 +362,16 @@ export default function EmployeeDetailPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(deleteTargetId)}
+        title="Hapus Dokumen"
+        message="Hapus dokumen ini? File di Google Drive juga akan dihapus."
+        confirmLabel="Hapus"
+        busy={Boolean(deleteTargetId) && deletingId === deleteTargetId}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteTargetId(null)}
+      />
     </div>
   );
 }

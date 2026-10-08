@@ -18,6 +18,11 @@ import BulkApplicantActions from '@/components/job-portal/BulkApplicantActions';
 import { findDuplicateApplications } from '@/lib/candidateDuplicates';
 import { MAX_TAG_LENGTH, normalizeTags } from '@/lib/talentPoolTags';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import Toast from '@/components/employee-list/Toast';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
+import EmptyState from '@/components/EmptyState';
 import {
   MESSAGE_TEMPLATES,
   TEMPLATE_STATUS,
@@ -336,6 +341,9 @@ export default function JobPortalCandidatesPage() {
   const [jobOptions, setJobOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Notifikasi non-blocking (pengganti alert()) — { type: 'error'|'success', message }
+  const [toast, setToast] = useState(null);
+  const dismissToast = useCallback(() => setToast(null), []);
   const [filterJob, setFilterJob] = useState(posisiParam);
   const [filterStatus, setFilterStatus] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -555,7 +563,7 @@ export default function JobPortalCandidatesPage() {
     const res = await requestStatusChange(current, newStatus);
     setUpdatingId(null);
     if (res.error) {
-      alert('Gagal update status: ' + res.error);
+      setToast({ type: 'error', message: 'Gagal update status: ' + res.error });
       return;
     }
     // Begitu status masuk "Interview" dan belum ada jadwal, langsung buka
@@ -763,6 +771,9 @@ export default function JobPortalCandidatesPage() {
   const [msgSending, setMsgSending] = useState(false);
   const [msgError, setMsgError] = useState(null);
   const [msgNotice, setMsgNotice] = useState(null);
+  // Kirim yang ditahan karena template tidak cocok dengan status pelamar: menyimpan
+  // channel-nya ('email' | 'whatsapp') sambil menunggu konfirmasi lewat dialog.
+  const [mismatchChannel, setMismatchChannel] = useState(null);
   const msgAppIdRef = useRef(null); // buang respons riwayat yang basi kalau modal sudah ganti/tutup
 
   const msgApp = msgAppId ? applications.find((a) => a.id === msgAppId) || null : null;
@@ -801,6 +812,7 @@ export default function JobPortalCandidatesPage() {
   const closeMessages = () => {
     msgAppIdRef.current = null;
     setMsgAppId(null);
+    setMismatchChannel(null);
   };
 
   // Nilai turunan untuk modal pesan
@@ -823,13 +835,9 @@ export default function JobPortalCandidatesPage() {
   const msgWaUrl = msgWaPhone && !msgBlocked ? buildWaLink(msgWaPhone, msgWaText) : null;
 
   // Template yang tidak sesuai status sekarang (mis. "Diterima" untuk pelamar
-  // berstatus Review) sering salah klik — minta konfirmasi dulu.
-  const confirmStatusMismatch = () =>
-    !msgStatusMismatch ||
-    window.confirm(
-      `Status pelamar saat ini "${msgApp.status}", sedangkan template "${getTemplateLabel(msgTemplate)}" ` +
-        `biasanya untuk status "${TEMPLATE_STATUS[msgTemplate]}". Tetap kirim?`
-    );
+  // berstatus Review) sering salah klik — minta konfirmasi dulu lewat dialog.
+  // Pengiriman ditahan (mismatchChannel) dan baru dikerjakan di
+  // handleConfirmMismatch setelah HR menekan "Tetap Kirim".
 
   const postMessage = async (channel) => {
     const res = await fetch(`/api/applications/${msgApp.id}/messages`, {
@@ -842,8 +850,16 @@ export default function JobPortalCandidatesPage() {
     return json;
   };
 
-  const handleSendEmail = async () => {
-    if (!msgApp || msgSending || !confirmStatusMismatch()) return;
+  const handleSendEmail = () => {
+    if (!msgApp || msgSending) return;
+    if (msgStatusMismatch) {
+      setMismatchChannel('email');
+      return;
+    }
+    sendEmail();
+  };
+
+  const sendEmail = async () => {
     const appId = msgApp.id;
     setMsgSending(true);
     setMsgError(null);
@@ -871,10 +887,23 @@ export default function JobPortalCandidatesPage() {
   // supaya tidak diblokir popup blocker. Pencatatan berjalan paralel saat klik.
   const handleWhatsAppClick = (e) => {
     if (!msgApp || !msgWaUrl) return;
-    if (msgSending || !confirmStatusMismatch()) {
+    if (msgSending) {
       e.preventDefault();
       return;
     }
+    if (msgStatusMismatch) {
+      // Tahan dulu: tab WhatsApp baru dibuka setelah dialog dikonfirmasi
+      // (handleConfirmMismatch), bukan oleh klik pada link ini.
+      e.preventDefault();
+      setMismatchChannel('whatsapp');
+      return;
+    }
+    logWhatsAppSend();
+  };
+
+  // Pencatatan riwayat untuk pengiriman WhatsApp; dipanggil saat link diklik
+  // (tanpa mismatch) atau setelah dialog konfirmasi.
+  const logWhatsAppSend = () => {
     const appId = msgApp.id;
     setMsgSending(true);
     setMsgError(null);
@@ -893,6 +922,20 @@ export default function JobPortalCandidatesPage() {
         if (msgAppIdRef.current === appId) setMsgError('WhatsApp dibuka, tetapi tidak tercatat di riwayat: ' + friendlyCaught(err, 'terjadi kesalahan.'));
       })
       .finally(() => setMsgSending(false));
+  };
+
+  const handleConfirmMismatch = () => {
+    const channel = mismatchChannel;
+    setMismatchChannel(null);
+    if (!msgApp) return;
+    if (channel === 'email') {
+      sendEmail();
+    } else if (channel === 'whatsapp' && msgWaUrl) {
+      // Dibuka langsung dari handler klik tombol dialog (masih gesture pengguna)
+      // supaya tidak diblokir popup blocker, sama seperti link aslinya.
+      window.open(msgWaUrl, '_blank', 'noopener,noreferrer');
+      logWhatsAppSend();
+    }
   };
 
   const handleConfirmWhatsApp = async (messageId) => {
@@ -1088,6 +1131,7 @@ export default function JobPortalCandidatesPage() {
 
   return (
     <div className="max-w-[1200px] mx-auto px-6 py-10">
+      <Toast toast={toast} onDismiss={dismissToast} />
       <div className="flex items-end justify-between mb-8 flex-wrap gap-4">
         <div>
           <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
@@ -1205,11 +1249,11 @@ export default function JobPortalCandidatesPage() {
 
       <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
         {loading ? (
-          <p className="text-sm text-[#6B6B6B] p-6">Memuat data...</p>
+          <LoadingState label="Memuat data..." />
         ) : error ? (
-          <p className="text-sm text-madael-red p-6">Gagal memuat data: {error}</p>
+          <ErrorState message={`Gagal memuat data: ${error}`} onRetry={fetchApplications} />
         ) : filtered.length === 0 ? (
-          <p className="text-sm text-[#6B6B6B] p-6">{searchTerms.length > 0 ? `Tidak ada pelamar yang cocok dengan pencarian "${searchQuery.trim()}".` : 'Tidak ada pelamar yang cocok dengan filter.'}</p>
+          <EmptyState message={searchTerms.length > 0 ? `Tidak ada pelamar yang cocok dengan pencarian "${searchQuery.trim()}".` : 'Tidak ada pelamar yang cocok dengan filter.'} />
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -1864,6 +1908,22 @@ export default function JobPortalCandidatesPage() {
           </div>
         </div>
       )}
+
+      {/* Konfirmasi kirim pesan saat template tidak cocok dengan status pelamar
+          — sebelumnya window.confirm(). */}
+      <ConfirmDialog
+        open={Boolean(mismatchChannel && msgApp)}
+        title="Template Tidak Sesuai Status"
+        message={
+          msgApp
+            ? `Status pelamar saat ini "${msgApp.status}", sedangkan template "${getTemplateLabel(msgTemplate)}" ` +
+              `biasanya untuk status "${TEMPLATE_STATUS[msgTemplate]}". Tetap kirim?`
+            : ''
+        }
+        confirmLabel="Tetap Kirim"
+        onConfirm={handleConfirmMismatch}
+        onCancel={() => setMismatchChannel(null)}
+      />
     </div>
   );
 }

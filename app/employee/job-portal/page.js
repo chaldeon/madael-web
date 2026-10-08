@@ -12,6 +12,10 @@ import { logActivity } from '@/lib/activityLog';
 import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import JobReviewersPanel from '@/components/job-portal/JobReviewersPanel';
 import { friendlyError } from '@/lib/errorMessage';
+import Toast from '@/components/employee-list/Toast';
+import LoadingState from '@/components/LoadingState';
+import ErrorState from '@/components/ErrorState';
+import EmptyState from '@/components/EmptyState';
 
 const emptyForm = {
   title: '',
@@ -167,6 +171,9 @@ export default function JobPortalLowonganPage() {
   const [applicantCounts, setApplicantCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Notifikasi non-blocking (pengganti alert()) — { type: 'error'|'success', message }
+  const [toast, setToast] = useState(null);
+  const dismissToast = useCallback(() => setToast(null), []);
 
   // openId: null (tertutup semua) | 'new' (form create) | <job.id> (form edit row itu)
   const [openId, setOpenId] = useState(null);
@@ -481,7 +488,7 @@ export default function JobPortalLowonganPage() {
         ke: job.is_active ? 'nonaktif' : 'aktif',
       });
     } else {
-      alert('Gagal mengubah status: ' + friendlyError(error, 'terjadi kesalahan.'));
+      setToast({ type: 'error', message: 'Gagal mengubah status: ' + friendlyError(error, 'terjadi kesalahan.') });
     }
     setTogglingId(null);
   };
@@ -516,7 +523,7 @@ export default function JobPortalLowonganPage() {
     const { error } = await supabase.from('job_listings').insert([payload]);
 
     if (error) {
-      alert('Gagal menduplikat lowongan: ' + friendlyError(error, 'terjadi kesalahan.'));
+      setToast({ type: 'error', message: 'Gagal menduplikat lowongan: ' + friendlyError(error, 'terjadi kesalahan.') });
     } else {
       logJobActivity('duplikat_lowongan', null, {
         judul: payload.title,
@@ -860,6 +867,7 @@ export default function JobPortalLowonganPage() {
 
   return (
     <div className="max-w-[1100px] mx-auto px-6 py-10">
+      <Toast toast={toast} onDismiss={dismissToast} />
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">
@@ -893,15 +901,17 @@ export default function JobPortalLowonganPage() {
 
         <div className="overflow-x-auto">
           {loading ? (
-            <p className="text-sm text-[#6B6B6B] p-6">Memuat data...</p>
+            <LoadingState label="Memuat data..." />
           ) : error ? (
-            <p className="text-sm text-madael-red p-6">Gagal memuat data: {error}</p>
+            <ErrorState message={`Gagal memuat data: ${error}`} onRetry={fetchData} />
           ) : listings.length === 0 ? (
-            <p className="text-sm text-[#6B6B6B] p-6">
-              {scoped
-                ? 'Belum ada lowongan yang di-assign ke kamu. Hubungi pengelola Job Portal untuk di-assign sebagai reviewer.'
-                : 'Belum ada lowongan.'}
-            </p>
+            <EmptyState
+              message={
+                scoped
+                  ? 'Belum ada lowongan yang di-assign ke kamu. Hubungi pengelola Job Portal untuk di-assign sebagai reviewer.'
+                  : 'Belum ada lowongan.'
+              }
+            />
           ) : (
             <table className="w-full text-sm">
               <thead>

@@ -8,6 +8,7 @@ import { X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { friendlyError } from '@/lib/errorMessage';
+import Toast from '@/components/employee-list/Toast';
 
 // Sengaja pakai vocabulary stage yang sama dengan Kanban Perusahaan yang
 // sudah ada (bukan daftar stage baru), biar konsisten buat tim.
@@ -75,6 +76,9 @@ export default function CrmDealsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
 
+  // Notifikasi non-blocking (pengganti alert()) — { type: 'error'|'success', message }
+  const [toast, setToast] = useState(null);
+  const dismissToast = useCallback(() => setToast(null), []);
   const [draggedId, setDraggedId] = useState(null);
   const [dragOverStage, setDragOverStage] = useState(null);
 
@@ -134,7 +138,7 @@ export default function CrmDealsPage() {
     const { error } = await supabase.from('crm_deals').update({ stage: newStage, updated_at: new Date().toISOString() }).eq('id', dealId);
     if (error) {
       setDeals(prev);
-      alert('Gagal update stage: ' + friendlyError(error, 'terjadi kesalahan.'));
+      setToast({ type: 'error', message: 'Gagal update stage: ' + friendlyError(error, 'terjadi kesalahan.') });
     }
   };
 
@@ -208,6 +212,7 @@ export default function CrmDealsPage() {
 
   return (
     <div className="max-w-[1400px] mx-auto px-6 py-8">
+      <Toast toast={toast} onDismiss={dismissToast} />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold text-black">Pipeline Deal</h1>

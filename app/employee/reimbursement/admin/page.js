@@ -14,6 +14,8 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { formatRupiah } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
+import Toast from '@/components/employee-list/Toast';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 function formatTanggal(value) {
   if (!value) return '—';
@@ -46,6 +48,13 @@ export default function ReimbursementAdminPage() {
   const [loadError, setLoadError] = useState(null);
   const [actingId, setActingId] = useState(null);
   const [actionError, setActionError] = useState(null);
+  // Notifikasi non-blocking (pengganti alert()) — { type: 'error'|'success', message }
+  const [toast, setToast] = useState(null);
+  const dismissToast = useCallback(() => setToast(null), []);
+  // Dialog alasan penolakan / catatan "dibayar" (pengganti window.prompt()):
+  // { kind: 'reject' | 'paid', row } atau null. Teks isian tetap opsional.
+  const [dialog, setDialog] = useState(null);
+  const [dialogText, setDialogText] = useState('');
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -94,14 +103,19 @@ export default function ReimbursementAdminPage() {
     [requests]
   );
 
-  const handleDecision = async (row, decision) => {
-    setActionError(null);
-
-    let rejectionReason = null;
+  // Menyetujui langsung jalan; menolak lebih dulu membuka dialog alasan
+  // (opsional) yang kemudian memanggil submitDecision.
+  const handleDecision = (row, decision) => {
     if (decision === 'rejected') {
-      rejectionReason = window.prompt('Alasan penolakan (opsional):') || null;
+      setDialogText('');
+      setDialog({ kind: 'reject', row });
+      return;
     }
+    submitDecision(row, decision, null);
+  };
 
+  const submitDecision = async (row, decision, rejectionReason) => {
+    setActionError(null);
     setActingId(row.id);
     const { data, error } = await supabase
       .from('reimbursement_requests')
@@ -141,13 +155,12 @@ export default function ReimbursementAdminPage() {
 
   // Ditandai setelah admin secara manual memasukkan nominal klaim ke field
   // Kompensasi di payroll run karyawan terkait — lihat catatan totalSiapDibayar.
-  const handleMarkPaid = async (row) => {
-    const note = window.prompt(
-      'Catatan (opsional) — mis. periode payroll run tempat klaim ini dimasukkan:',
-      ''
-    );
-    if (note === null) return; // user cancel
+  const handleMarkPaid = (row) => {
+    setDialogText('');
+    setDialog({ kind: 'paid', row });
+  };
 
+  const submitMarkPaid = async (row, note) => {
     setActionError(null);
     setActingId(row.id);
     const { data, error } = await supabase
@@ -173,11 +186,29 @@ export default function ReimbursementAdminPage() {
     });
   };
 
+  const closeDialog = () => setDialog(null);
+
+  // Dialog tetap terbuka (tombol busy) selama update berjalan, lalu menutup.
+  // Kolom alasan/catatan tetap opsional seperti sebelumnya (kosong → null).
+  const handleDialogConfirm = async () => {
+    if (!dialog) return;
+    const text = dialogText || null;
+    try {
+      if (dialog.kind === 'reject') {
+        await submitDecision(dialog.row, 'rejected', text);
+      } else {
+        await submitMarkPaid(dialog.row, text);
+      }
+    } finally {
+      setDialog(null);
+    }
+  };
+
   const handleViewBukti = async (row) => {
     if (!row.bukti_path) return;
     const { data, error } = await supabase.storage.from('reimbursement-bukti').createSignedUrl(row.bukti_path, 60 * 5);
     if (error || !data?.signedUrl) {
-      alert('Gagal membuka bukti: ' + friendlyError(error, 'terjadi kesalahan.'));
+      setToast({ type: 'error', message: 'Gagal membuka bukti: ' + friendlyError(error, 'terjadi kesalahan.') });
       return;
     }
     window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
@@ -220,6 +251,7 @@ export default function ReimbursementAdminPage() {
 
   return (
     <div className="max-w-[1000px] mx-auto px-6 py-10">
+      <Toast toast={toast} onDismiss={dismissToast} />
       <div className="mb-6">
         <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Kelola Reimbursement</h1>
         <p className="text-sm text-[#6B6B6B] mt-1">Tinjau dan setujui/tolak klaim reimbursement karyawan.</p>
@@ -341,6 +373,29 @@ export default function ReimbursementAdminPage() {
           </table>
         </div>
       )}
+
+      {/* Alasan penolakan / catatan "dibayar" — sebelumnya window.prompt().
+          Isiannya tetap opsional. */}
+      <ConfirmDialog
+        open={Boolean(dialog)}
+        title={dialog?.kind === 'reject' ? 'Tolak Klaim' : 'Tandai Dibayar'}
+        message={
+          dialog
+            ? `${dialog.kind === 'reject' ? 'Tolak' : 'Tandai sudah dibayar:'} klaim ${empById[dialog.row.employee_id]?.nama || 'karyawan'} sebesar ${formatRupiah(dialog.row.jumlah)}${dialog.kind === 'reject' ? '?' : '.'}`
+            : ''
+        }
+        inputLabel={
+          dialog?.kind === 'reject'
+            ? 'Alasan penolakan (opsional)'
+            : 'Catatan (opsional) — mis. periode payroll run tempat klaim ini dimasukkan'
+        }
+        value={dialogText}
+        onChange={setDialogText}
+        confirmLabel={dialog?.kind === 'reject' ? 'Tolak' : 'Tandai Dibayar'}
+        busy={Boolean(dialog) && actingId === dialog.row.id}
+        onConfirm={handleDialogConfirm}
+        onCancel={closeDialog}
+      />
     </div>
   );
 }

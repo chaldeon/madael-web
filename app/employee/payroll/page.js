@@ -11,6 +11,7 @@ import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 import SortableHeader from '@/components/SortableHeader';
 import EmployeeModal from '@/components/payroll/EmployeeModal';
@@ -44,6 +45,8 @@ export default function PayrollManagerPage() {
 
   const [attachingId, setAttachingId] = useState(null);
   const [attachError, setAttachError] = useState(null);
+  // Row yang dokumennya mau dihapus — membuka dialog konfirmasi (pengganti confirm()).
+  const [removeTarget, setRemoveTarget] = useState(null);
 
   // Id employee (superadmin) yang lagi login — dipakai untuk activity log,
   // bukan untuk gating akses (itu sudah ditangani PayrollLayout).
@@ -244,8 +247,13 @@ export default function PayrollManagerPage() {
     }
   };
 
-  const handleRemoveAttach = async (row) => {
-    if (!confirm('Hapus dokumen ini? File di Google Drive juga akan dihapus.')) return;
+  const handleRemoveAttach = (row) => setRemoveTarget(row);
+
+  // Dialog tetap terbuka (tombol busy) selama penghapusan berjalan, lalu menutup.
+  // Kalau gagal, pesan error tampil inline lewat attachError seperti sebelumnya.
+  const handleConfirmRemoveAttach = async () => {
+    const row = removeTarget;
+    if (!row) return;
 
     setAttachError(null);
     setAttachingId(row.id);
@@ -259,6 +267,7 @@ export default function PayrollManagerPage() {
       setAttachError(friendlyCaught(err, 'Gagal menghapus dokumen.'));
     } finally {
       setAttachingId(null);
+      setRemoveTarget(null);
     }
   };
 
@@ -452,6 +461,16 @@ export default function PayrollManagerPage() {
           onClose={() => setHitungRow(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={Boolean(removeTarget)}
+        title="Hapus Dokumen"
+        message="Hapus dokumen ini? File di Google Drive juga akan dihapus."
+        confirmLabel="Hapus"
+        busy={Boolean(removeTarget) && attachingId === removeTarget.id}
+        onConfirm={handleConfirmRemoveAttach}
+        onCancel={() => setRemoveTarget(null)}
+      />
     </div>
   );
 }

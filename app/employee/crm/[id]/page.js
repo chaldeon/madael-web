@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { formatRupiahOrDash } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
+import Toast from '@/components/employee-list/Toast';
 
 const STAGES = [
   'Prospek',
@@ -89,6 +90,10 @@ export default function ClientDetailPage() {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Notifikasi non-blocking (pengganti alert()) — { type: 'error'|'success', message }
+  const [toast, setToast] = useState(null);
+  const dismissToast = useCallback(() => setToast(null), []);
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState(null);
@@ -225,7 +230,7 @@ export default function ClientDetailPage() {
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     if (editForm.tipe.length === 0) {
-      alert('Pilih minimal satu tipe perusahaan (client/vendor/partner/prospect).');
+      setToast({ type: 'error', message: 'Pilih minimal satu tipe perusahaan (client/vendor/partner/prospect).' });
       return;
     }
     setSavingEdit(true);
@@ -249,7 +254,7 @@ export default function ClientDetailPage() {
     const { error } = await supabase.from('companies').update(payload).eq('id', clientId);
     setSavingEdit(false);
     if (error) {
-      alert('Gagal menyimpan: ' + friendlyError(error, 'terjadi kesalahan.'));
+      setToast({ type: 'error', message: 'Gagal menyimpan: ' + friendlyError(error, 'terjadi kesalahan.') });
       return;
     }
     setShowEditModal(false);
@@ -268,7 +273,7 @@ export default function ClientDetailPage() {
     const { error } = await supabase.from('companies').update({ stage: stageDraft }).eq('id', clientId);
     setSavingStage(false);
     if (error) {
-      alert('Gagal ganti stage: ' + friendlyError(error, 'terjadi kesalahan.'));
+      setToast({ type: 'error', message: 'Gagal ganti stage: ' + friendlyError(error, 'terjadi kesalahan.') });
       return;
     }
     setShowStageModal(false);
@@ -301,7 +306,7 @@ export default function ClientDetailPage() {
     const { error } = await supabase.from('client_activities').insert(payload);
     setSavingActivity(false);
     if (error) {
-      alert('Gagal menyimpan aktivitas: ' + friendlyError(error, 'terjadi kesalahan.'));
+      setToast({ type: 'error', message: 'Gagal menyimpan aktivitas: ' + friendlyError(error, 'terjadi kesalahan.') });
       return;
     }
     setShowActivityModal(false);
@@ -334,7 +339,7 @@ export default function ClientDetailPage() {
     const { error } = await supabase.from('client_projects').insert(payload);
     setSavingProject(false);
     if (error) {
-      alert('Gagal menyimpan project: ' + friendlyError(error, 'terjadi kesalahan.'));
+      setToast({ type: 'error', message: 'Gagal menyimpan project: ' + friendlyError(error, 'terjadi kesalahan.') });
       return;
     }
     setShowProjectModal(false);
@@ -362,7 +367,7 @@ export default function ClientDetailPage() {
     const { error } = await supabase.from('crm_deals').insert(payload);
     setSavingDeal(false);
     if (error) {
-      alert('Gagal menyimpan deal: ' + friendlyError(error, 'terjadi kesalahan.'));
+      setToast({ type: 'error', message: 'Gagal menyimpan deal: ' + friendlyError(error, 'terjadi kesalahan.') });
       return;
     }
     setShowDealModal(false);
@@ -375,7 +380,7 @@ export default function ClientDetailPage() {
     const { error } = await supabase.from('crm_deals').update({ stage: newStage, updated_at: new Date().toISOString() }).eq('id', dealId);
     if (error) {
       setDeals(prevDeals);
-      alert('Gagal update stage deal: ' + friendlyError(error, 'terjadi kesalahan.'));
+      setToast({ type: 'error', message: 'Gagal update stage deal: ' + friendlyError(error, 'terjadi kesalahan.') });
     }
   };
 
@@ -394,6 +399,7 @@ export default function ClientDetailPage() {
 
   return (
     <div className="max-w-[1200px] mx-auto px-6 py-10">
+      <Toast toast={toast} onDismiss={dismissToast} />
       <Link href="/employee/crm" className="inline-flex items-center gap-1.5 text-sm text-[#6B6B6B] hover:text-black mb-6">
         <ArrowLeft size={14} /> Kembali ke CRM
       </Link>
