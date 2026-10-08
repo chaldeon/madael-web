@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { Search, User, FileText, Receipt } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { sanitizeSearchTerm } from '@/lib/searchTerm';
 
 const MIN_QUERY_LENGTH = 2;
 const DEBOUNCE_MS = 300;
@@ -93,16 +94,29 @@ export default function GlobalSearchBar() {
         documents: docRes.error ? [] : (docRes.data || []),
       });
 
-      // Kalau employees & documents (dua-duanya tabel wajib) gagal, itu baru
-      // dianggap error beneran — invoices sengaja tidak dihitung karena opsional.
-      setSearchError(empRes.error && docRes.error ? 'Gagal melakukan pencarian.' : null);
+      // Karyawan & dokumen adalah tabel wajib: kegagalan salah satunya diberi
+      // tahu ke user (hasil sumber lain tetap tampil), supaya hasil kosong
+      // karena error tidak terlihat seperti "tidak ada data". Invoice sengaja
+      // tidak dihitung karena tabelnya opsional.
+      if (empRes.error) console.error('Pencarian global (karyawan):', empRes.error);
+      if (docRes.error) console.error('Pencarian global (dokumen):', docRes.error);
+
+      let message = null;
+      if (empRes.error && docRes.error) message = 'Gagal melakukan pencarian.';
+      else if (empRes.error) message = 'Pencarian karyawan gagal.';
+      else if (docRes.error) message = 'Pencarian dokumen gagal.';
+
+      setSearchError(message);
       setLoading(false);
     },
     [supabase]
   );
 
   useEffect(() => {
-    const q = query.trim();
+    // Query ke database selalu memakai istilah tersanitasi (koma/kurung/
+    // wildcard sudah dibuang). Kalau hasilnya terlalu pendek atau kosong,
+    // diperlakukan sama seperti "query terlalu pendek": tidak ada request.
+    const q = sanitizeSearchTerm(query);
     if (q.length < MIN_QUERY_LENGTH) {
       // Batalkan request yang mungkin masih in-flight dari ketikan sebelumnya.
       requestIdRef.current += 1;
@@ -120,7 +134,7 @@ export default function GlobalSearchBar() {
   }, [query, runSearch]);
 
   const totalResults = results.employees.length + results.invoices.length + results.documents.length;
-  const showDropdown = open && query.trim().length >= MIN_QUERY_LENGTH;
+  const showDropdown = open && sanitizeSearchTerm(query).length >= MIN_QUERY_LENGTH;
 
   return (
     <div className="relative w-full max-w-[320px]" ref={wrapRef}>
@@ -140,12 +154,18 @@ export default function GlobalSearchBar() {
         <div className="absolute left-0 top-full mt-2 w-[360px] max-w-[90vw] bg-white border border-[#E0E0E0] shadow-lg z-[1000] max-h-[420px] overflow-y-auto">
           {loading ? (
             <p className="text-xs text-[#9A9A9A] text-center py-8">Mencari...</p>
-          ) : searchError ? (
-            <p className="text-xs text-madael-red text-center py-8">{searchError}</p>
           ) : totalResults === 0 ? (
-            <p className="text-xs text-[#9A9A9A] text-center py-8">Tidak ada hasil untuk &quot;{query.trim()}&quot;.</p>
+            searchError ? (
+              <p className="text-xs text-madael-red text-center py-8">{searchError}</p>
+            ) : (
+              <p className="text-xs text-[#9A9A9A] text-center py-8">Tidak ada hasil untuk &quot;{query.trim()}&quot;.</p>
+            )
           ) : (
             <>
+              {/* Error sebagian: hasil dari sumber yang berhasil tetap ditampilkan. */}
+              {searchError && (
+                <p className="px-4 py-2 text-[11px] text-madael-red bg-[#FFF5F5] border-b border-[#F0F0F0]">{searchError}</p>
+              )}
               {results.employees.length > 0 && (
                 <div>
                   <p className="px-4 pt-3 pb-1 text-[10px] font-medium tracking-[0.04em] text-[#9A9A9A] uppercase">Employee</p>

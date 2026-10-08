@@ -16,6 +16,7 @@ import SortableHeader from '@/components/SortableHeader';
 import { emptyForm, TEMPLATE_URL, MODULE_GROUPS, PAGE_SIZE_OPTIONS, SORT_COLUMNS } from '@/lib/employeeListConfig';
 import { EXPLICIT_ONLY_MODULES } from '@/lib/employeeModules';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { sanitizeSearchTerm } from '@/lib/searchTerm';
 
 export default function EmployeeListPage() {
   const supabase = createClient();
@@ -142,11 +143,11 @@ export default function EmployeeListPage() {
     if (filterClientId) query = query.eq('client_id', filterClientId);
     if (filterStatus) query = query.eq('status', filterStatus);
 
-    if (debouncedSearch) {
-      // Filter .or() PostgREST dipisah koma — buang koma dari input pencarian
-      // biar tidak ikut memecah daftar kondisi (nama/ID/email nyaris tidak
-      // pernah butuh koma buat dicari).
-      const safeQ = debouncedSearch.replace(/,/g, '');
+    // Aturan sanitasi yang sama dengan pencarian global (lib/searchTerm.js):
+    // koma/kurung/kutip/wildcard tidak boleh ikut ke string filter .or().
+    // Kalau tidak ada isi setelah sanitasi, filter pencarian dilewati.
+    const safeQ = sanitizeSearchTerm(debouncedSearch);
+    if (safeQ) {
       query = query.or(`nama.ilike.%${safeQ}%,employee_id.ilike.%${safeQ}%,email.ilike.%${safeQ}%`);
     }
 
