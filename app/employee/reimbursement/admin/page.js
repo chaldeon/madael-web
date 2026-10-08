@@ -7,8 +7,6 @@ import Link from 'next/link';
 import { Check, X as XIcon, Paperclip, Wallet } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { notifyEmployee } from '@/lib/notify';
-import { logActivity } from '@/lib/activityLog';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -114,44 +112,40 @@ export default function ReimbursementAdminPage() {
     submitDecision(row, decision, null);
   };
 
-  const submitDecision = async (row, decision, rejectionReason) => {
+  // Semua perubahan status lewat rute server (validasi transisi, update
+  // bersyarat, approved_by, notifikasi, activity log). Saat 409 (status sudah
+  // berubah) daftar dimuat ulang supaya tombol sesuai status terbaru.
+  const sendStatusAction = async (row, payload, fallbackMessage) => {
     setActionError(null);
     setActingId(row.id);
-    const { data, error } = await supabase
-      .from('reimbursement_requests')
-      .update({
-        status: decision,
-        approved_by: employee.id,
-        rejection_reason: rejectionReason,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', row.id)
-      .select()
-      .single();
-
-    setActingId(null);
-    if (error) {
-      setActionError(friendlyError(error, 'Gagal memperbarui status klaim.'));
-      return;
+    try {
+      const res = await fetch(`/api/reimbursement/${row.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(json.error || fallbackMessage);
+        if (res.status === 409) loadData();
+        return;
+      }
+      setRequests((prev) => prev.map((r) => (r.id === json.request.id ? json.request : r)));
+    } catch (err) {
+      setActionError(friendlyError(err, fallbackMessage, { context: 'Ubah status reimbursement' }));
+    } finally {
+      setActingId(null);
     }
-    setRequests((prev) => prev.map((r) => (r.id === data.id ? data : r)));
-
-    const label = decision === 'approved' ? 'disetujui' : 'ditolak';
-    notifyEmployee(supabase, {
-      userId: row.employee_id,
-      tipe: `reimbursement_${decision}`,
-      pesan: `Klaim reimbursement kamu (${formatRupiah(row.jumlah)}, ${row.kategori}) telah ${label}.`,
-      link: '/employee/reimbursement',
-    });
-
-    logActivity(supabase, {
-      userId: employee.id,
-      aksi: `${decision === 'approved' ? 'approve' : 'reject'}_reimbursement`,
-      targetTable: 'reimbursement_requests',
-      targetId: row.id,
-      detail: { employee_id: row.employee_id, jumlah: row.jumlah, kategori: row.kategori },
-    });
   };
+
+  const submitDecision = (row, decision, rejectionReason) =>
+    sendStatusAction(
+      row,
+      decision === 'approved'
+        ? { action: 'approve' }
+        : { action: 'reject', reason: rejectionReason },
+      'Gagal memperbarui status klaim.'
+    );
 
   // Ditandai setelah admin secara manual memasukkan nominal klaim ke field
   // Kompensasi di payroll run karyawan terkait — lihat catatan totalSiapDibayar.
@@ -160,31 +154,8 @@ export default function ReimbursementAdminPage() {
     setDialog({ kind: 'paid', row });
   };
 
-  const submitMarkPaid = async (row, note) => {
-    setActionError(null);
-    setActingId(row.id);
-    const { data, error } = await supabase
-      .from('reimbursement_requests')
-      .update({ status: 'paid', paid_note: note || null, updated_at: new Date().toISOString() })
-      .eq('id', row.id)
-      .select()
-      .single();
-
-    setActingId(null);
-    if (error) {
-      setActionError(friendlyError(error, 'Gagal menandai klaim sebagai sudah dibayar.'));
-      return;
-    }
-    setRequests((prev) => prev.map((r) => (r.id === data.id ? data : r)));
-
-    logActivity(supabase, {
-      userId: employee.id,
-      aksi: 'tandai_dibayar_reimbursement',
-      targetTable: 'reimbursement_requests',
-      targetId: row.id,
-      detail: { employee_id: row.employee_id, jumlah: row.jumlah },
-    });
-  };
+  const submitMarkPaid = (row, note) =>
+    sendStatusAction(row, { action: 'pay', note }, 'Gagal menandai klaim sebagai sudah dibayar.');
 
   const closeDialog = () => setDialog(null);
 
@@ -329,8 +300,8 @@ export default function ReimbursementAdminPage() {
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       {row.status === 'pending' && row.employee_id === employee?.id && (
-                        // Guard UI saja: persetujuan masih langsung dari browser, jadi
-                        // penegakan sebenarnya butuh route server / RLS (lihat #1).
+                        // Hanya tampilan; penegakan sebenarnya ada di rute server
+                        // (/api/reimbursement/[id]/status).
                         <span className="text-xs text-[#9A9A9A]" title="Tidak boleh memproses klaim milik sendiri.">
                           Klaim sendiri
                         </span>
