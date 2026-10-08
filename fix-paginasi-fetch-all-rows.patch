@@ -1,0 +1,362 @@
+From 28c202c81a4835dab40f31b54fe8824a408f5368 Mon Sep 17 00:00:00 2001
+From: Claude <claude@example.com>
+Date: Thu, 8 Oct 2026 08:55:47 +0000
+Subject: [PATCH] Rekap absensi & daftar pelamar terpotong diam-diam di 1.000
+ baris
+
+PostgREST memotong respons di max-rows (bawaan Supabase 1.000) tanpa error,
+sehingga rekap absensi, hitungan pelamar per lowongan, dan daftar pelamar bisa
+kurang tanpa tanda apa pun di UI.
+
+- Tambah lib/fetchAllRows.js: mengambil semua baris lewat paginasi .range().
+  Menerima fungsi pembangun query, mengembalikan { data, error } seperti
+  Supabase, maju berdasarkan jumlah baris yang benar-benar diterima (tetap
+  benar bila max-rows server < pageSize), memasang .order('id') sebagai kunci
+  terakhir, dan mengembalikan error (bukan data terpotong) bila melewati
+  maxPages.
+- Dipakai di absensi/rekap, absensi/karyawan (rekap), absensi/koreksi,
+  job-portal (hitungan pelamar), job-portal/pelamar (daftar + tag lamaran
+  umum).
+- Dipakai juga di statistics (absensi 6 bulan, seluruh lamaran) dan reports
+  (tren kehadiran 6 bulan) karena membaca tabel yang sama tanpa batas.
+- Tidak ada perubahan UI, teks, atau skema database.
+---
+ app/employee/absensi/karyawan/page.js   | 15 ++++--
+ app/employee/absensi/koreksi/page.js    | 17 ++++---
+ app/employee/absensi/rekap/page.js      | 15 ++++--
+ app/employee/job-portal/page.js         | 11 ++--
+ app/employee/job-portal/pelamar/page.js | 26 ++++++----
+ app/employee/reports/page.js            | 13 +++--
+ app/employee/statistics/page.js         | 15 ++++--
+ lib/fetchAllRows.js                     | 67 +++++++++++++++++++++++++
+ 8 files changed, 143 insertions(+), 36 deletions(-)
+ create mode 100644 lib/fetchAllRows.js
+
+diff --git a/app/employee/absensi/karyawan/page.js b/app/employee/absensi/karyawan/page.js
+index 97e8911..1cd6f9c 100644
+--- a/app/employee/absensi/karyawan/page.js
++++ b/app/employee/absensi/karyawan/page.js
+@@ -22,6 +22,7 @@ import SortableHeader from '@/components/SortableHeader';
+ import { parseToleransi, currentMonthValue, formatJam, formatTanggal, formatWaktu, countScheduledWorkdays, downloadRekapCsv, computeStatusTelat, HARI_OPTIONS, DEFAULT_HARI, EMPTY_JADWAL_FORM, JADWAL_SORT_COLUMNS, REKAP_SORT_COLUMNS, TABS } from '@/lib/absensiKaryawanConfig';
+ import { durasiMenit, formatDurasi, scheduleFieldsFromTemplate, shiftLabel } from '@/lib/shifts';
+ import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
++import { fetchAllRows } from '@/lib/fetchAllRows';
+ 
+ export default function SemuaKaryawanPage() {
+   const supabase = createClient();
+@@ -191,11 +192,15 @@ export default function SemuaKaryawanPage() {
+     const lastDayNum = new Date(year, month, 0).getDate();
+     const lastDay = `${monthValue}-${String(lastDayNum).padStart(2, '0')}`;
+ 
+-    const { data, error } = await supabase
+-      .from('attendance')
+-      .select('employee_id, tanggal, clock_in, status_telat, justified')
+-      .gte('tanggal', firstDay)
+-      .lte('tanggal', lastDay);
++    // Sebulan penuh untuk semua karyawan bisa > 1.000 baris (batas max-rows
++    // PostgREST), jadi diambil per halaman sampai habis.
++    const { data, error } = await fetchAllRows(() =>
++      supabase
++        .from('attendance')
++        .select('employee_id, tanggal, clock_in, status_telat, justified')
++        .gte('tanggal', firstDay)
++        .lte('tanggal', lastDay)
++    );
+ 
+     setRekapLoading(false);
+     if (error) {
+diff --git a/app/employee/absensi/koreksi/page.js b/app/employee/absensi/koreksi/page.js
+index 6c29827..4fb0570 100644
+--- a/app/employee/absensi/koreksi/page.js
++++ b/app/employee/absensi/koreksi/page.js
+@@ -15,6 +15,7 @@ import ErrorState from '@/components/ErrorState';
+ import EmptyState from '@/components/EmptyState';
+ import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
+ import { friendlyError } from '@/lib/errorMessage';
++import { fetchAllRows } from '@/lib/fetchAllRows';
+ 
+ function currentMonthValue() {
+   const d = new Date();
+@@ -89,12 +90,16 @@ export default function KoreksiAbsensiPage() {
+         .select('id, nama, employee_id, status')
+         .eq('status', 'Aktif')
+         .order('nama'),
+-      supabase
+-        .from('attendance')
+-        .select('*')
+-        .gte('tanggal', firstDay)
+-        .lte('tanggal', lastDay)
+-        .order('tanggal', { ascending: false }),
++      // Sebulan penuh bisa > 1.000 baris (batas max-rows PostgREST). Urutan
++      // tanggal tetap dipakai; fetchAllRows menambah `id` sebagai pemutus seri.
++      fetchAllRows(() =>
++        supabase
++          .from('attendance')
++          .select('*')
++          .gte('tanggal', firstDay)
++          .lte('tanggal', lastDay)
++          .order('tanggal', { ascending: false })
++      ),
+     ]);
+ 
+     const firstError = empRes.error || attRes.error;
+diff --git a/app/employee/absensi/rekap/page.js b/app/employee/absensi/rekap/page.js
+index 7ecf86b..95fe0ee 100644
+--- a/app/employee/absensi/rekap/page.js
++++ b/app/employee/absensi/rekap/page.js
+@@ -12,6 +12,7 @@ import ErrorState from '@/components/ErrorState';
+ import EmptyState from '@/components/EmptyState';
+ import { isTelatEfektif } from '@/lib/attendanceStatus';
+ import { friendlyError } from '@/lib/errorMessage';
++import { fetchAllRows } from '@/lib/fetchAllRows';
+ 
+ const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+ 
+@@ -98,11 +99,15 @@ export default function RekapAbsensiPage() {
+         .eq('status', 'Aktif')
+         .order('nama'),
+       supabase.from('work_schedule').select('*'),
+-      supabase
+-        .from('attendance')
+-        .select('employee_id, tanggal, clock_in, status_telat, justified')
+-        .gte('tanggal', firstDay)
+-        .lte('tanggal', lastDay),
++      // Sebulan penuh untuk semua karyawan bisa > 1.000 baris (batas max-rows
++      // PostgREST), jadi diambil per halaman sampai habis.
++      fetchAllRows(() =>
++        supabase
++          .from('attendance')
++          .select('employee_id, tanggal, clock_in, status_telat, justified')
++          .gte('tanggal', firstDay)
++          .lte('tanggal', lastDay)
++      ),
+     ]);
+ 
+     const firstError = empRes.error || schedRes.error || attRes.error;
+diff --git a/app/employee/job-portal/page.js b/app/employee/job-portal/page.js
+index 6ab1924..466b1fb 100644
+--- a/app/employee/job-portal/page.js
++++ b/app/employee/job-portal/page.js
+@@ -12,6 +12,7 @@ import { logActivity } from '@/lib/activityLog';
+ import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
+ import JobReviewersPanel from '@/components/job-portal/JobReviewersPanel';
+ import { friendlyError } from '@/lib/errorMessage';
++import { fetchAllRows } from '@/lib/fetchAllRows';
+ import Toast from '@/components/employee-list/Toast';
+ import LoadingState from '@/components/LoadingState';
+ import ErrorState from '@/components/ErrorState';
+@@ -228,9 +229,13 @@ export default function JobPortalLowonganPage() {
+       return;
+     }
+ 
+-    let appsQuery = supabase.from('applications').select('job_id');
+-    if (assignedIds) appsQuery = appsQuery.in('job_id', assignedIds);
+-    const { data: apps, error: appsError } = await appsQuery;
++    // Hitungan dibuat dari seluruh baris lamaran; tanpa paginasi, hasil terpotong
++    // diam-diam di 1.000 baris (batas max-rows PostgREST) dan angkanya kurang.
++    const { data: apps, error: appsError } = await fetchAllRows(() => {
++      let appsQuery = supabase.from('applications').select('job_id');
++      if (assignedIds) appsQuery = appsQuery.in('job_id', assignedIds);
++      return appsQuery;
++    });
+ 
+     if (!appsError && apps) {
+       const counts = {};
+diff --git a/app/employee/job-portal/pelamar/page.js b/app/employee/job-portal/pelamar/page.js
+index a3a4a8a..97010fe 100644
+--- a/app/employee/job-portal/pelamar/page.js
++++ b/app/employee/job-portal/pelamar/page.js
+@@ -18,6 +18,7 @@ import BulkApplicantActions from '@/components/job-portal/BulkApplicantActions';
+ import { findDuplicateApplications } from '@/lib/candidateDuplicates';
+ import { MAX_TAG_LENGTH, normalizeTags } from '@/lib/talentPoolTags';
+ import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
++import { fetchAllRows } from '@/lib/fetchAllRows';
+ import Toast from '@/components/employee-list/Toast';
+ import ConfirmDialog from '@/components/ConfirmDialog';
+ import LoadingState from '@/components/LoadingState';
+@@ -435,14 +436,18 @@ export default function JobPortalCandidatesPage() {
+       }
+     }
+ 
+-    let query = supabase
+-      .from('applications')
+-      .select(
+-        'id, created_at, nama, email, telepon, status, cv_drive_id, cv_filename, job_id, catatan, answers, interview_at, interview_interviewer_id, interview_mode, interview_location, interview_address, interview_meeting_url, job_listings ( title, slug ), interviewer:interview_interviewer_id ( nama ), application_notes ( id, isi, author_nama, created_at )'
+-      )
+-      .order('created_at', { ascending: false });
+-    if (assignedIds) query = query.in('job_id', assignedIds);
+-    const { data, error } = await query;
++    // Pelamar bisa > 1.000 baris (batas max-rows PostgREST), jadi diambil per
++    // halaman sampai habis. Urutan terbaru-dulu tetap; `id` jadi pemutus seri.
++    const { data, error } = await fetchAllRows(() => {
++      let query = supabase
++        .from('applications')
++        .select(
++          'id, created_at, nama, email, telepon, status, cv_drive_id, cv_filename, job_id, catatan, answers, interview_at, interview_interviewer_id, interview_mode, interview_location, interview_address, interview_meeting_url, job_listings ( title, slug ), interviewer:interview_interviewer_id ( nama ), application_notes ( id, isi, author_nama, created_at )'
++        )
++        .order('created_at', { ascending: false });
++      if (assignedIds) query = query.in('job_id', assignedIds);
++      return query;
++    });
+ 
+     if (error) {
+       setError(friendlyError(error, 'Gagal memuat data pelamar.'));
+@@ -464,7 +469,10 @@ export default function JobPortalCandidatesPage() {
+       setTagsLoadError(null);
+       return;
+     }
+-    const { data, error } = await supabase.from('applications').select('id, tags').is('job_id', null);
++    // Lamaran umum bisa > 1.000 baris (batas max-rows PostgREST): ambil semua halaman.
++    const { data, error } = await fetchAllRows(() =>
++      supabase.from('applications').select('id, tags').is('job_id', null)
++    );
+     if (error) {
+       setTagsLoadError(friendlyError(error, 'Gagal memuat tag.'));
+       return;
+diff --git a/app/employee/reports/page.js b/app/employee/reports/page.js
+index e03569c..a2f7f9f 100644
+--- a/app/employee/reports/page.js
++++ b/app/employee/reports/page.js
+@@ -14,6 +14,7 @@ import LoadingState from '@/components/LoadingState';
+ import ErrorState from '@/components/ErrorState';
+ import { formatRupiah } from '@/lib/format';
+ import { friendlyError } from '@/lib/errorMessage';
++import { fetchAllRows } from '@/lib/fetchAllRows';
+ 
+ const MADAEL_RED = '#C1272D';
+ const STATUS_COLOR = { Draft: '#9CA3AF', Review: '#F59E0B', Approved: '#16A34A' };
+@@ -129,10 +130,14 @@ export default function ReportsDashboardPage() {
+     const months = last6Months();
+     const firstDay = `${months[0]}-01`;
+ 
+-    const { data, error } = await supabase
+-      .from('attendance')
+-      .select('tanggal')
+-      .gte('tanggal', firstDay);
++    // Enam bulan absensi jauh melewati 1.000 baris (batas max-rows PostgREST),
++    // sehingga grafik tren akan kurang tanpa paginasi.
++    const { data, error } = await fetchAllRows(() =>
++      supabase
++        .from('attendance')
++        .select('tanggal')
++        .gte('tanggal', firstDay)
++    );
+ 
+     if (error) {
+       setTrendError(friendlyError(error, 'Gagal memuat tren kehadiran.'));
+diff --git a/app/employee/statistics/page.js b/app/employee/statistics/page.js
+index 3b3a876..9acd72a 100644
+--- a/app/employee/statistics/page.js
++++ b/app/employee/statistics/page.js
+@@ -17,6 +17,7 @@ import { isTelatEfektif } from '@/lib/attendanceStatus';
+ import { formatRupiah } from '@/lib/format';
+ import { isJobOpen } from '@/lib/jobStatus';
+ import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
++import { fetchAllRows } from '@/lib/fetchAllRows';
+ 
+ const PERIODS = [
+   { value: 'weekly', label: 'Mingguan' },
+@@ -106,7 +107,10 @@ function HrAnalyticsSection({ supabase }) {
+     const [empRes, masterRes, attendanceRes, runsRes] = await Promise.all([
+       supabase.from('employees').select('id, status, created_at'),
+       supabase.from('employees_master').select('status, linked_employee_id'),
+-      supabase.from('attendance').select('tanggal, status_telat, justified').gte('tanggal', firstDay),
++      // Enam bulan absensi jauh melewati 1.000 baris (batas max-rows PostgREST).
++      fetchAllRows(() =>
++        supabase.from('attendance').select('tanggal, status_telat, justified').gte('tanggal', firstDay)
++      ),
+       supabase.from('payroll_runs').select('id, periode').eq('status', 'Approved').gte('periode', months[0]),
+     ]);
+ 
+@@ -373,9 +377,12 @@ export default function StatisticsPage() {
+     (async () => {
+       setSupabaseLoading(true);
+       const [{ data: apps }, { data: jobs }] = await Promise.all([
+-        supabase
+-          .from('applications')
+-          .select('id, created_at, job_id, job_listings(title)'),
++        // Seluruh lamaran bisa > 1.000 baris (batas max-rows PostgREST): ambil semua halaman.
++        fetchAllRows(() =>
++          supabase
++            .from('applications')
++            .select('id, created_at, job_id, job_listings(title)')
++        ),
+         supabase
+           .from('job_listings')
+           .select('id, title, is_active, closes_at'),
+diff --git a/lib/fetchAllRows.js b/lib/fetchAllRows.js
+new file mode 100644
+index 0000000..bd75c43
+--- /dev/null
++++ b/lib/fetchAllRows.js
+@@ -0,0 +1,67 @@
++// Mengambil SEMUA baris hasil sebuah query Supabase lewat paginasi `.range()`.
++//
++// Kenapa perlu: PostgREST memotong respons di `max-rows` (bawaan Supabase 1.000)
++// TANPA error. Query seperti "attendance sebulan untuk semua karyawan" (~45 orang
++// x 22 hari kerja) atau "semua applications" bisa melewati batas itu, dan halaman
++// akan menampilkan angka yang kurang tanpa tanda apa pun.
++//
++// Pemakaian — kirim FUNGSI PEMBANGUN query, bukan query-nya langsung:
++//
++//   const { data, error } = await fetchAllRows(() =>
++//     supabase
++//       .from('attendance')
++//       .select('employee_id, tanggal, clock_in')
++//       .gte('tanggal', firstDay)
++//       .lte('tanggal', lastDay)
++//   );
++//
++// Bentuk kembaliannya sama dengan Supabase (`{ data, error }`), jadi pemanggil
++// cukup mengganti sumber datanya. Pada error, `data` bernilai null.
++//
++// Catatan desain:
++// - Builder Supabase tidak aman dipakai ulang antar halaman (filter/range menumpuk
++//   di instance yang sama), maka setiap halaman memanggil `buildQuery()` lagi.
++// - Posisi maju mengikuti jumlah baris yang BENAR-BENAR diterima (`from += rows.length`),
++//   bukan `pageSize`. Jadi tetap benar kalau `max-rows` server lebih kecil dari
++//   `pageSize` (mis. 500): halaman yang kembali 500 baris tidak dianggap "terakhir".
++//   Konsekuensinya, penanda akhir data adalah halaman KOSONG (satu request tambahan).
++// - Urutan harus deterministik supaya tidak ada baris ganda/hilang antar halaman.
++//   `.order(orderKey)` dipasang SETELAH urutan milik pemanggil, sehingga urutan
++//   pemanggil tetap dipakai dan `id` hanya jadi pemutus seri. Kalau UI butuh urutan
++//   lain, urutkan di client setelah data lengkap.
++// - Jika data melebihi `maxPages`, fungsi mengembalikan ERROR, bukan data yang
++//   terpotong: memotong diam-diam adalah persis bug yang dicegah helper ini.
++
++export const DEFAULT_PAGE_SIZE = 1000;
++export const DEFAULT_MAX_PAGES = 100;
++export const FETCH_ALL_LIMIT_CODE = 'FETCH_ALL_LIMIT';
++
++export async function fetchAllRows(
++  buildQuery,
++  { pageSize = DEFAULT_PAGE_SIZE, maxPages = DEFAULT_MAX_PAGES, orderKey = 'id' } = {}
++) {
++  const all = [];
++  let from = 0;
++
++  for (let page = 0; page < maxPages; page += 1) {
++    let query = buildQuery();
++    if (orderKey) query = query.order(orderKey, { ascending: true });
++    const { data, error } = await query.range(from, from + pageSize - 1);
++
++    if (error) return { data: null, error };
++
++    const rows = data || [];
++    if (rows.length === 0) return { data: all, error: null };
++
++    for (const row of rows) all.push(row);
++    from += rows.length;
++  }
++
++  return {
++    data: null,
++    error: {
++      code: FETCH_ALL_LIMIT_CODE,
++      message: `Jumlah data melebihi batas pengambilan (${maxPages} halaman).`,
++    },
++  };
++}
+-- 
+2.43.0
+

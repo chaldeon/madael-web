@@ -15,6 +15,7 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
 import { friendlyError } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 function currentMonthValue() {
   const d = new Date();
@@ -89,12 +90,16 @@ export default function KoreksiAbsensiPage() {
         .select('id, nama, employee_id, status')
         .eq('status', 'Aktif')
         .order('nama'),
-      supabase
-        .from('attendance')
-        .select('*')
-        .gte('tanggal', firstDay)
-        .lte('tanggal', lastDay)
-        .order('tanggal', { ascending: false }),
+      // Sebulan penuh bisa > 1.000 baris (batas max-rows PostgREST). Urutan
+      // tanggal tetap dipakai; fetchAllRows menambah `id` sebagai pemutus seri.
+      fetchAllRows(() =>
+        supabase
+          .from('attendance')
+          .select('*')
+          .gte('tanggal', firstDay)
+          .lte('tanggal', lastDay)
+          .order('tanggal', { ascending: false })
+      ),
     ]);
 
     const firstError = empRes.error || attRes.error;

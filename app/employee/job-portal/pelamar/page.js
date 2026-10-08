@@ -18,6 +18,7 @@ import BulkApplicantActions from '@/components/job-portal/BulkApplicantActions';
 import { findDuplicateApplications } from '@/lib/candidateDuplicates';
 import { MAX_TAG_LENGTH, normalizeTags } from '@/lib/talentPoolTags';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import Toast from '@/components/employee-list/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import LoadingState from '@/components/LoadingState';
@@ -435,14 +436,18 @@ export default function JobPortalCandidatesPage() {
       }
     }
 
-    let query = supabase
-      .from('applications')
-      .select(
-        'id, created_at, nama, email, telepon, status, cv_drive_id, cv_filename, job_id, catatan, answers, interview_at, interview_interviewer_id, interview_mode, interview_location, interview_address, interview_meeting_url, job_listings ( title, slug ), interviewer:interview_interviewer_id ( nama ), application_notes ( id, isi, author_nama, created_at )'
-      )
-      .order('created_at', { ascending: false });
-    if (assignedIds) query = query.in('job_id', assignedIds);
-    const { data, error } = await query;
+    // Pelamar bisa > 1.000 baris (batas max-rows PostgREST), jadi diambil per
+    // halaman sampai habis. Urutan terbaru-dulu tetap; `id` jadi pemutus seri.
+    const { data, error } = await fetchAllRows(() => {
+      let query = supabase
+        .from('applications')
+        .select(
+          'id, created_at, nama, email, telepon, status, cv_drive_id, cv_filename, job_id, catatan, answers, interview_at, interview_interviewer_id, interview_mode, interview_location, interview_address, interview_meeting_url, job_listings ( title, slug ), interviewer:interview_interviewer_id ( nama ), application_notes ( id, isi, author_nama, created_at )'
+        )
+        .order('created_at', { ascending: false });
+      if (assignedIds) query = query.in('job_id', assignedIds);
+      return query;
+    });
 
     if (error) {
       setError(friendlyError(error, 'Gagal memuat data pelamar.'));
@@ -464,7 +469,10 @@ export default function JobPortalCandidatesPage() {
       setTagsLoadError(null);
       return;
     }
-    const { data, error } = await supabase.from('applications').select('id, tags').is('job_id', null);
+    // Lamaran umum bisa > 1.000 baris (batas max-rows PostgREST): ambil semua halaman.
+    const { data, error } = await fetchAllRows(() =>
+      supabase.from('applications').select('id, tags').is('job_id', null)
+    );
     if (error) {
       setTagsLoadError(friendlyError(error, 'Gagal memuat tag.'));
       return;

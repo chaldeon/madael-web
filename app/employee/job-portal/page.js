@@ -12,6 +12,7 @@ import { logActivity } from '@/lib/activityLog';
 import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import JobReviewersPanel from '@/components/job-portal/JobReviewersPanel';
 import { friendlyError } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import Toast from '@/components/employee-list/Toast';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -228,9 +229,13 @@ export default function JobPortalLowonganPage() {
       return;
     }
 
-    let appsQuery = supabase.from('applications').select('job_id');
-    if (assignedIds) appsQuery = appsQuery.in('job_id', assignedIds);
-    const { data: apps, error: appsError } = await appsQuery;
+    // Hitungan dibuat dari seluruh baris lamaran; tanpa paginasi, hasil terpotong
+    // diam-diam di 1.000 baris (batas max-rows PostgREST) dan angkanya kurang.
+    const { data: apps, error: appsError } = await fetchAllRows(() => {
+      let appsQuery = supabase.from('applications').select('job_id');
+      if (assignedIds) appsQuery = appsQuery.in('job_id', assignedIds);
+      return appsQuery;
+    });
 
     if (!appsError && apps) {
       const counts = {};
