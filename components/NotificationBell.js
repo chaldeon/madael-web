@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { Bell } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
+import { getNotificationMeta, NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notificationTypes';
 
 // Komponen mandiri — cari employee dari auth user sendiri, jadi bisa dipakai
 // di header mana pun tanpa perlu prop drilling. Kalau auth user tidak match
@@ -13,20 +14,36 @@ export default function NotificationBell() {
   const supabase = createClient();
   const [employeeId, setEmployeeId] = useState(null);
   const [items, setItems] = useState([]);
+  // Jumlah belum dibaca SELURUH notifikasi (bukan hanya 20 yang ditampilkan di
+  // dropdown), supaya badge tidak mengecil padahal masih ada yang belum dibaca.
+  const [unreadTotal, setUnreadTotal] = useState(0);
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const wrapRef = useRef(null);
 
-  const unreadCount = items.filter((n) => !n.is_read).length;
+  const unreadCount = unreadTotal;
 
   const loadNotifications = useCallback(async (empId) => {
-    const { data } = await supabase
-      .from('notifications')
-      .select('id, tipe, pesan, is_read, link, created_at')
-      .eq('user_id', empId)
-      .order('created_at', { ascending: false })
-      .limit(20);
-    setItems(data || []);
+    const [listRes, countRes] = await Promise.all([
+      supabase
+        .from('notifications')
+        .select('id, tipe, pesan, is_read, link, created_at')
+        .eq('user_id', empId)
+        .order('created_at', { ascending: false })
+        .limit(20),
+      supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', empId)
+        .eq('is_read', false),
+    ]);
+    setItems(listRes.data || []);
+    if (!countRes.error && typeof countRes.count === 'number') {
+      setUnreadTotal(countRes.count);
+    } else {
+      // Hitung cadangan dari daftar yang termuat kalau query hitung gagal.
+      setUnreadTotal((listRes.data || []).filter((n) => !n.is_read).length);
+    }
     setLoaded(true);
   }, [supabase]);
 
@@ -56,6 +73,17 @@ export default function NotificationBell() {
     return () => clearInterval(interval);
   }, [employeeId, loadNotifications]);
 
+  // Halaman Pusat Notifikasi bisa mengubah status baca — segarkan lonceng.
+  useEffect(() => {
+    if (!employeeId) return;
+    function handleChanged(e) {
+      if (e.detail?.source === 'bell') return;
+      loadNotifications(employeeId);
+    }
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, handleChanged);
+    return () => window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, handleChanged);
+  }, [employeeId, loadNotifications]);
+
   useEffect(() => {
     function handleClickOutside(e) {
       if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
@@ -64,16 +92,35 @@ export default function NotificationBell() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const markAsRead = async (id) => {
-    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
-    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+  const announceChanged = () => {
+    window.dispatchEvent(new CustomEvent(NOTIFICATIONS_CHANGED_EVENT, { detail: { source: 'bell' } }));
   };
 
+  const markAsRead = async (id) => {
+    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+    setUnreadTotal((c) => Math.max(0, c - 1));
+    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    announceChanged();
+  };
+
+  // Menandai SEMUA notifikasi belum dibaca milik user ini, termasuk yang tidak
+  // ikut termuat di dropdown (hanya 20 terbaru).
   const markAllAsRead = async () => {
-    const unreadIds = items.filter((n) => !n.is_read).map((n) => n.id);
-    if (unreadIds.length === 0) return;
+    if (unreadTotal === 0) return;
     setItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
-    await supabase.from('notifications').update({ is_read: true }).in('id', unreadIds);
+    setUnreadTotal(0);
+    await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('user_id', employeeId)
+      .eq('is_read', false);
+    announceChanged();
+  };
+
+  const handleToggle = () => {
+    // Segarkan saat dropdown dibuka supaya isinya tidak basi di antara polling.
+    if (!open) loadNotifications(employeeId);
+    setOpen((v) => !v);
   };
 
   // Belum ketemu employee row (masih loading atau memang tidak ada) — jangan
@@ -84,7 +131,7 @@ export default function NotificationBell() {
     <div className="relative" ref={wrapRef}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={handleToggle}
         className="relative p-2 text-[#6B6B6B] hover:text-black transition-colors cursor-pointer"
         aria-label="Notifikasi"
       >
@@ -116,25 +163,61 @@ export default function NotificationBell() {
             ) : items.length === 0 ? (
               <p className="text-xs text-[#9A9A9A] text-center py-8">Belum ada notifikasi.</p>
             ) : (
-              items.map((n) => (
-                <Link
-                  key={n.id}
-                  href={n.link || '#'}
-                  onClick={() => { if (!n.is_read) markAsRead(n.id); setOpen(false); }}
-                  className={`block px-4 py-3 border-b border-[#F4F4F4] last:border-0 no-underline hover:bg-[#FAFAFA] transition-colors ${
-                    !n.is_read ? 'bg-[#FFF5F5]' : ''
-                  }`}
-                >
-                  <p className="text-xs text-black leading-snug">{n.pesan}</p>
-                  <p className="text-[10px] text-[#9A9A9A] mt-1">
-                    {new Date(n.created_at).toLocaleString('id-ID', {
-                      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-                    })}
-                  </p>
-                </Link>
-              ))
+              items.map((n) => {
+                const { Icon, iconClass, label } = getNotificationMeta(n.tipe);
+                const rowClass = `flex items-start gap-3 w-full text-left px-4 py-3 border-b border-[#F4F4F4] last:border-0 no-underline hover:bg-[#FAFAFA] transition-colors ${
+                  !n.is_read ? 'bg-[#FFF5F5]' : ''
+                }`;
+                const content = (
+                  <>
+                    <span
+                      className={`shrink-0 mt-0.5 w-7 h-7 flex items-center justify-center rounded-full ${iconClass}`}
+                      title={label}
+                    >
+                      <Icon size={14} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs text-black leading-snug">{n.pesan}</span>
+                      <span className="block text-[10px] text-[#9A9A9A] mt-1">
+                        {new Date(n.created_at).toLocaleString('id-ID', {
+                          day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+                        })}
+                      </span>
+                    </span>
+                  </>
+                );
+
+                // Notifikasi tanpa link tidak boleh jadi tautan ke '#' — cukup
+                // ditandai dibaca, dropdown tetap terbuka.
+                return n.link ? (
+                  <Link
+                    key={n.id}
+                    href={n.link}
+                    onClick={() => { if (!n.is_read) markAsRead(n.id); setOpen(false); }}
+                    className={rowClass}
+                  >
+                    {content}
+                  </Link>
+                ) : (
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() => { if (!n.is_read) markAsRead(n.id); }}
+                    className={`${rowClass} cursor-pointer`}
+                  >
+                    {content}
+                  </button>
+                );
+              })
             )}
           </div>
+          <Link
+            href="/employee/notifications"
+            onClick={() => setOpen(false)}
+            className="block px-4 py-3 border-t border-[#E0E0E0] text-center text-xs font-medium text-madael-red hover:text-madael-dark no-underline"
+          >
+            Lihat semua notifikasi
+          </Link>
         </div>
       )}
     </div>
