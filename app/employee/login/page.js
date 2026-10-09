@@ -4,20 +4,42 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
+import { Eye, EyeOff } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useLanguage } from '@/context/LanguageContext';
+
+const DEFAULT_REDIRECT = '/employee/dashboard';
+
+// Validasi tujuan dari ?redirectedFrom supaya tidak jadi open redirect:
+// hanya path internal yang diawali /employee (bukan halaman login itu sendiri).
+function getSafeRedirect(raw) {
+  if (typeof raw !== 'string' || !raw.startsWith('/')) return DEFAULT_REDIRECT;
+  try {
+    const base = 'http://localhost';
+    const url = new URL(raw, base);
+    const inEmployee = url.pathname === '/employee' || url.pathname.startsWith('/employee/');
+    if (url.origin !== base || !inEmployee || url.pathname.startsWith('/employee/login')) {
+      return DEFAULT_REDIRECT;
+    }
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return DEFAULT_REDIRECT;
+  }
+}
 
 function EmployeeLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
   const { lang } = useLanguage();
   const resetSuccess = searchParams.get('reset') === 'success';
   const activatedSuccess = searchParams.get('activated') === 'success';
+  const redirectTo = getSafeRedirect(searchParams.get('redirectedFrom'));
 
   useEffect(() => {
     const checkSession = async () => {
@@ -25,13 +47,13 @@ function EmployeeLoginForm() {
       const { data: { user } } = await supabase.auth.getUser();
 
       if (user) {
-        router.push('/employee/dashboard');
+        router.push(redirectTo);
         return;
       }
       setCheckingSession(false);
     };
     checkSession();
-  }, [router]);
+  }, [router, redirectTo]);
 
   const inputClass =
     'w-full border border-[#E0E0E0] px-4 py-2.5 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
@@ -51,7 +73,7 @@ function EmployeeLoginForm() {
       return;
     }
 
-    router.push('/employee/dashboard');
+    router.push(redirectTo);
     router.refresh();
   };
 
@@ -119,14 +141,29 @@ function EmployeeLoginForm() {
 
           <div>
             <label htmlFor="password" className={labelClass}>Password</label>
-            <input
-              id="password"
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={inputClass}
-            />
+            <div className="relative">
+              <input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={`${inputClass} pr-11 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={
+                  showPassword
+                    ? lang === 'id' ? 'Sembunyikan password' : 'Hide password'
+                    : lang === 'id' ? 'Tampilkan password' : 'Show password'
+                }
+                aria-pressed={showPassword}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-[#8A8A8A] hover:text-madael-red transition-colors"
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
             <Link
               href="/employee/forgot-password"
               className="block mt-1.5 text-xs text-[#6B6B6B] hover:text-madael-red transition-colors"

@@ -49,7 +49,9 @@ export async function middleware(request) {
   if (isEmployeeRoute && !user) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = '/employee/login';
-    redirectUrl.searchParams.set('redirectedFrom', pathname);
+    // Bawa query string juga supaya deep link (mis. ?posisi=...) tidak hilang.
+    redirectUrl.search = '';
+    redirectUrl.searchParams.set('redirectedFrom', pathname + request.nextUrl.search);
     return NextResponse.redirect(redirectUrl);
   }
 
