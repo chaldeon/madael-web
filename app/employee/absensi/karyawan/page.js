@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { logActivity } from '@/lib/activityLog';
+import { notifyEmployee } from '@/lib/notify';
 import { isTelatEfektif, MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
 
 import LoadingState from '@/components/LoadingState';
@@ -599,6 +600,13 @@ export default function SemuaKaryawanPage() {
         targetId: row.id,
         detail: { employee_id: row.employee_id, tanggal: row.tanggal },
       });
+
+      notifyEmployee(supabase, {
+        userId: row.employee_id,
+        tipe: 'koreksi_absensi_disetujui',
+        pesan: `Pengajuan koreksi absensi tanggal ${formatTanggal(row.tanggal)} disetujui. Data absensi kamu sudah diperbarui.`,
+        link: '/employee/absensi',
+      });
     } catch (err) {
       setKoreksiError(friendlyCaught(err, 'Gagal menyetujui pengajuan koreksi.'));
     } finally {
@@ -647,6 +655,13 @@ export default function SemuaKaryawanPage() {
         targetTable: 'attendance_corrections',
         targetId: rejectingRow.id,
         detail: { employee_id: rejectingRow.employee_id, tanggal: rejectingRow.tanggal, catatan: rejectCatatan.trim() || null },
+      });
+
+      notifyEmployee(supabase, {
+        userId: rejectingRow.employee_id,
+        tipe: 'koreksi_absensi_ditolak',
+        pesan: `Pengajuan koreksi absensi tanggal ${formatTanggal(rejectingRow.tanggal)} ditolak.${rejectCatatan.trim() ? ` Alasan: ${rejectCatatan.trim()}` : ''}`,
+        link: '/employee/absensi',
       });
       setRejectingRow(null);
     } catch (err) {

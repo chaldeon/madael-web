@@ -23,6 +23,7 @@ import BreakControl from '@/components/BreakControl';
 import { getBreakState, durasiIstirahatMenit, formatDurasi } from '@/lib/attendanceBreak';
 import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { notifySuperadmins } from '@/lib/notify';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -284,6 +285,13 @@ export default function AbsensiPage() {
 
       setMyCorrections((prev) => [inserted, ...prev]);
       setShowKoreksiForm(false);
+
+      // Beri tahu superadmin (yang berwenang approve) ada pengajuan baru.
+      notifySuperadmins(supabase, {
+        tipe: 'koreksi_absensi_diajukan',
+        pesan: `${employee?.nama || 'Karyawan'} mengajukan koreksi absensi tanggal ${formatTanggal(inserted.tanggal)}.`,
+        link: '/employee/absensi/karyawan',
+      });
     } catch (err) {
       setKoreksiError(friendlyCaught(err, 'Gagal mengirim pengajuan koreksi.'));
     } finally {
@@ -710,6 +718,11 @@ export default function AbsensiPage() {
                       <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-[#F4F4F4] text-[#6B6B6B]">
                         DIBATALKAN
                       </span>
+                    )}
+                    {row.catatan_reviewer && (
+                      <p className="text-xs text-[#6B6B6B] mt-1.5 max-w-[240px] whitespace-normal break-words">
+                        <span className="text-[#9A9A9A]">Catatan: </span>{row.catatan_reviewer}
+                      </p>
                     )}
                   </td>
                   <td className="px-4 py-3">
