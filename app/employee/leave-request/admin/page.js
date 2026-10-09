@@ -6,7 +6,8 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { Check, X as XIcon, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { hitungHariKerja, hitungSisaCuti, labelJenisCuti, potongKuota } from '@/lib/leave';
+import { useModalDismiss } from '@/lib/useModalDismiss';
+import { hitungHariKerja, hitungSisaCuti, labelJenisCuti, potongKuota, MAKS_CATATAN_TOLAK_CUTI } from '@/lib/leave';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -66,6 +67,54 @@ function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
   );
 }
 
+function RejectDialog({ row, namaKaryawan, saving, error, onSubmit, onClose }) {
+  const [alasan, setAlasan] = useState('');
+  const handleBackdropClick = useModalDismiss(true, onClose, 'Tutup dialog ini? Alasan yang diketik tidak akan tersimpan.', alasan.trim() !== '');
+
+  return (
+    <div className="fixed inset-0 z-[1000] bg-black/40 flex items-center justify-center px-4" onClick={handleBackdropClick}>
+      <div className="bg-white border-t-4 border-madael-red w-full max-w-[440px] p-6" onClick={(e) => e.stopPropagation()}>
+        <h2 className="font-serif text-xl text-black mb-1">Tolak Pengajuan {potongKuota(row.jenis) ? 'Cuti' : labelJenisCuti(row.jenis)}</h2>
+        <p className="text-xs text-[#6B6B6B] mb-4">
+          {namaKaryawan} · {formatTanggal(row.tanggal_mulai)} — {formatTanggal(row.tanggal_selesai)}
+        </p>
+
+        <label className="flex flex-col gap-1 mb-4">
+          <span className="text-xs text-[#6B6B6B]">Alasan penolakan (opsional, akan dilihat karyawan)</span>
+          <textarea
+            value={alasan}
+            onChange={(e) => setAlasan(e.target.value)}
+            rows={3}
+            maxLength={MAKS_CATATAN_TOLAK_CUTI}
+            className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors resize-none"
+          />
+        </label>
+
+        {error && <p className="text-xs text-red-600 mb-4">{error}</p>}
+
+        <div className="flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={handleBackdropClick}
+            disabled={saving}
+            className="border border-[#E0E0E0] text-black px-5 py-2 text-sm hover:border-madael-red transition-colors disabled:opacity-50"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            onClick={() => onSubmit({ rejection_reason: alasan.trim() })}
+            disabled={saving}
+            className="bg-madael-red text-white px-5 py-2 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+          >
+            {saving ? 'Menyimpan...' : 'Tolak'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LeaveRequestAdminPage() {
   const { status } = useModuleAccess('leave_request_admin');
 
@@ -81,6 +130,7 @@ export default function LeaveRequestAdminPage() {
   const [actingId, setActingId] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [actionWarning, setActionWarning] = useState(null);
+  const [rejectingRow, setRejectingRow] = useState(null); // baris yang sedang ditolak (dialog alasan)
 
   // Data dimuat lewat route server (bukan query browser) karena employees_master
   // dibatasi RLS superadmin — lihat catatan di app/api/leave-requests/admin.
@@ -161,12 +211,14 @@ export default function LeaveRequestAdminPage() {
   // Semua perubahan (status + kuota + notifikasi + audit log) diproses atomik
   // di server lewat /api/leave-requests/[id]/decision. decision:
   // 'approved' | 'rejected' | 'cancelled' (batalkan cuti yang sudah disetujui).
-  const handleDecision = async (row, decision) => {
+  // extra: field tambahan di body (mis. { rejection_reason } saat menolak).
+  // Mengembalikan 'ok' | 'conflict' | 'error' | 'cancelled-by-user'.
+  const handleDecision = async (row, decision, extra = {}) => {
     if (decision === 'cancelled') {
       const konfirmasi = window.confirm(
         `Batalkan ${potongKuota(row.jenis) ? 'cuti' : labelJenisCuti(row.jenis).toLowerCase()} yang sudah disetujui (${formatTanggal(row.tanggal_mulai)} — ${formatTanggal(row.tanggal_selesai)})?${potongKuota(row.jenis) ? '\n\nKuota cuti karyawan akan dikembalikan.' : ''}`
       );
-      if (!konfirmasi) return;
+      if (!konfirmasi) return 'cancelled-by-user';
     }
 
     setActionError(null);
@@ -177,14 +229,17 @@ export default function LeaveRequestAdminPage() {
       const res = await fetch(`/api/leave-requests/${row.id}/decision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify({ decision, ...extra }),
       });
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         setActionError(json.error || 'Gagal memperbarui status pengajuan.');
-        if (res.status === 409) loadData(); // status/kuota berubah di sisi lain — sinkronkan layar
-        return;
+        if (res.status === 409) {
+          loadData(); // status/kuota berubah di sisi lain — sinkronkan layar
+          return 'conflict';
+        }
+        return 'error';
       }
 
       setRequests((prev) => prev.map((r) => (r.id === json.request.id ? json.request : r)));
@@ -196,11 +251,21 @@ export default function LeaveRequestAdminPage() {
         )));
       }
       setActionWarning(json.warning || null);
+      return 'ok';
     } catch {
       setActionError('Gagal memproses pengajuan. Periksa koneksi internet kamu.');
+      return 'error';
     } finally {
       setActingId(null);
     }
+  };
+
+  const handleRejectSubmit = async (extra) => {
+    if (!rejectingRow) return;
+    const hasil = await handleDecision(rejectingRow, 'rejected', extra);
+    // Gagal biasa: dialog tetap terbuka supaya pesan error terlihat dan bisa
+    // dicoba lagi. Berhasil / bentrok status: tutup (daftar sudah disinkronkan).
+    if (hasil === 'ok' || hasil === 'conflict') setRejectingRow(null);
   };
 
   if (status === 'loading') {
@@ -314,7 +379,12 @@ export default function LeaveRequestAdminPage() {
                           : sisa ? `${sisa.sisa}/${sisa.jatah}` : <span className="text-[#9A9A9A]">belum terhubung</span>}
                       </td>
                       <td className="px-4 py-3 text-[#6B6B6B] max-w-[200px] truncate" title={row.alasan}>{row.alasan}</td>
-                      <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={row.status} />
+                        {row.status === 'rejected' && row.rejection_reason && (
+                          <p className="text-[11px] text-[#9A9A9A] mt-1 max-w-[160px]" title={row.rejection_reason}>{row.rejection_reason}</p>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         {row.status === 'pending' ? (
                           <div className="flex items-center justify-end gap-3">
@@ -326,7 +396,7 @@ export default function LeaveRequestAdminPage() {
                               <Check size={12} /> Setujui
                             </button>
                             <button
-                              onClick={() => handleDecision(row, 'rejected')}
+                              onClick={() => { setActionError(null); setRejectingRow(row); }}
                               disabled={actingId === row.id}
                               className="inline-flex items-center gap-1 text-xs text-madael-red hover:text-madael-dark font-medium disabled:opacity-50"
                             >
@@ -352,6 +422,17 @@ export default function LeaveRequestAdminPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {rejectingRow && (
+        <RejectDialog
+          row={rejectingRow}
+          namaKaryawan={empById[rejectingRow.employee_id]?.nama || '—'}
+          saving={actingId === rejectingRow.id}
+          error={actionError}
+          onSubmit={handleRejectSubmit}
+          onClose={() => setRejectingRow(null)}
+        />
       )}
     </div>
   );

@@ -5,14 +5,16 @@ import { logActivity } from '@/lib/activityLog';
 import { notifyEmployee } from '@/lib/notify';
 import {
   hitungHariKerja, tahunSekarang, tahunDariTanggal, potongKuota, labelJenisCuti,
-  SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN,
+  SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN, MAKS_CATATAN_TOLAK_CUTI,
 } from '@/lib/leave';
 import { ambilKonteksCuti, cariCutiBentrok, formatTanggal, ubahKuotaTerpakai } from '@/lib/leaveServer';
 import { friendlyError } from '@/lib/errorMessage';
 
-// POST /api/leave-requests/[id]/decision   body: { decision }
+// POST /api/leave-requests/[id]/decision   body: { decision, rejection_reason? }
 //   'approved'  : pending  -> approved  (kuota berkurang)
-//   'rejected'  : pending  -> rejected
+//   'rejected'  : pending  -> rejected  (rejection_reason = alasan penolakan,
+//                 opsional, maks MAKS_CATATAN_TOLAK_CUTI karakter; ikut
+//                 ditampilkan di teks notifikasi karyawan)
 //   'cancelled' : approved -> cancelled (admin membatalkan cuti yang sudah
 //                 disetujui; kuota dikembalikan)
 //
@@ -44,6 +46,19 @@ export async function POST(request, { params }) {
     const decision = body?.decision;
     if (!['approved', 'rejected', 'cancelled'].includes(decision)) {
       return NextResponse.json({ error: 'Keputusan tidak valid.' }, { status: 400 });
+    }
+
+    // Alasan penolakan: opsional, hanya dipakai untuk 'rejected'.
+    let alasanTolak = null;
+    if (decision === 'rejected') {
+      const mentah = typeof body?.rejection_reason === 'string' ? body.rejection_reason.trim() : '';
+      if (mentah.length > MAKS_CATATAN_TOLAK_CUTI) {
+        return NextResponse.json(
+          { error: `Alasan penolakan maksimal ${MAKS_CATATAN_TOLAK_CUTI} karakter.` },
+          { status: 400 }
+        );
+      }
+      alasanTolak = mentah || null;
     }
 
     const { data: row, error: rowError } = await admin
@@ -110,7 +125,7 @@ export async function POST(request, { params }) {
     let jumlahHari = hariDariJadwal;
 
     if (decision === 'rejected') {
-      hasil = await updateStatus({ status: 'rejected', approved_by: emp.id });
+      hasil = await updateStatus({ status: 'rejected', approved_by: emp.id, rejection_reason: alasanTolak });
     } else if (decision === 'approved') {
       if (tahunDariTanggal(row.tanggal_mulai) !== tahun || tahunDariTanggal(row.tanggal_selesai) !== tahun) {
         return NextResponse.json(
@@ -225,6 +240,7 @@ export async function POST(request, { params }) {
         jenis: row.jenis || 'tahunan',
         jumlah_hari_kerja: jumlahHari,
         kuota_terpakai_setelah: kuota ? kuota.cuti_terpakai : null,
+        ...(decision === 'rejected' ? { rejection_reason: alasanTolak } : {}),
       },
     });
 
@@ -232,7 +248,7 @@ export async function POST(request, { params }) {
     await notifyEmployee(admin, {
       userId: row.employee_id,
       tipe: decision === 'cancelled' ? 'cuti_cancelled' : `cuti_${decision}`,
-      pesan: `Pengajuan ${potong ? 'cuti' : labelJenisCuti(row.jenis).toLowerCase()} kamu (${formatTanggal(row.tanggal_mulai)} – ${formatTanggal(row.tanggal_selesai)}, ${jumlahHari} hari kerja) telah ${label}.`,
+      pesan: `Pengajuan ${potong ? 'cuti' : labelJenisCuti(row.jenis).toLowerCase()} kamu (${formatTanggal(row.tanggal_mulai)} – ${formatTanggal(row.tanggal_selesai)}, ${jumlahHari} hari kerja) telah ${label}.${decision === 'rejected' && alasanTolak ? ` Alasan: ${alasanTolak}` : ''}`,
       link: '/employee/leave-request',
     });
 
