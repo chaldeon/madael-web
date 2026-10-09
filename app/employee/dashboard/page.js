@@ -27,8 +27,16 @@ function AnnouncementBanner({ supabase, employeeId }) {
   const loadData = useCallback(async () => {
     if (!employeeId) return;
 
+    // Kedaluwarsa disaring di query (bukan cuma di client) dan jumlahnya dibatasi,
+    // supaya riwayat pengumuman lama tidak ikut terunduh tiap buka dashboard.
+    const nowIso = new Date().toISOString();
     const [annRes, readRes] = await Promise.all([
-      supabase.from('announcements').select('*').order('created_at', { ascending: false }),
+      supabase
+        .from('announcements')
+        .select('id, judul, isi, expired_at')
+        .or(`expired_at.is.null,expired_at.gt.${nowIso}`)
+        .order('created_at', { ascending: false })
+        .limit(50),
       supabase.from('announcement_reads').select('announcement_id').eq('employee_id', employeeId),
     ]);
 
@@ -118,18 +126,16 @@ export default function EmployeeDashboardPage() {
 
     // Nama perusahaan cuma buat ditampilkan di header — diambil terpisah dan
     // best-effort, supaya kalau relasi companies belum siap/gagal, itu TIDAK
-    // sampai memblokir login (beda dari cek di atas yang memang wajib).
-    let companyName = null;
-    if (emp.client_id) {
-      const { data: company } = await supabase
-        .from('companies')
-        .select('nama_perusahaan')
-        .eq('id', emp.client_id)
-        .maybeSingle();
-      companyName = company?.nama_perusahaan || null;
-    }
-
-    setEmployee({ ...emp, companyName });
+    // sampai memblokir login (beda dari cek di atas yang memang wajib). Hanya
+    // `data`-nya yang dipakai, error companies diabaikan. Dijalankan paralel
+    // dengan query employee_modules karena keduanya sama-sama hanya butuh emp.
+    const companyQuery = emp.client_id
+      ? supabase
+          .from('companies')
+          .select('nama_perusahaan')
+          .eq('id', emp.client_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null });
 
     // Superadmin bypass semua modul kecuali EXPLICIT_ONLY_MODULES, jadi untuk
     // mereka cukup ambil baris explicit-only saja.
@@ -138,7 +144,10 @@ export default function EmployeeDashboardPage() {
       .select('module_name')
       .eq('employee_id', emp.id);
     if (emp.is_superadmin) modsQuery = modsQuery.in('module_name', EXPLICIT_ONLY_MODULES);
-    const { data: mods } = await modsQuery;
+
+    const [{ data: company }, { data: mods }] = await Promise.all([companyQuery, modsQuery]);
+
+    setEmployee({ ...emp, companyName: company?.nama_perusahaan || null });
     setModuleKeys((mods || []).map((m) => m.module_name));
 
     setLoading(false);
@@ -199,19 +208,19 @@ export default function EmployeeDashboardPage() {
       <div className="max-w-[1100px] mx-auto px-6 py-10">
         <AnnouncementBanner supabase={supabase} employeeId={employee.id} />
 
+        {/* Layer 1 — Dashboard Saya: sama untuk semua karyawan (superadmin tetap karyawan aktif) */}
+        <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
+          Dashboard Saya
+        </h1>
+        <p className="text-sm text-[#6B6B6B] mb-8">Profil, absensi, cuti, dan payslip kamu.</p>
+        {hasAccess('absensi') && <QuickClockInCard employee={employee} />}
+        <ModuleGrid
+          modules={MODULE_REGISTRY.filter((m) => m.layer === 'personal')}
+          hasAnyAccess={hasAnyAccess}
+        />
+
         {employee?.is_superadmin ? (
           <>
-            {/* Layer 1 — Dashboard Saya: superadmin tetap karyawan aktif, sama kayak yang lain */}
-            <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
-              Dashboard Saya
-            </h1>
-            <p className="text-sm text-[#6B6B6B] mb-8">Profil, absensi, cuti, dan payslip kamu.</p>
-            {hasAccess('absensi') && <QuickClockInCard employee={employee} />}
-            <ModuleGrid
-              modules={MODULE_REGISTRY.filter((m) => m.layer === 'personal')}
-              hasAnyAccess={hasAnyAccess}
-            />
-
             {/* Layer 2 — My Work: semua modul yang sudah live (superadmin selalu punya akses penuh,
                 termasuk Reports & Activity Log yang eksklusif superadmin) */}
             <h2 className="font-serif text-[22px] font-normal text-black tracking-[-0.02em] mt-12 mb-1">
@@ -259,17 +268,6 @@ export default function EmployeeDashboardPage() {
           </>
         ) : (
           <>
-            {/* Layer 1 — Dashboard Saya: sama untuk semua karyawan */}
-            <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
-              Dashboard Saya
-            </h1>
-            <p className="text-sm text-[#6B6B6B] mb-8">Profil, absensi, cuti, dan payslip kamu.</p>
-            {hasAccess('absensi') && <QuickClockInCard employee={employee} />}
-            <ModuleGrid
-              modules={MODULE_REGISTRY.filter((m) => m.layer === 'personal')}
-              hasAnyAccess={hasAnyAccess}
-            />
-
             {/* Layer 2 — My Work: modul kerjaan sesuai akses yang diberikan */}
             <h2 className="font-serif text-[22px] font-normal text-black tracking-[-0.02em] mt-12 mb-1">
               My Work
