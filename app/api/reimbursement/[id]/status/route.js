@@ -128,7 +128,7 @@ export async function PATCH(request, { params }) {
       await notifyEmployee(admin, {
         userId: row.employee_id,
         tipe: `reimbursement_${target}`,
-        pesan: `Klaim reimbursement kamu (${formatRupiah(row.jumlah)}, ${row.kategori}) telah ${label}.`,
+        pesan: `Klaim reimbursement kamu (${formatRupiah(row.jumlah)}, ${row.kategori}) telah ${label}.${action === 'reject' && patch.rejection_reason ? ` Alasan: ${patch.rejection_reason}` : ''}`,
         link: '/employee/reimbursement',
       });
       await logActivity(admin, {

@@ -394,7 +394,12 @@ export default function LeaveRequestPage() {
                   </td>
                   <td className="px-4 py-3 text-[#6B6B6B]">{hitungHariKerja(r.tanggal_mulai, r.tanggal_selesai, hariKerja)}</td>
                   <td className="px-4 py-3 text-[#6B6B6B] max-w-[220px] truncate" title={r.alasan}>{r.alasan}</td>
-                  <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                  <td className="px-4 py-3">
+                    <StatusBadge status={r.status} />
+                    {r.status === 'rejected' && r.rejection_reason && (
+                      <p className="text-[11px] text-[#9A9A9A] mt-1 max-w-[180px] whitespace-normal break-words">Alasan: {r.rejection_reason}</p>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     {r.status === 'pending' ? (
                       <button
