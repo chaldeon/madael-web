@@ -1,0 +1,99 @@
+From b445a03bf9fa954b7eeed7a224181035fd075c2e Mon Sep 17 00:00:00 2001
+From: Claude <claude@example.com>
+Date: Fri, 9 Oct 2026 02:52:27 +0000
+Subject: [PATCH] Notifikasi dua arah + catatan penolakan untuk koreksi absensi
+
+- Karyawan menerima notifikasi in-app saat pengajuan koreksi absensinya
+  disetujui atau ditolak (alasan penolakan ikut dicantumkan di pesan).
+- Superadmin menerima notifikasi saat karyawan mengajukan koreksi baru.
+- Kolom catatan_reviewer kini tampil di tabel "Pengajuan Koreksi Kehadiran"
+  milik karyawan (di bawah badge status).
+
+Memakai helper lib/notify.js yang sudah ada (notifyEmployee, notifySuperadmins).
+Tanpa perubahan database.
+---
+ app/employee/absensi/karyawan/page.js | 15 +++++++++++++++
+ app/employee/absensi/page.js          | 13 +++++++++++++
+ 2 files changed, 28 insertions(+)
+
+diff --git a/app/employee/absensi/karyawan/page.js b/app/employee/absensi/karyawan/page.js
+index 1cd6f9c..258f73f 100644
+--- a/app/employee/absensi/karyawan/page.js
++++ b/app/employee/absensi/karyawan/page.js
+@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase-browser';
+ import { useModuleAccess } from '@/lib/useModuleAccess';
+ import { useModalDismiss } from '@/lib/useModalDismiss';
+ import { logActivity } from '@/lib/activityLog';
++import { notifyEmployee } from '@/lib/notify';
+ import { isTelatEfektif, MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
+ 
+ import LoadingState from '@/components/LoadingState';
+@@ -599,6 +600,13 @@ export default function SemuaKaryawanPage() {
+         targetId: row.id,
+         detail: { employee_id: row.employee_id, tanggal: row.tanggal },
+       });
++
++      notifyEmployee(supabase, {
++        userId: row.employee_id,
++        tipe: 'koreksi_absensi_disetujui',
++        pesan: `Pengajuan koreksi absensi tanggal ${formatTanggal(row.tanggal)} disetujui. Data absensi kamu sudah diperbarui.`,
++        link: '/employee/absensi',
++      });
+     } catch (err) {
+       setKoreksiError(friendlyCaught(err, 'Gagal menyetujui pengajuan koreksi.'));
+     } finally {
+@@ -648,6 +656,13 @@ export default function SemuaKaryawanPage() {
+         targetId: rejectingRow.id,
+         detail: { employee_id: rejectingRow.employee_id, tanggal: rejectingRow.tanggal, catatan: rejectCatatan.trim() || null },
+       });
++
++      notifyEmployee(supabase, {
++        userId: rejectingRow.employee_id,
++        tipe: 'koreksi_absensi_ditolak',
++        pesan: `Pengajuan koreksi absensi tanggal ${formatTanggal(rejectingRow.tanggal)} ditolak.${rejectCatatan.trim() ? ` Alasan: ${rejectCatatan.trim()}` : ''}`,
++        link: '/employee/absensi',
++      });
+       setRejectingRow(null);
+     } catch (err) {
+       setKoreksiError(friendlyCaught(err, 'Gagal menolak pengajuan koreksi.'));
+diff --git a/app/employee/absensi/page.js b/app/employee/absensi/page.js
+index 080c322..06f5697 100644
+--- a/app/employee/absensi/page.js
++++ b/app/employee/absensi/page.js
+@@ -23,6 +23,7 @@ import BreakControl from '@/components/BreakControl';
+ import { getBreakState, durasiIstirahatMenit, formatDurasi } from '@/lib/attendanceBreak';
+ import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
+ import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
++import { notifySuperadmins } from '@/lib/notify';
+ 
+ const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+ 
+@@ -284,6 +285,13 @@ export default function AbsensiPage() {
+ 
+       setMyCorrections((prev) => [inserted, ...prev]);
+       setShowKoreksiForm(false);
++
++      // Beri tahu superadmin (yang berwenang approve) ada pengajuan baru.
++      notifySuperadmins(supabase, {
++        tipe: 'koreksi_absensi_diajukan',
++        pesan: `${employee?.nama || 'Karyawan'} mengajukan koreksi absensi tanggal ${formatTanggal(inserted.tanggal)}.`,
++        link: '/employee/absensi/karyawan',
++      });
+     } catch (err) {
+       setKoreksiError(friendlyCaught(err, 'Gagal mengirim pengajuan koreksi.'));
+     } finally {
+@@ -711,6 +719,11 @@ export default function AbsensiPage() {
+                         DIBATALKAN
+                       </span>
+                     )}
++                    {row.catatan_reviewer && (
++                      <p className="text-xs text-[#6B6B6B] mt-1.5 max-w-[240px] whitespace-normal break-words">
++                        <span className="text-[#9A9A9A]">Catatan: </span>{row.catatan_reviewer}
++                      </p>
++                    )}
+                   </td>
+                   <td className="px-4 py-3">
+                     {row.foto_bukti_url ? (
+-- 
+2.43.0
+
