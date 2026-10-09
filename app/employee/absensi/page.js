@@ -20,8 +20,10 @@ import LateReasonBox from '@/components/LateReasonBox';
 import AttendanceReviewScreen from '@/components/AttendanceReviewScreen';
 import LiveClock from '@/components/LiveClock';
 import BreakControl from '@/components/BreakControl';
-import { getBreakState, durasiIstirahatMenit, formatDurasi } from '@/lib/attendanceBreak';
+import ExportCsvButton from '@/components/ExportCsvButton';
+import { getBreakState, durasiIstirahatMenit, durasiKerjaMenit, formatDurasi } from '@/lib/attendanceBreak';
 import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
+import { getAttendanceStatus } from '@/lib/attendanceStatus';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { notifySuperadmins } from '@/lib/notify';
 
@@ -209,6 +211,27 @@ export default function AbsensiPage() {
       today: todayStr(),
     });
   }, [monthLoading, monthError, monthValue, monthData, monthLeaves, schedule]);
+
+  // Baris ekspor CSV riwayat bulan terpilih, urut tanggal naik (kebalikan tampilan layar).
+  const csvRows = useMemo(() => {
+    if (!summary) return [];
+    const statusLabel = { tidak_hadir: 'TANPA KEHADIRAN', cuti: 'CUTI' };
+    return [...summary.days].reverse().map(({ tanggal, kind, row }) => {
+      const kerja = durasiKerjaMenit(row);
+      return {
+        tanggal,
+        hari: HARI_LABEL[new Date(tanggal + 'T00:00:00').getDay()],
+        clockIn: row?.clock_in ? formatWaktu(row.clock_in) : '',
+        clockOut: row?.clock_out ? formatWaktu(row.clock_out) : '',
+        mulaiIstirahat: row?.break_start ? formatWaktu(row.break_start) : '',
+        selesaiIstirahat: row?.break_end ? formatWaktu(row.break_end) : '',
+        istirahatMenit: durasiIstirahatMenit(row) ?? '',
+        jamKerja: kerja === null ? '' : formatDurasi(kerja),
+        jamKerjaMenit: kerja ?? '',
+        status: statusLabel[kind] || getAttendanceStatus(row).label,
+      };
+    });
+  }, [summary]);
 
   const openKoreksiForm = () => {
     setKoreksiError(null);
@@ -541,6 +564,23 @@ export default function AbsensiPage() {
           <p className="text-xs text-[#9A9A9A] mt-0.5">{formatBulan(monthValue)}</p>
         </div>
         <div className="flex items-center gap-2">
+          <ExportCsvButton
+            filename={`riwayat-absensi-${monthValue}`}
+            headers={[
+              { key: 'tanggal', label: 'Tanggal' },
+              { key: 'hari', label: 'Hari' },
+              { key: 'clockIn', label: 'Clock In' },
+              { key: 'clockOut', label: 'Clock Out' },
+              { key: 'mulaiIstirahat', label: 'Mulai Istirahat' },
+              { key: 'selesaiIstirahat', label: 'Selesai Istirahat' },
+              { key: 'istirahatMenit', label: 'Istirahat (menit)' },
+              { key: 'jamKerja', label: 'Jam Kerja Efektif' },
+              { key: 'jamKerjaMenit', label: 'Jam Kerja Efektif (menit)' },
+              { key: 'status', label: 'Status' },
+            ]}
+            rows={csvRows}
+            label="Ekspor CSV"
+          />
           <button
             type="button"
             onClick={() => setMonthValue((m) => shiftMonth(m, -1))}
@@ -572,12 +612,13 @@ export default function AbsensiPage() {
 
       {summary && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
             {[
               ['Hadir', summary.totalHadir],
               ['Telat', summary.totalTelat],
               ['Tanpa Kehadiran', summary.totalTidakHadir ?? '—'],
               ['Cuti', summary.cutiHari],
+              ['Total Jam Kerja', formatDurasi(summary.totalMenitKerja)],
             ].map(([label, value]) => (
               <div key={label} className="bg-white border border-[#E0E0E0] px-4 py-3">
                 <p className="text-[11px] text-[#9A9A9A] mb-1">{label}</p>
@@ -585,6 +626,11 @@ export default function AbsensiPage() {
               </div>
             ))}
           </div>
+          {summary.hariTanpaClockOut > 0 && (
+            <p className="text-xs text-[#9A9A9A] mb-3">
+              {summary.hariTanpaClockOut} hari belum ada clock out, jadi jam kerjanya belum ikut dihitung. Ajukan koreksi kehadiran kalau lupa clock out.
+            </p>
+          )}
           {summary.totalTidakHadir === null && (
             <p className="text-xs text-[#9A9A9A] mb-3">
               Jadwal kerja kamu belum diatur, jadi hari tanpa kehadiran belum bisa dihitung.
@@ -606,13 +652,14 @@ export default function AbsensiPage() {
                 <th className="px-4 py-3 font-medium">Clock In</th>
                 <th className="px-4 py-3 font-medium">Clock Out</th>
                 <th className="px-4 py-3 font-medium">Istirahat</th>
+                <th className="px-4 py-3 font-medium">Jam Kerja</th>
                 <th className="px-4 py-3 font-medium">Status</th>
               </tr>
             </thead>
             <tbody>
               {summary.days.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-0">
+                  <td colSpan={6} className="p-0">
                     <EmptyState message="Belum ada data absensi di bulan ini." />
                   </td>
                 </tr>
@@ -635,6 +682,9 @@ export default function AbsensiPage() {
                       ) : (
                         '—'
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-[#6B6B6B] whitespace-nowrap">
+                      {formatDurasi(durasiKerjaMenit(row))}
                     </td>
                     <td className="px-4 py-3">
                       {kind === 'tidak_hadir' && (

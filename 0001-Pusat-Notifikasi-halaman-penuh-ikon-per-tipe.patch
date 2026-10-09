@@ -1,0 +1,726 @@
+From d71a25f4ca53e7b520ba8f79d9709f41789f5911 Mon Sep 17 00:00:00 2001
+From: Claude <claude@example.com>
+Date: Fri, 9 Oct 2026 04:47:15 +0000
+Subject: [PATCH] Pusat Notifikasi (halaman penuh) + ikon per tipe
+
+- Halaman baru /employee/notifications: semua notifikasi milik karyawan
+  (dimuat penuh lewat fetchAllRows), filter Semua / Belum dibaca dan
+  filter kategori, "Tandai semua dibaca", dan "Tampilkan lebih banyak".
+- lib/notificationTypes.js: pemetaan kolom `tipe` -> ikon, label, dan
+  kategori (berdasarkan awalan, aman untuk tipe dinamis/baru); ikon hijau
+  untuk disetujui/selesai, merah untuk ditolak/dibatalkan.
+- NotificationBell: ikon per tipe, tautan "Lihat semua notifikasi",
+  notifikasi tanpa link tidak lagi mengarah ke '#', badge menghitung
+  seluruh notifikasi belum dibaca (bukan hanya 20 terbaru), "Tandai semua
+  dibaca" mencakup semua, dan lonceng + halaman saling menyegarkan lewat
+  event window.
+- Tanpa perubahan database.
+---
+ app/employee/notifications/layout.js |  36 +++
+ app/employee/notifications/page.js   | 346 +++++++++++++++++++++++++++
+ components/NotificationBell.js       | 141 ++++++++---
+ lib/notificationTypes.js             |  94 ++++++++
+ 4 files changed, 588 insertions(+), 29 deletions(-)
+ create mode 100644 app/employee/notifications/layout.js
+ create mode 100644 app/employee/notifications/page.js
+ create mode 100644 lib/notificationTypes.js
+
+diff --git a/app/employee/notifications/layout.js b/app/employee/notifications/layout.js
+new file mode 100644
+index 0000000..5b21568
+--- /dev/null
++++ b/app/employee/notifications/layout.js
+@@ -0,0 +1,36 @@
++'use client';
++
++import Link from 'next/link';
++import { useRouter } from 'next/navigation';
++import { createClient } from '@/lib/supabase-browser';
++import EmployeeHeader from '@/components/EmployeeHeader';
++
++// Pusat Notifikasi tidak butuh modul khusus — setiap karyawan hanya melihat
++// notifikasinya sendiri (difilter per user_id di page.js, dan sesi dijaga
++// middleware untuk semua path /employee), jadi layout ini tidak memakai
++// useModuleAccess.
++export default function NotificationsLayout({ children }) {
++  const router = useRouter();
++  const supabase = createClient();
++
++  const handleLogout = async () => {
++    await supabase.auth.signOut();
++    router.push('/employee/login');
++    router.refresh();
++  };
++
++  return (
++    <section className="min-h-screen bg-[#F4F4F4]">
++      <EmployeeHeader
++        onLogout={handleLogout}
++        subnav={
++          <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
++            ← Dashboard
++          </Link>
++        }
++      />
++
++      {children}
++    </section>
++  );
++}
+diff --git a/app/employee/notifications/page.js b/app/employee/notifications/page.js
+new file mode 100644
+index 0000000..bc944c7
+--- /dev/null
++++ b/app/employee/notifications/page.js
+@@ -0,0 +1,346 @@
++'use client';
++
++export const dynamic = 'force-dynamic';
++
++import { useEffect, useState, useCallback, useMemo } from 'react';
++import { useRouter } from 'next/navigation';
++import Link from 'next/link';
++import { Bell, CheckCheck } from 'lucide-react';
++import { createClient } from '@/lib/supabase-browser';
++import { fetchAllRows } from '@/lib/fetchAllRows';
++import { friendlyError } from '@/lib/errorMessage';
++import {
++  getNotificationMeta,
++  NOTIFICATION_CATEGORY_OPTIONS,
++  NOTIFICATIONS_CHANGED_EVENT,
++} from '@/lib/notificationTypes';
++import LoadingState from '@/components/LoadingState';
++import ErrorState from '@/components/ErrorState';
++import EmptyState from '@/components/EmptyState';
++
++// Jumlah notifikasi yang ditampilkan per "halaman" — seluruh data dimuat sekali
++// (fetchAllRows), lalu ditampilkan bertahap lewat tombol "Tampilkan lebih banyak".
++const PAGE_SIZE = 30;
++
++function formatWaktu(value) {
++  return new Date(value).toLocaleString('id-ID', {
++    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
++  });
++}
++
++export default function NotificationsPage() {
++  const router = useRouter();
++  const supabase = createClient();
++
++  const [employeeId, setEmployeeId] = useState(null);
++  const [items, setItems] = useState([]);
++  const [loading, setLoading] = useState(true);
++  const [loadError, setLoadError] = useState(null);
++  const [actionError, setActionError] = useState(null);
++  const [markingAll, setMarkingAll] = useState(false);
++
++  const [readFilter, setReadFilter] = useState('all'); // 'all' | 'unread'
++  const [categoryFilter, setCategoryFilter] = useState('all');
++  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
++
++  // Muat seluruh notifikasi milik satu employee. Tidak ada setState sinkron di
++  // awal fungsi (state awal sudah `loading`); pemanggil yang mengatur ulang
++  // loading/error bila perlu (tombol "Coba Lagi").
++  const loadNotifications = useCallback(async (empId) => {
++    const { data, error } = await fetchAllRows(() =>
++      supabase
++        .from('notifications')
++        .select('id, tipe, pesan, is_read, link, created_at')
++        .eq('user_id', empId)
++        .order('created_at', { ascending: false })
++    );
++
++    if (error) {
++      setLoadError(friendlyError(error, 'Gagal memuat notifikasi.'));
++      setLoading(false);
++      return;
++    }
++
++    // fetchAllRows menambahkan urutan `id` di belakang urutan kita; urutkan ulang
++    // di client supaya yang terbaru tetap di atas.
++    setLoadError(null);
++    setItems(
++      [...data].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
++    );
++    setLoading(false);
++  }, [supabase]);
++
++  // Cari employee dari auth user (pola sama seperti NotificationBell), lalu muat
++  // notifikasinya.
++  const init = useCallback(async () => {
++    const { data: { user } } = await supabase.auth.getUser();
++    if (!user) {
++      router.push('/employee/login');
++      return;
++    }
++
++    const { data: emp, error: empError } = await supabase
++      .from('employees')
++      .select('id, status')
++      .eq('email', user.email)
++      .maybeSingle();
++
++    if (empError) {
++      setLoadError(friendlyError(empError, 'Data karyawan tidak ditemukan.'));
++      setLoading(false);
++      return;
++    }
++
++    // Akun yang bukan employee aktif tidak punya notifikasi (sama seperti lonceng).
++    if (!emp || emp.status !== 'Aktif') {
++      setEmployeeId(null);
++      setItems([]);
++      setLoading(false);
++      return;
++    }
++
++    setEmployeeId(emp.id);
++    await loadNotifications(emp.id);
++  }, [supabase, router, loadNotifications]);
++
++  useEffect(() => {
++    (async () => { await init(); })();
++  }, [init]);
++
++  // Lonceng di header juga bisa menandai dibaca — ikut segarkan daftar ini.
++  useEffect(() => {
++    if (!employeeId) return;
++    function handleChanged(e) {
++      if (e.detail?.source === 'page') return;
++      loadNotifications(employeeId);
++    }
++    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, handleChanged);
++    return () => window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, handleChanged);
++  }, [employeeId, loadNotifications]);
++
++  const announceChanged = () => {
++    window.dispatchEvent(new CustomEvent(NOTIFICATIONS_CHANGED_EVENT, { detail: { source: 'page' } }));
++  };
++
++  const unreadCount = useMemo(() => items.filter((n) => !n.is_read).length, [items]);
++
++  const filtered = useMemo(
++    () =>
++      items.filter((n) => {
++        if (readFilter === 'unread' && n.is_read) return false;
++        if (categoryFilter !== 'all' && getNotificationMeta(n.tipe).categoryKey !== categoryFilter) {
++          return false;
++        }
++        return true;
++      }),
++    [items, readFilter, categoryFilter]
++  );
++
++  const visible = filtered.slice(0, visibleCount);
++
++  const changeReadFilter = (value) => {
++    setReadFilter(value);
++    setVisibleCount(PAGE_SIZE);
++  };
++
++  const changeCategoryFilter = (value) => {
++    setCategoryFilter(value);
++    setVisibleCount(PAGE_SIZE);
++  };
++
++  const markAsRead = async (id) => {
++    setActionError(null);
++    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
++    const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', id);
++    if (error) {
++      setActionError(friendlyError(error, 'Gagal menandai notifikasi sebagai dibaca.'));
++      loadNotifications(employeeId);
++      return;
++    }
++    announceChanged();
++  };
++
++  const markAllAsRead = async () => {
++    if (!employeeId || unreadCount === 0) return;
++    setActionError(null);
++    setMarkingAll(true);
++    const { error } = await supabase
++      .from('notifications')
++      .update({ is_read: true })
++      .eq('user_id', employeeId)
++      .eq('is_read', false);
++    setMarkingAll(false);
++
++    if (error) {
++      setActionError(friendlyError(error, 'Gagal menandai semua notifikasi sebagai dibaca.'));
++      return;
++    }
++    setItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
++    announceChanged();
++  };
++
++  if (loading) {
++    return (
++      <div className="max-w-[760px] mx-auto px-6 py-10">
++        <LoadingState label="Memuat notifikasi..." />
++      </div>
++    );
++  }
++
++  if (loadError) {
++    const retry = () => {
++      setLoading(true);
++      setLoadError(null);
++      init();
++    };
++    return (
++      <div className="max-w-[760px] mx-auto px-6 py-10">
++        <ErrorState message={loadError} onRetry={retry} />
++      </div>
++    );
++  }
++
++  const filterButtonClass = (active) =>
++    `px-4 py-2 text-xs font-medium tracking-[0.02em] border transition-colors cursor-pointer ${
++      active
++        ? 'bg-madael-red text-white border-madael-red'
++        : 'bg-white text-[#6B6B6B] border-[#E0E0E0] hover:text-black'
++    }`;
++
++  const selectClass =
++    'border border-[#E0E0E0] px-3 py-2 text-xs text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
++
++  const emptyMessage = !employeeId
++    ? 'Akun ini tidak memiliki notifikasi.'
++    : items.length === 0
++      ? 'Belum ada notifikasi.'
++      : 'Tidak ada notifikasi yang cocok dengan filter ini.';
++
++  return (
++    <div className="max-w-[760px] mx-auto px-6 py-10">
++      <div className="flex items-start justify-between gap-4 mb-6">
++        <div>
++          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Pusat Notifikasi</h1>
++          <p className="text-sm text-[#6B6B6B] mt-1">
++            Semua notifikasi akunmu, dari yang terbaru.
++            {unreadCount > 0 ? ` ${unreadCount} belum dibaca.` : ''}
++          </p>
++        </div>
++        {unreadCount > 0 && (
++          <button
++            type="button"
++            onClick={markAllAsRead}
++            disabled={markingAll}
++            className="shrink-0 flex items-center gap-2 text-xs font-medium text-madael-red hover:text-madael-dark disabled:opacity-50 cursor-pointer"
++          >
++            <CheckCheck size={14} />
++            {markingAll ? 'Memproses...' : 'Tandai semua dibaca'}
++          </button>
++        )}
++      </div>
++
++      {actionError && <p className="text-xs text-red-600 mb-4">{actionError}</p>}
++
++      <div className="flex flex-wrap items-center gap-3 mb-4">
++        <div className="flex">
++          <button
++            type="button"
++            onClick={() => changeReadFilter('all')}
++            className={filterButtonClass(readFilter === 'all')}
++          >
++            Semua
++          </button>
++          <button
++            type="button"
++            onClick={() => changeReadFilter('unread')}
++            className={`${filterButtonClass(readFilter === 'unread')} -ml-px`}
++          >
++            Belum dibaca{unreadCount > 0 ? ` (${unreadCount})` : ''}
++          </button>
++        </div>
++
++        <select
++          value={categoryFilter}
++          onChange={(e) => changeCategoryFilter(e.target.value)}
++          className={selectClass}
++          aria-label="Filter kategori"
++        >
++          <option value="all">Semua kategori</option>
++          {NOTIFICATION_CATEGORY_OPTIONS.map((c) => (
++            <option key={c.key} value={c.key}>{c.label}</option>
++          ))}
++        </select>
++      </div>
++
++      <div className="bg-white border border-[#E0E0E0]">
++        {visible.length === 0 ? (
++          <EmptyState message={emptyMessage} icon={Bell} />
++        ) : (
++          visible.map((n) => {
++            const { Icon, iconClass, label } = getNotificationMeta(n.tipe);
++            const rowClass = `flex items-start gap-3 w-full text-left px-5 py-4 border-b border-[#F4F4F4] last:border-0 no-underline hover:bg-[#FAFAFA] transition-colors ${
++              !n.is_read ? 'bg-[#FFF5F5]' : ''
++            }`;
++            const content = (
++              <>
++                <span
++                  className={`shrink-0 mt-0.5 w-8 h-8 flex items-center justify-center rounded-full ${iconClass}`}
++                  aria-hidden="true"
++                >
++                  <Icon size={16} />
++                </span>
++                <span className="min-w-0 flex-1">
++                  <span className="block text-sm text-black leading-snug">{n.pesan}</span>
++                  <span className="block text-xs text-[#9A9A9A] mt-1">
++                    {label} · {formatWaktu(n.created_at)}
++                  </span>
++                </span>
++                {!n.is_read && (
++                  <span
++                    className="shrink-0 mt-2 w-2 h-2 rounded-full bg-madael-red"
++                    title="Belum dibaca"
++                    aria-label="Belum dibaca"
++                  />
++                )}
++              </>
++            );
++
++            // Tanpa link: tidak ada tujuan, jadi klik hanya menandai dibaca
++            // (bukan tautan ke '#').
++            return n.link ? (
++              <Link
++                key={n.id}
++                href={n.link}
++                onClick={() => { if (!n.is_read) markAsRead(n.id); }}
++                className={rowClass}
++              >
++                {content}
++              </Link>
++            ) : (
++              <button
++                key={n.id}
++                type="button"
++                onClick={() => { if (!n.is_read) markAsRead(n.id); }}
++                className={`${rowClass} ${n.is_read ? 'cursor-default' : 'cursor-pointer'}`}
++              >
++                {content}
++              </button>
++            );
++          })
++        )}
++      </div>
++
++      {filtered.length > visibleCount && (
++        <div className="flex justify-center mt-4">
++          <button
++            type="button"
++            onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
++            className="border border-[#E0E0E0] bg-white px-5 py-2 text-xs font-medium text-[#6B6B6B] hover:text-black transition-colors cursor-pointer"
++          >
++            Tampilkan lebih banyak ({filtered.length - visibleCount} lagi)
++          </button>
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/components/NotificationBell.js b/components/NotificationBell.js
+index ccfe437..58edff7 100644
+--- a/components/NotificationBell.js
++++ b/components/NotificationBell.js
+@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
+ import Link from 'next/link';
+ import { Bell } from 'lucide-react';
+ import { createClient } from '@/lib/supabase-browser';
++import { getNotificationMeta, NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notificationTypes';
+ 
+ // Komponen mandiri — cari employee dari auth user sendiri, jadi bisa dipakai
+ // di header mana pun tanpa perlu prop drilling. Kalau auth user tidak match
+@@ -13,20 +14,36 @@ export default function NotificationBell() {
+   const supabase = createClient();
+   const [employeeId, setEmployeeId] = useState(null);
+   const [items, setItems] = useState([]);
++  // Jumlah belum dibaca SELURUH notifikasi (bukan hanya 20 yang ditampilkan di
++  // dropdown), supaya badge tidak mengecil padahal masih ada yang belum dibaca.
++  const [unreadTotal, setUnreadTotal] = useState(0);
+   const [open, setOpen] = useState(false);
+   const [loaded, setLoaded] = useState(false);
+   const wrapRef = useRef(null);
+ 
+-  const unreadCount = items.filter((n) => !n.is_read).length;
++  const unreadCount = unreadTotal;
+ 
+   const loadNotifications = useCallback(async (empId) => {
+-    const { data } = await supabase
+-      .from('notifications')
+-      .select('id, tipe, pesan, is_read, link, created_at')
+-      .eq('user_id', empId)
+-      .order('created_at', { ascending: false })
+-      .limit(20);
+-    setItems(data || []);
++    const [listRes, countRes] = await Promise.all([
++      supabase
++        .from('notifications')
++        .select('id, tipe, pesan, is_read, link, created_at')
++        .eq('user_id', empId)
++        .order('created_at', { ascending: false })
++        .limit(20),
++      supabase
++        .from('notifications')
++        .select('id', { count: 'exact', head: true })
++        .eq('user_id', empId)
++        .eq('is_read', false),
++    ]);
++    setItems(listRes.data || []);
++    if (!countRes.error && typeof countRes.count === 'number') {
++      setUnreadTotal(countRes.count);
++    } else {
++      // Hitung cadangan dari daftar yang termuat kalau query hitung gagal.
++      setUnreadTotal((listRes.data || []).filter((n) => !n.is_read).length);
++    }
+     setLoaded(true);
+   }, [supabase]);
+ 
+@@ -56,6 +73,17 @@ export default function NotificationBell() {
+     return () => clearInterval(interval);
+   }, [employeeId, loadNotifications]);
+ 
++  // Halaman Pusat Notifikasi bisa mengubah status baca — segarkan lonceng.
++  useEffect(() => {
++    if (!employeeId) return;
++    function handleChanged(e) {
++      if (e.detail?.source === 'bell') return;
++      loadNotifications(employeeId);
++    }
++    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, handleChanged);
++    return () => window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, handleChanged);
++  }, [employeeId, loadNotifications]);
++
+   useEffect(() => {
+     function handleClickOutside(e) {
+       if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+@@ -64,16 +92,35 @@ export default function NotificationBell() {
+     return () => document.removeEventListener('mousedown', handleClickOutside);
+   }, []);
+ 
++  const announceChanged = () => {
++    window.dispatchEvent(new CustomEvent(NOTIFICATIONS_CHANGED_EVENT, { detail: { source: 'bell' } }));
++  };
++
+   const markAsRead = async (id) => {
+     setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
++    setUnreadTotal((c) => Math.max(0, c - 1));
+     await supabase.from('notifications').update({ is_read: true }).eq('id', id);
++    announceChanged();
+   };
+ 
++  // Menandai SEMUA notifikasi belum dibaca milik user ini, termasuk yang tidak
++  // ikut termuat di dropdown (hanya 20 terbaru).
+   const markAllAsRead = async () => {
+-    const unreadIds = items.filter((n) => !n.is_read).map((n) => n.id);
+-    if (unreadIds.length === 0) return;
++    if (unreadTotal === 0) return;
+     setItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
+-    await supabase.from('notifications').update({ is_read: true }).in('id', unreadIds);
++    setUnreadTotal(0);
++    await supabase
++      .from('notifications')
++      .update({ is_read: true })
++      .eq('user_id', employeeId)
++      .eq('is_read', false);
++    announceChanged();
++  };
++
++  const handleToggle = () => {
++    // Segarkan saat dropdown dibuka supaya isinya tidak basi di antara polling.
++    if (!open) loadNotifications(employeeId);
++    setOpen((v) => !v);
+   };
+ 
+   // Belum ketemu employee row (masih loading atau memang tidak ada) — jangan
+@@ -84,7 +131,7 @@ export default function NotificationBell() {
+     <div className="relative" ref={wrapRef}>
+       <button
+         type="button"
+-        onClick={() => setOpen((v) => !v)}
++        onClick={handleToggle}
+         className="relative p-2 text-[#6B6B6B] hover:text-black transition-colors cursor-pointer"
+         aria-label="Notifikasi"
+       >
+@@ -116,25 +163,61 @@ export default function NotificationBell() {
+             ) : items.length === 0 ? (
+               <p className="text-xs text-[#9A9A9A] text-center py-8">Belum ada notifikasi.</p>
+             ) : (
+-              items.map((n) => (
+-                <Link
+-                  key={n.id}
+-                  href={n.link || '#'}
+-                  onClick={() => { if (!n.is_read) markAsRead(n.id); setOpen(false); }}
+-                  className={`block px-4 py-3 border-b border-[#F4F4F4] last:border-0 no-underline hover:bg-[#FAFAFA] transition-colors ${
+-                    !n.is_read ? 'bg-[#FFF5F5]' : ''
+-                  }`}
+-                >
+-                  <p className="text-xs text-black leading-snug">{n.pesan}</p>
+-                  <p className="text-[10px] text-[#9A9A9A] mt-1">
+-                    {new Date(n.created_at).toLocaleString('id-ID', {
+-                      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+-                    })}
+-                  </p>
+-                </Link>
+-              ))
++              items.map((n) => {
++                const { Icon, iconClass, label } = getNotificationMeta(n.tipe);
++                const rowClass = `flex items-start gap-3 w-full text-left px-4 py-3 border-b border-[#F4F4F4] last:border-0 no-underline hover:bg-[#FAFAFA] transition-colors ${
++                  !n.is_read ? 'bg-[#FFF5F5]' : ''
++                }`;
++                const content = (
++                  <>
++                    <span
++                      className={`shrink-0 mt-0.5 w-7 h-7 flex items-center justify-center rounded-full ${iconClass}`}
++                      title={label}
++                    >
++                      <Icon size={14} />
++                    </span>
++                    <span className="min-w-0 flex-1">
++                      <span className="block text-xs text-black leading-snug">{n.pesan}</span>
++                      <span className="block text-[10px] text-[#9A9A9A] mt-1">
++                        {new Date(n.created_at).toLocaleString('id-ID', {
++                          day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
++                        })}
++                      </span>
++                    </span>
++                  </>
++                );
++
++                // Notifikasi tanpa link tidak boleh jadi tautan ke '#' — cukup
++                // ditandai dibaca, dropdown tetap terbuka.
++                return n.link ? (
++                  <Link
++                    key={n.id}
++                    href={n.link}
++                    onClick={() => { if (!n.is_read) markAsRead(n.id); setOpen(false); }}
++                    className={rowClass}
++                  >
++                    {content}
++                  </Link>
++                ) : (
++                  <button
++                    key={n.id}
++                    type="button"
++                    onClick={() => { if (!n.is_read) markAsRead(n.id); }}
++                    className={`${rowClass} cursor-pointer`}
++                  >
++                    {content}
++                  </button>
++                );
++              })
+             )}
+           </div>
++          <Link
++            href="/employee/notifications"
++            onClick={() => setOpen(false)}
++            className="block px-4 py-3 border-t border-[#E0E0E0] text-center text-xs font-medium text-madael-red hover:text-madael-dark no-underline"
++          >
++            Lihat semua notifikasi
++          </Link>
+         </div>
+       )}
+     </div>
+diff --git a/lib/notificationTypes.js b/lib/notificationTypes.js
+new file mode 100644
+index 0000000..3c5f8b9
+--- /dev/null
++++ b/lib/notificationTypes.js
+@@ -0,0 +1,94 @@
++// Metadata tampilan untuk kolom `notifications.tipe` — dipakai lonceng
++// (components/NotificationBell.js) dan Pusat Notifikasi
++// (app/employee/notifications). Satu sumber supaya ikon dan kategori konsisten.
++//
++// Nilai `tipe` dibuat di banyak tempat (lib/notify.js dipanggil dari halaman
++// dan rute API), sebagian dirakit dinamis (mis. `cuti_${decision}`), jadi
++// pencocokan memakai AWALAN, bukan daftar nilai tetap. Tipe baru yang belum
++// terdaftar jatuh ke kategori "Lainnya" dengan ikon lonceng — tidak error.
++
++import {
++  Bell,
++  CalendarDays,
++  Clock,
++  ClipboardCheck,
++  Receipt,
++  UserCog,
++  Wallet,
++  Megaphone,
++  LifeBuoy,
++  Briefcase,
++} from 'lucide-react';
++
++// Nama event window — dikirim setelah notifikasi ditandai dibaca supaya
++// lonceng dan halaman Pusat Notifikasi (yang bisa terbuka bersamaan)
++// saling menyegarkan tanpa menunggu polling.
++export const NOTIFICATIONS_CHANGED_EVENT = 'notifications:changed';
++
++// Urutan penting: aturan yang lebih spesifik harus di atas aturan umum
++// (mis. `koreksi_absensi_` sebelum yang lain). Tiap aturan: awalan tipe -> kategori.
++const CATEGORIES = {
++  cuti: { label: 'Cuti', icon: CalendarDays },
++  lembur: { label: 'Lembur', icon: Clock },
++  absensi: { label: 'Absensi', icon: ClipboardCheck },
++  reimbursement: { label: 'Reimbursement', icon: Receipt },
++  profil: { label: 'Profil', icon: UserCog },
++  gaji: { label: 'Gaji', icon: Wallet },
++  pengumuman: { label: 'Pengumuman', icon: Megaphone },
++  bantuan: { label: 'Bantuan', icon: LifeBuoy },
++  rekrutmen: { label: 'Rekrutmen', icon: Briefcase },
++  lainnya: { label: 'Lainnya', icon: Bell },
++};
++
++const PREFIX_RULES = [
++  ['cuti_', 'cuti'],
++  ['lembur_', 'lembur'],
++  ['koreksi_absensi_', 'absensi'],
++  ['absensi_', 'absensi'],
++  ['reimbursement_', 'reimbursement'],
++  ['profil_', 'profil'],
++  ['payroll_', 'gaji'],
++  ['payslip_', 'gaji'],
++  ['pengumuman_', 'pengumuman'],
++  ['tiket_', 'bantuan'],
++  ['pelamar_', 'rekrutmen'],
++  ['interview_', 'rekrutmen'],
++  ['reviewer_', 'rekrutmen'],
++];
++
++// Hasil akhir keputusan, dilihat dari akhiran `tipe` — dipakai untuk memberi
++// warna ikon (hijau = disetujui/selesai, merah = ditolak/dibatalkan).
++const SUCCESS_RE = /(disetujui|approved|paid|published)$/;
++const DANGER_RE = /(ditolak|rejected|dibatalkan|cancelled)$/;
++
++const TONE_CLASS = {
++  success: 'bg-green-100 text-green-700',
++  danger: 'bg-red-100 text-red-700',
++  neutral: 'bg-[#F4F4F4] text-[#6B6B6B]',
++};
++
++export function getNotificationCategoryKey(tipe) {
++  const value = typeof tipe === 'string' ? tipe : '';
++  const rule = PREFIX_RULES.find(([prefix]) => value.startsWith(prefix));
++  return rule ? rule[1] : 'lainnya';
++}
++
++// Return { categoryKey, label, Icon, iconClass } untuk satu nilai `tipe`.
++export function getNotificationMeta(tipe) {
++  const categoryKey = getNotificationCategoryKey(tipe);
++  const category = CATEGORIES[categoryKey];
++  const value = typeof tipe === 'string' ? tipe : '';
++  const tone = SUCCESS_RE.test(value) ? 'success' : DANGER_RE.test(value) ? 'danger' : 'neutral';
++  return {
++    categoryKey,
++    label: category.label,
++    Icon: category.icon,
++    iconClass: TONE_CLASS[tone],
++  };
++}
++
++// Daftar kategori untuk filter di halaman Pusat Notifikasi: [{ key, label }].
++export const NOTIFICATION_CATEGORY_OPTIONS = Object.entries(CATEGORIES).map(([key, c]) => ({
++  key,
++  label: c.label,
++}));
+-- 
+2.43.0
+
