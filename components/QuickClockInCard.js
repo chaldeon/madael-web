@@ -12,15 +12,20 @@
 // — link "Lihat detail" di bawah mengarah ke sana.
 
 import { useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Camera, CheckCircle2, Clock, AlertTriangle, QrCode } from 'lucide-react';
 import { useAttendanceClock } from '@/lib/useAttendanceClock';
 import CameraCapture from '@/components/CameraCapture';
-import QrScanner from '@/components/QrScanner';
 import AttendanceReviewScreen from '@/components/AttendanceReviewScreen';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
 import BreakControl from '@/components/BreakControl';
 import { getBreakState } from '@/lib/attendanceBreak';
+
+// Scanner QR (beserta jsQR) baru dibutuhkan saat tombol Scan QR ditekan, jadi
+// dimuat on-demand dan tidak ikut bundle dashboard. Hanya dirender saat
+// qrMode aktif (lihat bawah); ssr:false karena memakai kamera/browser API.
+const QrScanner = dynamic(() => import('@/components/QrScanner'), { ssr: false });
 
 function formatWaktu(iso) {
   if (!iso) return '—';
@@ -172,13 +177,15 @@ export default function QuickClockInCard({ employee }) {
         onClose={closeCamera}
       />
 
-      <QrScanner
-        open={!!qrMode}
-        title={`Scan QR ${qrMode === 'in' ? 'Clock In' : 'Clock Out'}`}
-        hint="Arahkan kamera ke QR absensi di lokasi kerja."
-        onScan={handleQrScan}
-        onClose={closeQr}
-      />
+      {qrMode && (
+        <QrScanner
+          open
+          title={`Scan QR ${qrMode === 'in' ? 'Clock In' : 'Clock Out'}`}
+          hint="Arahkan kamera ke QR absensi di lokasi kerja."
+          onScan={handleQrScan}
+          onClose={closeQr}
+        />
+      )}
 
       <AttendanceReviewScreen
         review={review}
