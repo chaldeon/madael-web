@@ -20,6 +20,7 @@ import EmptyState from '@/components/EmptyState';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { Chip, StatusBadge } from '@/components/peraturan/PeraturanParts';
 import RelasiManager from '@/components/peraturan/RelasiManager';
+import PasalList from '@/components/peraturan/PasalList';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RELASI_COLUMNS = 'id, jenis_relasi, catatan';
@@ -259,6 +260,13 @@ export default function PeraturanDetailPage() {
           </div>
         )}
 
+        <PasalList
+          peraturanId={row.id}
+          peraturanLabel={labelPeraturan(row)}
+          canEdit={canEdit}
+          employee={employee}
+        />
+
         {(row.topik?.length > 0 || row.keywords?.length > 0) && (
           <div className="mt-6 pt-6 border-t border-[#E0E0E0]">
             <h2 className="text-sm font-medium text-black mb-3">Topik & Keyword</h2>
@@ -322,7 +330,7 @@ export default function PeraturanDetailPage() {
       <ConfirmDialog
         open={confirmDelete}
         title="Hapus Peraturan"
-        message={<>Hapus <strong>{labelPeraturan(row)}</strong> beserta relasinya? Tindakan ini tidak bisa dibatalkan.</>}
+        message={<>Hapus <strong>{labelPeraturan(row)}</strong> beserta relasi dan seluruh pasalnya? Tindakan ini tidak bisa dibatalkan.</>}
         confirmLabel="Hapus"
         busyLabel="Menghapus..."
         busy={deleting}

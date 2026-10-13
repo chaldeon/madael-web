@@ -43,6 +43,9 @@ const AKSI_LABEL = {
   impor_employee_massal: 'Impor Employee Massal',
   tambah_relasi_peraturan: 'Tambah Relasi Peraturan',
   hapus_relasi_peraturan: 'Hapus Relasi Peraturan',
+  tambah_pasal_peraturan: 'Tambah Pasal Peraturan',
+  ubah_pasal_peraturan: 'Ubah Pasal Peraturan',
+  hapus_pasal_peraturan: 'Hapus Pasal Peraturan',
 };
 
 function formatWaktu(value) {
