@@ -12,8 +12,9 @@ import { logActivity } from '@/lib/activityLog';
 import { friendlyError } from '@/lib/errorMessage';
 import {
   PERATURAN_MODULE_KEY, DETAIL_COLUMNS, RELASI_LABEL, labelPeraturan, formatTanggal,
-  formatTanggalWaktu, isHttpUrl,
+  formatTanggalWaktu, isHttpUrl, formatUkuranBerkas,
 } from '@/lib/peraturanConfig';
+import { hapusPdfPeraturan } from '@/lib/peraturanPdf';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -140,8 +141,11 @@ export default function PeraturanDetailPage() {
       aksi: 'hapus_peraturan',
       targetTable: 'peraturan',
       targetId: row.id,
-      detail: { peraturan: labelPeraturan(row), judul: row.judul },
+      detail: { peraturan: labelPeraturan(row), judul: row.judul, ...(row.pdf_nama ? { pdf: row.pdf_nama } : {}) },
     });
+    // Baris sudah terhapus, jadi PDF-nya di Drive tidak dirujuk lagi. Best effort:
+    // gagal di sini hanya meninggalkan berkas yatim di Drive.
+    if (row.pdf_drive_id) await hapusPdfPeraturan(row.pdf_drive_id);
     router.push('/employee/peraturan');
   };
 
@@ -221,7 +225,7 @@ export default function PeraturanDetailPage() {
           <InfoRow label="Status">{row.status}</InfoRow>
         </dl>
 
-        {(row.url_sumber || row.url_pdf) && (
+        {(row.url_sumber || row.url_pdf || row.pdf_drive_id) && (
           <div className="flex flex-wrap gap-3 mt-6">
             {/* Hanya http(s) yang dijadikan tautan; database juga menolak skema lain. */}
             {isHttpUrl(row.url_sumber) && (
@@ -235,6 +239,19 @@ export default function PeraturanDetailPage() {
                 Sumber resmi
               </a>
             )}
+            {/* PDF unggahan dibuka lewat route proxy (sesi login), bukan tautan Drive. */}
+            {row.pdf_drive_id && (
+              <a
+                href={`/api/peraturan/${row.id}/pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-madael-red hover:text-madael-dark"
+              >
+                <FileText size={14} />
+                Buka PDF{row.pdf_nama ? ` — ${row.pdf_nama}` : ''}
+                {row.pdf_ukuran ? ` (${formatUkuranBerkas(row.pdf_ukuran)})` : ''}
+              </a>
+            )}
             {isHttpUrl(row.url_pdf) && (
               <a
                 href={row.url_pdf}
@@ -243,7 +260,7 @@ export default function PeraturanDetailPage() {
                 className="inline-flex items-center gap-2 text-sm text-madael-red hover:text-madael-dark"
               >
                 <FileText size={14} />
-                Berkas PDF
+                {row.pdf_drive_id ? 'PDF (tautan luar)' : 'Berkas PDF'}
               </a>
             )}
           </div>
@@ -330,7 +347,7 @@ export default function PeraturanDetailPage() {
       <ConfirmDialog
         open={confirmDelete}
         title="Hapus Peraturan"
-        message={<>Hapus <strong>{labelPeraturan(row)}</strong> beserta relasi dan seluruh pasalnya? Tindakan ini tidak bisa dibatalkan.</>}
+        message={<>Hapus <strong>{labelPeraturan(row)}</strong> beserta relasi{row.pdf_drive_id ? ', berkas PDF yang diunggah,' : ''} dan seluruh pasalnya? Tindakan ini tidak bisa dibatalkan.</>}
         confirmLabel="Hapus"
         busyLabel="Menghapus..."
         busy={deleting}
