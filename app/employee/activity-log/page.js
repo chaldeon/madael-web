@@ -41,6 +41,8 @@ const AKSI_LABEL = {
   duplikat_lowongan: 'Duplikat Lowongan',
   tambah_employee: 'Tambah Employee',
   impor_employee_massal: 'Impor Employee Massal',
+  tambah_relasi_peraturan: 'Tambah Relasi Peraturan',
+  hapus_relasi_peraturan: 'Hapus Relasi Peraturan',
 };
 
 function formatWaktu(value) {
