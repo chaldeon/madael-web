@@ -19,6 +19,7 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { Chip, StatusBadge } from '@/components/peraturan/PeraturanParts';
+import RelasiManager from '@/components/peraturan/RelasiManager';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RELASI_COLUMNS = 'id, jenis_relasi, catatan';
@@ -51,13 +52,16 @@ export default function PeraturanDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
 
-  const load = useCallback(async () => {
+  // silent: muat ulang tanpa menampilkan LoadingState (dipakai setelah tambah/hapus
+  // relasi supaya form tidak hilang). Objek opsi, bukan boolean, supaya aman dipakai
+  // sebagai handler onRetry (yang menerima event klik).
+  const load = useCallback(async ({ silent = false } = {}) => {
     if (!UUID_RE.test(String(id))) {
       setNotFound(true);
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError('');
     setNotFound(false);
 
@@ -94,8 +98,12 @@ export default function PeraturanDetailPage() {
       Object.entries(RELASI_LABEL).forEach(([jenisRelasi, label]) => {
         const keluar = (outRes.data || []).filter((r) => r.jenis_relasi === jenisRelasi && r.ref);
         const masuk = (inRes.data || []).filter((r) => r.jenis_relasi === jenisRelasi && r.ref);
-        if (keluar.length) groups.push({ key: `${jenisRelasi}-keluar`, label: label.keluar, items: keluar });
-        if (masuk.length) groups.push({ key: `${jenisRelasi}-masuk`, label: label.masuk, items: masuk });
+        if (keluar.length) {
+          groups.push({ key: `${jenisRelasi}-keluar`, label: label.keluar, arah: 'keluar', jenisRelasi, items: keluar });
+        }
+        if (masuk.length) {
+          groups.push({ key: `${jenisRelasi}-masuk`, label: label.masuk, arah: 'masuk', jenisRelasi, items: masuk });
+        }
       });
     }
 
@@ -269,7 +277,16 @@ export default function PeraturanDetailPage() {
           </div>
         )}
 
-        {relasi.length > 0 && (
+        {canEdit && (
+          <RelasiManager
+            peraturan={row}
+            groups={relasi}
+            employeeId={employee.id}
+            onChanged={() => load({ silent: true })}
+          />
+        )}
+
+        {!canEdit && relasi.length > 0 && (
           <div className="mt-6 pt-6 border-t border-[#E0E0E0]">
             <h2 className="text-sm font-medium text-black mb-3">Relasi Peraturan</h2>
             <div className="space-y-4">
