@@ -16,7 +16,7 @@ import {
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
-import { Chip, StatusBadge, inputClass } from '@/components/peraturan/PeraturanParts';
+import { Chip, Cuplikan, StatusBadge, inputClass } from '@/components/peraturan/PeraturanParts';
 
 const selectClass = inputClass;
 
@@ -292,6 +292,7 @@ export default function PeraturanListPage() {
                 </Link>
 
                 {row.tentang && <p className="text-sm text-[#3D3D3D] mt-1 line-clamp-2">{row.tentang}</p>}
+                <Cuplikan text={row.cuplikan} />
 
                 <p className="text-[11px] text-[#9A9A9A] mt-2">
                   Berlaku sejak {formatTanggal(row.tanggal_berlaku)}

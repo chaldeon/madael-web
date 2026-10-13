@@ -41,3 +41,21 @@ export function Chip({ label, onClick, active = false, count, onRemove }) {
     </button>
   );
 }
+
+// Cuplikan hasil pencarian dari RPC cari_peraturan: bagian yang cocok dibungkus
+// karakter kontrol \u0002 ... \u0003. Dirender sebagai teks React (bukan HTML).
+export function Cuplikan({ text }) {
+  if (!text) return null;
+  const parts = String(text).split(/\u0002|\u0003/);
+  return (
+    <p className="text-xs text-[#6B6B6B] mt-1 line-clamp-2">
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <mark key={i} className="bg-yellow-100 text-black">{part}</mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </p>
+  );
+}
