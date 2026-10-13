@@ -41,6 +41,9 @@ const AKSI_LABEL = {
   duplikat_lowongan: 'Duplikat Lowongan',
   tambah_employee: 'Tambah Employee',
   impor_employee_massal: 'Impor Employee Massal',
+  tambah_peraturan: 'Tambah Peraturan',
+  ubah_peraturan: 'Ubah Peraturan',
+  hapus_peraturan: 'Hapus Peraturan',
   tambah_relasi_peraturan: 'Tambah Relasi Peraturan',
   hapus_relasi_peraturan: 'Hapus Relasi Peraturan',
   tambah_pasal_peraturan: 'Tambah Pasal Peraturan',
@@ -243,7 +246,7 @@ export default function ActivityLogPage() {
         <h1 className="text-2xl font-semibold text-black">Activity Log</h1>
       </div>
       <p className="text-sm text-[#6B6B6B] mb-8">
-        Audit trail untuk koreksi absensi, approve/reject cuti, perubahan status payroll, dan edit struktur gaji.
+        Audit trail aktivitas penting di seluruh modul, seperti absensi, cuti, lembur, payroll, lowongan, dan peraturan.
       </p>
 
       <div className="flex flex-wrap items-center gap-3 mb-6">
