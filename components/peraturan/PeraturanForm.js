@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
@@ -8,8 +8,9 @@ import { logActivity } from '@/lib/activityLog';
 import { friendlyError } from '@/lib/errorMessage';
 import {
   JENIS_OPTIONS, STATUS_OPTIONS, TOPIK_OPTIONS, LIMITS, MIN_TAHUN, MAX_TAHUN,
-  EMPTY_FORM, formFromRow, buildPayload, parseKeywords, labelPeraturan,
+  EMPTY_FORM, formFromRow, buildPayload, parseKeywords, labelPeraturan, formatUkuranBerkas,
 } from '@/lib/peraturanConfig';
+import { validasiPdf, unggahPdfPeraturan, hapusPdfPeraturan } from '@/lib/peraturanPdf';
 import { Chip, inputClass, labelClass } from '@/components/peraturan/PeraturanParts';
 
 // Form tambah (initialRow kosong) dan ubah (initialRow = baris peraturan).
@@ -26,7 +27,16 @@ export default function PeraturanForm({ initialRow = null, employee }) {
   const [error, setError] = useState('');
   const [duplicateId, setDuplicateId] = useState(null);
 
-  const dirty = JSON.stringify(form) !== baseline;
+  // PDF unggahan (Google Drive). Terpisah dari `form` karena bukan bagian dari
+  // buildPayload: kolom pdf_* hanya diisi dari hasil unggah di handleSubmit.
+  const [pdfFile, setPdfFile] = useState(null);
+  const [hapusPdf, setHapusPdf] = useState(false);
+  const pdfInputRef = useRef(null);
+  const pdfLama = initialRow?.pdf_drive_id
+    ? { id: initialRow.pdf_drive_id, nama: initialRow.pdf_nama, ukuran: initialRow.pdf_ukuran }
+    : null;
+
+  const dirty = JSON.stringify(form) !== baseline || !!pdfFile || hapusPdf;
 
   // Peringatan bawaan browser kalau tab ditutup/di-refresh saat ada isian belum disimpan.
   useEffect(() => {
@@ -42,6 +52,29 @@ export default function PeraturanForm({ initialRow = null, employee }) {
       ...prev,
       topik: prev.topik.includes(t) ? prev.topik.filter((x) => x !== t) : [...prev.topik, t],
     }));
+
+  const pilihPdf = async (e) => {
+    const file = e.target.files?.[0] || null;
+    setError('');
+    if (!file) {
+      setPdfFile(null);
+      return;
+    }
+    const pesan = await validasiPdf(file);
+    if (pesan) {
+      setError(pesan);
+      setPdfFile(null);
+      if (pdfInputRef.current) pdfInputRef.current.value = '';
+      return;
+    }
+    setPdfFile(file);
+    setHapusPdf(false);
+  };
+
+  const batalPilihPdf = () => {
+    setPdfFile(null);
+    if (pdfInputRef.current) pdfInputRef.current.value = '';
+  };
 
   const keywordPreview = useMemo(() => parseKeywords(form.keywordsText), [form.keywordsText]);
 
@@ -59,28 +92,57 @@ export default function PeraturanForm({ initialRow = null, employee }) {
 
     setSaving(true);
 
+    // Urutan untuk PDF: unggah ke Drive DULU, lalu simpan baris (payload + kolom
+    // pdf_*) dalam satu insert/update, supaya database tidak pernah berisi baris
+    // setengah jadi. Kalau penyimpanan baris gagal, berkas yang baru diunggah
+    // dihapus lagi (bersihPdfBaru). PDF lama baru dihapus SETELAH update sukses.
+    let pdfBaru = null;
+    if (pdfFile) {
+      try {
+        pdfBaru = await unggahPdfPeraturan(pdfFile);
+      } catch (uploadError) {
+        setSaving(false);
+        setError(uploadError.message);
+        return;
+      }
+    }
+    const bersihPdfBaru = () => (pdfBaru ? hapusPdfPeraturan(pdfBaru.fileId) : null);
+
+    let pdfColumns = {};
+    if (pdfBaru) {
+      pdfColumns = { pdf_drive_id: pdfBaru.fileId, pdf_nama: pdfBaru.nama, pdf_ukuran: pdfBaru.ukuran };
+    } else if (editing && hapusPdf && pdfLama) {
+      pdfColumns = { pdf_drive_id: null, pdf_nama: null, pdf_ukuran: null };
+    }
+
     if (editing) {
       const { data, error: err } = await supabase
         .from('peraturan')
-        .update(payload)
+        .update({ ...payload, ...pdfColumns })
         .eq('id', initialRow.id)
         .select('id');
 
       if (err) {
+        await bersihPdfBaru();
         setSaving(false);
         await handleSaveError(err, 'Gagal menyimpan perubahan peraturan.');
         return;
       }
       if (!data || data.length === 0) {
         // RLS menolak diam-diam (0 baris) atau data sudah dihapus.
+        await bersihPdfBaru();
         setSaving(false);
         setError('Perubahan tidak tersimpan: kamu tidak punya izin, atau peraturan ini sudah dihapus.');
         return;
       }
 
+      // Baris sudah tersimpan: PDF lama (diganti/dihapus) tidak dirujuk lagi.
+      if (pdfLama && 'pdf_drive_id' in pdfColumns) await hapusPdfPeraturan(pdfLama.id);
+
       const changed = Object.keys(payload).filter(
         (k) => JSON.stringify(payload[k]) !== JSON.stringify(initialRow[k] ?? (Array.isArray(payload[k]) ? [] : null))
       );
+      if ('pdf_drive_id' in pdfColumns) changed.push('pdf_drive_id');
       logActivity(supabase, {
         userId: employee.id,
         aksi: 'ubah_peraturan',
@@ -92,8 +154,9 @@ export default function PeraturanForm({ initialRow = null, employee }) {
       return;
     }
 
-    const { data, error: err } = await supabase.from('peraturan').insert([payload]).select('id').single();
+    const { data, error: err } = await supabase.from('peraturan').insert([{ ...payload, ...pdfColumns }]).select('id').single();
     if (err) {
+      await bersihPdfBaru();
       setSaving(false);
       await handleSaveError(err, 'Gagal menyimpan peraturan.');
       return;
@@ -104,7 +167,7 @@ export default function PeraturanForm({ initialRow = null, employee }) {
       aksi: 'tambah_peraturan',
       targetTable: 'peraturan',
       targetId: data.id,
-      detail: { peraturan: labelPeraturan(payload), judul: payload.judul },
+      detail: { peraturan: labelPeraturan(payload), judul: payload.judul, ...(pdfBaru ? { pdf: pdfBaru.nama } : {}) },
     });
     router.push(`/employee/peraturan/${data.id}`);
   };
@@ -199,6 +262,50 @@ export default function PeraturanForm({ initialRow = null, employee }) {
           <label className={labelClass} htmlFor="p-url-pdf">URL Berkas PDF (opsional)</label>
           <input id="p-url-pdf" type="url" value={form.url_pdf} onChange={set('url_pdf')} className={inputClass} placeholder="https://..." />
         </div>
+      </div>
+
+      <div className="mb-4">
+        <label className={labelClass} htmlFor="p-pdf-file">Unggah Berkas PDF (opsional)</label>
+        {pdfLama && !hapusPdf && !pdfFile && (
+          <div className="flex flex-wrap items-center gap-3 mb-2 text-sm text-[#3D3D3D]">
+            <a
+              href={`/api/peraturan/${initialRow.id}/pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-madael-red hover:text-madael-dark underline break-all"
+            >
+              {pdfLama.nama || 'Berkas PDF'}
+            </a>
+            {pdfLama.ukuran ? <span className="text-xs text-[#9A9A9A]">{formatUkuranBerkas(pdfLama.ukuran)}</span> : null}
+            <button type="button" onClick={() => setHapusPdf(true)} className="text-xs text-red-700 hover:underline">
+              Hapus berkas
+            </button>
+          </div>
+        )}
+        {pdfLama && hapusPdf && (
+          <p className="text-xs text-amber-700 mb-2">
+            Berkas <strong>{pdfLama.nama || 'PDF'}</strong> akan dihapus saat disimpan.{' '}
+            <button type="button" onClick={() => setHapusPdf(false)} className="underline">Batalkan</button>
+          </p>
+        )}
+        <input
+          id="p-pdf-file"
+          ref={pdfInputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          onChange={pilihPdf}
+          className={`${inputClass} file:mr-3 file:border-0 file:bg-[#F4F4F4] file:px-3 file:py-1 file:text-xs`}
+        />
+        {pdfFile && (
+          <p className="text-xs text-[#3D3D3D] mt-1">
+            {pdfFile.name} ({formatUkuranBerkas(pdfFile.size)}){' '}
+            <button type="button" onClick={batalPilihPdf} className="text-red-700 hover:underline">Batal pilih</button>
+            {pdfLama && !hapusPdf && ' — menggantikan berkas yang ada.'}
+          </p>
+        )}
+        <p className="text-[11px] text-[#9A9A9A] mt-1">
+          PDF maksimal {formatUkuranBerkas(LIMITS.pdfBytes)}, disimpan di Google Drive. Berkas lebih besar: gunakan kolom URL di atas.
+        </p>
       </div>
 
       <fieldset className="mb-4">
