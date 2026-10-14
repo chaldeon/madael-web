@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Scale, Search, Plus } from 'lucide-react';
+import { Scale, Search, Plus, Upload } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { friendlyError } from '@/lib/errorMessage';
@@ -183,13 +183,22 @@ export default function PeraturanListPage() {
           </p>
         </div>
         {canEdit && (
-          <Link
-            href="/employee/peraturan/baru"
-            className="inline-flex items-center gap-2 bg-madael-red text-white px-5 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
-          >
-            <Plus size={16} />
-            Tambah Peraturan
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/employee/peraturan/impor"
+              className="inline-flex items-center gap-2 border border-[#E0E0E0] bg-white text-black px-5 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-[#F4F4F4] transition-colors"
+            >
+              <Upload size={16} />
+              Impor
+            </Link>
+            <Link
+              href="/employee/peraturan/baru"
+              className="inline-flex items-center gap-2 bg-madael-red text-white px-5 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
+            >
+              <Plus size={16} />
+              Tambah Peraturan
+            </Link>
+          </div>
         )}
       </div>
 

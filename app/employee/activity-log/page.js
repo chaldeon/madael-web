@@ -49,6 +49,7 @@ const AKSI_LABEL = {
   tambah_pasal_peraturan: 'Tambah Pasal Peraturan',
   ubah_pasal_peraturan: 'Ubah Pasal Peraturan',
   hapus_pasal_peraturan: 'Hapus Pasal Peraturan',
+  impor_peraturan_massal: 'Impor Peraturan Massal',
 };
 
 function formatWaktu(value) {
