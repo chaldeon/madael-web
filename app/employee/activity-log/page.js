@@ -10,6 +10,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { friendlyError } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 function currentMonthValue() {
   const d = new Date();
@@ -173,12 +174,17 @@ export default function ActivityLogPage() {
 
     const [empRes, logRes] = await Promise.all([
       supabase.from('employees').select('id, nama').order('nama'),
-      supabase
-        .from('activity_logs')
-        .select('id, user_id, aksi, target_table, target_id, detail, created_at')
-        .gte('created_at', firstDay)
-        .lt('created_at', lastDay)
-        .order('created_at', { ascending: false }),
+      // PostgREST memotong respons di 1.000 baris tanpa error; fetchAllRows
+      // mengambil seluruh log bulan ini lewat paginasi (urutan created_at desc,
+      // `id` hanya pemutus seri).
+      fetchAllRows(() =>
+        supabase
+          .from('activity_logs')
+          .select('id, user_id, aksi, target_table, target_id, detail, created_at')
+          .gte('created_at', firstDay)
+          .lt('created_at', lastDay)
+          .order('created_at', { ascending: false })
+      ),
     ]);
 
     const firstError = empRes.error || logRes.error;
