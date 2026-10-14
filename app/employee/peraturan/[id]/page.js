@@ -22,6 +22,7 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import { Chip, StatusBadge } from '@/components/peraturan/PeraturanParts';
 import RelasiManager from '@/components/peraturan/RelasiManager';
 import PasalList from '@/components/peraturan/PasalList';
+import RevisiPanel from '@/components/peraturan/RevisiPanel';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RELASI_COLUMNS = 'id, jenis_relasi, catatan';
@@ -335,6 +336,13 @@ export default function PeraturanDetailPage() {
           </div>
         )}
 
+        <RevisiPanel
+          row={row}
+          canEdit={canEdit}
+          employee={employee}
+          onRestored={() => load({ silent: true })}
+        />
+
         <p className="text-[11px] text-[#9A9A9A] mt-8">
           Dibuat {formatTanggalWaktu(row.created_at)}
           {row.pembuat?.nama && ` oleh ${row.pembuat.nama}`}
@@ -347,7 +355,7 @@ export default function PeraturanDetailPage() {
       <ConfirmDialog
         open={confirmDelete}
         title="Hapus Peraturan"
-        message={<>Hapus <strong>{labelPeraturan(row)}</strong> beserta relasi{row.pdf_drive_id ? ', berkas PDF yang diunggah,' : ''} dan seluruh pasalnya? Tindakan ini tidak bisa dibatalkan.</>}
+        message={<>Hapus <strong>{labelPeraturan(row)}</strong> beserta relasi{row.pdf_drive_id ? ', berkas PDF yang diunggah,' : ''} dan seluruh pasalnya? Peraturan bisa dipulihkan dari halaman Terhapus (berkas PDF unggahan tidak ikut dipulihkan).</>}
         confirmLabel="Hapus"
         busyLabel="Menghapus..."
         busy={deleting}

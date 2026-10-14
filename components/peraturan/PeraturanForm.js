@@ -139,8 +139,10 @@ export default function PeraturanForm({ initialRow = null, employee }) {
       // Baris sudah tersimpan: PDF lama (diganti/dihapus) tidak dirujuk lagi.
       if (pdfLama && 'pdf_drive_id' in pdfColumns) await hapusPdfPeraturan(pdfLama.id);
 
+      // Daftar (topik, keywords) dibandingkan tanpa memedulikan urutan.
+      const bentuk = (v) => (Array.isArray(v) ? JSON.stringify([...v].sort()) : JSON.stringify(v));
       const changed = Object.keys(payload).filter(
-        (k) => JSON.stringify(payload[k]) !== JSON.stringify(initialRow[k] ?? (Array.isArray(payload[k]) ? [] : null))
+        (k) => bentuk(payload[k]) !== bentuk(initialRow[k] ?? (Array.isArray(payload[k]) ? [] : null))
       );
       if ('pdf_drive_id' in pdfColumns) changed.push('pdf_drive_id');
       logActivity(supabase, {
