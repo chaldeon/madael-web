@@ -50,6 +50,7 @@ const AKSI_LABEL = {
   ubah_pasal_peraturan: 'Ubah Pasal Peraturan',
   hapus_pasal_peraturan: 'Hapus Pasal Peraturan',
   impor_peraturan_massal: 'Impor Peraturan Massal',
+  ekspor_peraturan: 'Ekspor Peraturan',
   pulihkan_revisi_peraturan: 'Pulihkan Revisi Peraturan',
 };
 

@@ -5,13 +5,17 @@ export const dynamic = 'force-dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Scale, Search, Plus, Upload, Trash2 } from 'lucide-react';
+import { Scale, Search, Plus, Upload, Trash2, Download } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { friendlyError } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
+import { logActivity } from '@/lib/activityLog';
+import { downloadCsv } from '@/lib/exportCsv';
 import {
   PERATURAN_MODULE_KEY, JENIS_OPTIONS, STATUS_OPTIONS, TOPIK_OPTIONS, PAGE_SIZE,
   MIN_TAHUN, MAX_TAHUN, labelPeraturan, formatTanggal,
+  EXPORT_HEADERS, EXPORT_SELECT, EXPORT_ID_CHUNK, peraturanToExportRow, sortPeraturanExport,
 } from '@/lib/peraturanConfig';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -144,6 +148,80 @@ export default function PeraturanListPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // --- Ekspor CSV (sekaligus cadangan) ---
+  // 'semua'  : seluruh tabel peraturan, langsung dari tabel (tidak lewat RPC pencarian).
+  // 'filter' : semua hasil pencarian/filter aktif (bukan hanya halaman yang tampil):
+  //            id dari RPC cari_peraturan (argumen sama dengan load()), lalu baris
+  //            lengkapnya diambil dari tabel karena RPC tidak membawa semua kolom.
+  const [exporting, setExporting] = useState('');
+  const [exportError, setExportError] = useState('');
+
+  const handleExport = async (scope) => {
+    if (exporting) return;
+    setExporting(scope);
+    setExportError('');
+    try {
+      let data;
+      if (scope === 'semua') {
+        const res = await fetchAllRows(() => supabase.from('peraturan').select(EXPORT_SELECT));
+        if (res.error) throw res.error;
+        data = res.data;
+      } else {
+        const hit = await fetchAllRows(() =>
+          supabase.rpc('cari_peraturan', {
+            p_q: q.trim() ? q : null,
+            p_jenis: jenis || null,
+            p_tahun: tahun ? Number(tahun) : null,
+            p_status: status || null,
+            p_topik: topik || null,
+            p_keywords: keywords.length ? keywords : null,
+          })
+        );
+        if (hit.error) throw hit.error;
+        const ids = [...new Set(hit.data.map((r) => r.id))];
+        data = [];
+        for (let i = 0; i < ids.length; i += EXPORT_ID_CHUNK) {
+          const { data: part, error: err } = await supabase
+            .from('peraturan')
+            .select(EXPORT_SELECT)
+            .in('id', ids.slice(i, i + EXPORT_ID_CHUNK));
+          if (err) throw err;
+          data.push(...(part || []));
+        }
+      }
+
+      if (!data || data.length === 0) {
+        setExportError('Tidak ada data untuk diekspor.');
+        return;
+      }
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      downloadCsv(
+        `peraturan-${scope === 'semua' ? 'semua' : 'filter'}-${stamp}.csv`,
+        EXPORT_HEADERS,
+        sortPeraturanExport(data).map(peraturanToExportRow),
+        { neutralizeFormulas: true }
+      );
+
+      if (employee?.id) {
+        logActivity(supabase, {
+          userId: employee.id,
+          aksi: 'ekspor_peraturan',
+          targetTable: 'peraturan',
+          targetId: null,
+          detail: {
+            cakupan: scope === 'semua' ? 'semua' : 'filter',
+            jumlah: data.length,
+            filter: scope === 'filter' ? { q: q.trim() || null, jenis, tahun, status, topik, keywords } : null,
+          },
+        });
+      }
+    } catch (err) {
+      setExportError(friendlyError(err, 'Gagal mengekspor peraturan.', { context: 'Ekspor peraturan' }));
+    } finally {
+      setExporting('');
+    }
+  };
 
   const toggleKeyword = (kw) => {
     const next = keywords.includes(kw) ? keywords.filter((k) => k !== kw) : [...keywords, kw];
@@ -286,9 +364,36 @@ export default function PeraturanListPage() {
         </div>
       ) : (
         <div className={loading ? 'opacity-60' : ''}>
-          <p className="text-xs text-[#6B6B6B] mb-3">
-            Menampilkan {firstShown}–{lastShown} dari {total} peraturan
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <p className="text-xs text-[#6B6B6B]">
+              Menampilkan {firstShown}–{lastShown} dari {total} peraturan
+            </p>
+            <div className="flex flex-wrap items-center gap-4">
+              {hasFilter && (
+                <button
+                  type="button"
+                  onClick={() => handleExport('filter')}
+                  disabled={!!exporting}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-madael-red hover:text-madael-dark disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Download size={13} />
+                  {exporting === 'filter' ? 'Mengekspor...' : `Ekspor hasil filter (${total})`}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => handleExport('semua')}
+                disabled={!!exporting}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-madael-red hover:text-madael-dark disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Download size={13} />
+                {exporting === 'semua' ? 'Mengekspor...' : 'Ekspor semua (CSV)'}
+              </button>
+            </div>
+          </div>
+          {exportError && (
+            <p role="alert" className="text-xs text-red-600 mb-3">{exportError}</p>
+          )}
 
           <div className="space-y-3">
             {rows.map((row) => (
