@@ -1,0 +1,420 @@
+From ef78c8d9829b15d0869b74ee9aea79d48a2746d4 Mon Sep 17 00:00:00 2001
+From: Gegs <gegs@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 06:44:59 +0000
+Subject: [PATCH] Fix: modul absensi_admin menyesatkan, lolos gate tapi ditolak
+ di halaman
+
+Semua halaman dan API Kelola Absensi Tim (jadwal, rekap, approval koreksi,
+koreksi manual, justify, foto, pengaturan) sudah khusus superadmin. Pemegang
+absensi_admin non-superadmin lolos gate modul lalu ditolak "khusus superadmin".
+
+Kebijakan dibuat eksplisit: absensi_admin khusus superadmin.
+- employeeModules: flag superadminOnly + SUPERADMIN_ONLY_MODULES; isModuleGranted
+  menolak non-superadmin walau ada baris sisa di employee_modules, sehingga card
+  dashboard, tab layout, halaman, dan requireModuleAccess konsisten
+- deskripsi modul diberi "(khusus superadmin)"
+- absensi_admin dihapus dari MODULE_OPTIONS (tidak bisa lagi di-assign)
+- hapus halaman yatim absensi/jadwal (key absensi_jadwal tidak terdaftar, tidak
+  ditautkan; fiturnya sudah ada di tab Jadwal Kerja halaman Kelola Absensi Tim)
+- perbaiki komentar useModuleAccess yang menyebut absensi_jadwal
+
+Tanpa perubahan database.
+---
+ app/employee/absensi/jadwal/page.js | 315 ----------------------------
+ lib/employeeModules.js              |  12 +-
+ lib/useModuleAccess.js              |   2 +-
+ 3 files changed, 11 insertions(+), 318 deletions(-)
+ delete mode 100644 app/employee/absensi/jadwal/page.js
+
+diff --git a/app/employee/absensi/jadwal/page.js b/app/employee/absensi/jadwal/page.js
+deleted file mode 100644
+index 46e587d..0000000
+--- a/app/employee/absensi/jadwal/page.js
++++ /dev/null
+@@ -1,315 +0,0 @@
+-'use client';
+-
+-export const dynamic = 'force-dynamic';
+-
+-import { useEffect, useState, useCallback, useRef } from 'react';
+-import Link from 'next/link';
+-import { X, Pencil } from 'lucide-react';
+-import { createClient } from '@/lib/supabase-browser';
+-import { useModuleAccess } from '@/lib/useModuleAccess';
+-import { useModalDismiss } from '@/lib/useModalDismiss';
+-import { MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
+-import LoadingState from '@/components/LoadingState';
+-import ErrorState from '@/components/ErrorState';
+-import EmptyState from '@/components/EmptyState';
+-import { friendlyError } from '@/lib/errorMessage';
+-
+-const HARI_OPTIONS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+-const DEFAULT_HARI = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
+-
+-const EMPTY_FORM = { jam_masuk: '08:00', jam_pulang: '17:00', hari_kerja: DEFAULT_HARI, toleransi_menit: '0' };
+-
+-function formatJam(value) {
+-  return value ? value.slice(0, 5) : '—';
+-}
+-
+-export default function JadwalKerjaPage() {
+-  const supabase = createClient();
+-  const { status } = useModuleAccess('absensi_jadwal');
+-
+-  const [employees, setEmployees] = useState([]);
+-  const [schedules, setSchedules] = useState({}); // employee_id -> schedule row
+-  const [loading, setLoading] = useState(true);
+-  const [loadError, setLoadError] = useState(null);
+-
+-  const [editingEmp, setEditingEmp] = useState(null);
+-  const [form, setForm] = useState(EMPTY_FORM);
+-  // Snapshot jadwal awal (bisa jadwal yang sudah ada, atau EMPTY_FORM kalau
+-  // karyawan belum punya jadwal) supaya bisa dibandingkan dengan form saat ini.
+-  const formBaselineRef = useRef(EMPTY_FORM);
+-  const handleEditModalBackdrop = useModalDismiss(
+-    !!editingEmp,
+-    () => setEditingEmp(null),
+-    undefined,
+-    JSON.stringify(form) !== JSON.stringify(formBaselineRef.current)
+-  );
+-  const [saving, setSaving] = useState(false);
+-  const [saveError, setSaveError] = useState(null);
+-
+-  const loadData = useCallback(async () => {
+-    setLoading(true);
+-    setLoadError(null);
+-
+-    const [empRes, schedRes] = await Promise.all([
+-      supabase
+-        .from('employees')
+-        .select('id, nama, employee_id, status, companies:client_id ( nama_perusahaan )')
+-        .eq('status', 'Aktif')
+-        .order('nama'),
+-      supabase.from('work_schedule').select('*'),
+-    ]);
+-
+-    const firstError = empRes.error || schedRes.error;
+-    if (firstError) {
+-      setLoadError(friendlyError(firstError, 'Gagal memuat data jadwal kerja.'));
+-      setLoading(false);
+-      return;
+-    }
+-
+-    setEmployees(empRes.data || []);
+-    const byEmp = {};
+-    (schedRes.data || []).forEach((s) => { byEmp[s.employee_id] = s; });
+-    setSchedules(byEmp);
+-    setLoading(false);
+-  }, [supabase]);
+-
+-  useEffect(() => {
+-    if (status === 'allowed') loadData();
+-  }, [status, loadData]);
+-
+-  const openEdit = (emp) => {
+-    const existing = schedules[emp.id];
+-    const initial = existing
+-      ? { jam_masuk: formatJam(existing.jam_masuk), jam_pulang: formatJam(existing.jam_pulang), hari_kerja: existing.hari_kerja || DEFAULT_HARI, toleransi_menit: String(existing.toleransi_menit ?? 0) }
+-      : EMPTY_FORM;
+-    formBaselineRef.current = initial;
+-    setForm(initial);
+-    setEditingEmp(emp);
+-  };
+-
+-  const toggleHari = (hari) => {
+-    setForm((f) => ({
+-      ...f,
+-      hari_kerja: f.hari_kerja.includes(hari)
+-        ? f.hari_kerja.filter((h) => h !== hari)
+-        : [...f.hari_kerja, hari],
+-    }));
+-  };
+-
+-  const handleSave = async () => {
+-    const raw = String(form.toleransi_menit ?? '').trim();
+-    const toleransi = /^\d+$/.test(raw) ? Number(raw) : null;
+-    if (toleransi === null || toleransi > MAX_TOLERANSI_MENIT) {
+-      setSaveError(`Toleransi harus bilangan bulat 0–${MAX_TOLERANSI_MENIT} menit.`);
+-      return;
+-    }
+-    setSaving(true);
+-    setSaveError(null);
+-    const { data, error } = await supabase
+-      .from('work_schedule')
+-      .upsert(
+-        [{
+-          employee_id: editingEmp.id,
+-          jam_masuk: form.jam_masuk,
+-          jam_pulang: form.jam_pulang,
+-          hari_kerja: form.hari_kerja,
+-          toleransi_menit: toleransi,
+-        }],
+-        { onConflict: 'employee_id' }
+-      )
+-      .select()
+-      .single();
+-
+-    setSaving(false);
+-    if (error) {
+-      setSaveError(friendlyError(error, 'Gagal menyimpan jadwal, coba lagi.'));
+-      return;
+-    }
+-    setSchedules((s) => ({ ...s, [editingEmp.id]: data }));
+-    setEditingEmp(null);
+-  };
+-
+-  if (status === 'loading') {
+-    return (
+-      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
+-        <LoadingState label="Memuat data..." />
+-      </section>
+-    );
+-  }
+-
+-  if (status === 'denied') {
+-    return (
+-      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
+-        <div className="w-full max-w-[420px] border-t-4 border-madael-red bg-white p-8 text-center">
+-          <p className="text-sm text-black mb-6">Kamu tidak punya akses ke halaman ini.</p>
+-          <Link
+-            href="/employee/dashboard"
+-            className="inline-block bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
+-          >
+-            Kembali ke Dashboard
+-          </Link>
+-        </div>
+-      </section>
+-    );
+-  }
+-
+-  if (loadError) {
+-    return (
+-      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
+-        <div className="w-full max-w-[420px]">
+-          <ErrorState message={loadError} onRetry={loadData} />
+-        </div>
+-      </section>
+-    );
+-  }
+-
+-  const inputClass =
+-    'border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
+-
+-  return (
+-    <div className="max-w-[900px] mx-auto px-6 py-10">
+-      <div className="mb-8">
+-        <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Jadwal Kerja</h1>
+-        <p className="text-sm text-[#6B6B6B] mt-1">Atur jam masuk, jam pulang, dan hari kerja tiap employee.</p>
+-      </div>
+-
+-      {loading ? (
+-        <LoadingState label="Memuat data jadwal..." />
+-      ) : employees.length === 0 ? (
+-        <div className="bg-white border border-[#E0E0E0]">
+-          <EmptyState message="Belum ada employee aktif yang bisa diatur jadwalnya." />
+-        </div>
+-      ) : (
+-        <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
+-          <table className="w-full text-sm">
+-            <thead>
+-              <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
+-                <th className="px-4 py-3 font-medium">Nama</th>
+-                <th className="px-4 py-3 font-medium">Perusahaan</th>
+-                <th className="px-4 py-3 font-medium">Jam Masuk</th>
+-                <th className="px-4 py-3 font-medium">Jam Pulang</th>
+-                <th className="px-4 py-3 font-medium">Toleransi (menit)</th>
+-                <th className="px-4 py-3 font-medium">Hari Kerja</th>
+-                <th className="px-4 py-3 font-medium"></th>
+-              </tr>
+-            </thead>
+-            <tbody>
+-              {employees.map((emp) => {
+-                const sched = schedules[emp.id];
+-                return (
+-                  <tr key={emp.id} className="border-b border-[#E0E0E0] last:border-0">
+-                    <td className="px-4 py-3 text-black">{emp.nama}</td>
+-                    <td className="px-4 py-3 text-[#6B6B6B]">{emp.companies?.nama_perusahaan || '—'}</td>
+-                    <td className="px-4 py-3 text-[#6B6B6B]">{sched ? formatJam(sched.jam_masuk) : '—'}</td>
+-                    <td className="px-4 py-3 text-[#6B6B6B]">{sched ? formatJam(sched.jam_pulang) : '—'}</td>
+-                    <td className="px-4 py-3 text-[#6B6B6B]">{sched ? (sched.toleransi_menit ?? 0) : '—'}</td>
+-                    <td className="px-4 py-3 text-[#6B6B6B]">
+-                      {sched?.hari_kerja?.length ? sched.hari_kerja.join(', ') : 'Belum diatur'}
+-                    </td>
+-                    <td className="px-4 py-3 text-right">
+-                      <button
+-                        onClick={() => openEdit(emp)}
+-                        className="inline-flex items-center gap-1 text-xs text-madael-red hover:text-madael-dark font-medium"
+-                      >
+-                        <Pencil size={12} />
+-                        Edit
+-                      </button>
+-                    </td>
+-                  </tr>
+-                );
+-              })}
+-            </tbody>
+-          </table>
+-        </div>
+-      )}
+-
+-      {editingEmp && (
+-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={handleEditModalBackdrop}>
+-          <div className="bg-white w-full max-w-[440px] p-6 relative" onClick={(e) => e.stopPropagation()}>
+-            <button
+-              onClick={() => setEditingEmp(null)}
+-              className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black"
+-            >
+-              <X size={18} />
+-            </button>
+-            <h2 className="text-sm font-medium text-black mb-4">Jadwal — {editingEmp.nama}</h2>
+-
+-            <div className="grid grid-cols-2 gap-3 mb-4">
+-              <label className="flex flex-col gap-1">
+-                <span className="text-xs text-[#6B6B6B]">Jam Masuk</span>
+-                <input
+-                  type="time"
+-                  value={form.jam_masuk}
+-                  onChange={(e) => setForm((f) => ({ ...f, jam_masuk: e.target.value }))}
+-                  className={inputClass}
+-                />
+-              </label>
+-              <label className="flex flex-col gap-1">
+-                <span className="text-xs text-[#6B6B6B]">Jam Pulang</span>
+-                <input
+-                  type="time"
+-                  value={form.jam_pulang}
+-                  onChange={(e) => setForm((f) => ({ ...f, jam_pulang: e.target.value }))}
+-                  className={inputClass}
+-                />
+-              </label>
+-            </div>
+-
+-            <span className="text-xs text-[#6B6B6B] block mb-2">Hari Kerja</span>
+-            <div className="flex flex-wrap gap-2 mb-6">
+-              {HARI_OPTIONS.map((hari) => {
+-                const active = form.hari_kerja.includes(hari);
+-                return (
+-                  <button
+-                    key={hari}
+-                    type="button"
+-                    onClick={() => toggleHari(hari)}
+-                    className={`px-3 py-1.5 text-xs border transition-colors ${
+-                      active
+-                        ? 'bg-madael-red text-white border-madael-red'
+-                        : 'bg-white text-[#6B6B6B] border-[#E0E0E0]'
+-                    }`}
+-                  >
+-                    {hari}
+-                  </button>
+-                );
+-              })}
+-            </div>
+-
+-            <label className="flex flex-col gap-1 mb-6">
+-              <span className="text-xs text-[#6B6B6B]">Toleransi (menit)</span>
+-              <input
+-                type="number"
+-                min="0"
+-                max={MAX_TOLERANSI_MENIT}
+-                step="1"
+-                value={form.toleransi_menit}
+-                onChange={(e) => setForm((f) => ({ ...f, toleransi_menit: e.target.value }))}
+-                className={inputClass}
+-              />
+-              <span className="text-[11px] text-[#9A9A9A]">
+-                0 = tanpa toleransi. Dianggap telat kalau clock-in lewat jam masuk + toleransi. Hanya berlaku untuk absensi baru.
+-              </span>
+-            </label>
+-
+-            {saveError && (
+-              <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 mb-3">
+-                <span>{saveError}</span>
+-                <button onClick={handleSave} className="shrink-0 underline font-medium hover:text-red-900">
+-                  Coba Lagi
+-                </button>
+-              </div>
+-            )}
+-            <button
+-              onClick={handleSave}
+-              disabled={saving}
+-              className="w-full bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors disabled:opacity-50"
+-            >
+-              {saving ? 'Menyimpan...' : 'Simpan Jadwal'}
+-            </button>
+-          </div>
+-        </div>
+-      )}
+-    </div>
+-  );
+-}
+\ No newline at end of file
+diff --git a/lib/employeeModules.js b/lib/employeeModules.js
+index d0a2bc0..2216db8 100644
+--- a/lib/employeeModules.js
++++ b/lib/employeeModules.js
+@@ -17,6 +17,9 @@ import {
+ // folder ini cuma tampil kalau employee punya akses ke minimal 1 modul hris),
+ // 'general' (modul kerja lain, di luar folder HRIS). Superadmin tidak
+ // menggunakan layer ini — dashboard superadmin tetap 1 grid datar semua modul.
++// superadminOnly: modul hanya untuk superadmin. Tidak ada di MODULE_OPTIONS (tidak bisa
++// di-assign) dan isModuleGranted menolak non-superadmin walau masih ada baris sisa di
++// employee_modules, jadi card dashboard, layout/halaman, dan API route konsisten.
+ // Dipakai oleh app/employee/dashboard (grid modul karyawan) dan app/employee/dev-modules (roadmap superadmin).
+ export const MODULE_REGISTRY = [
+   // --- Layer 1: Dashboard Saya (personal, sama untuk semua karyawan) ---
+@@ -30,7 +33,7 @@ export const MODULE_REGISTRY = [
+   // --- Layer 2: My Work — folder HRIS (kelola data lintas karyawan) ---
+   { key: 'employee_list', name: 'Employee List', desc: 'Kelola data dan akses karyawan', href: '/employee/list', status: 'live', icon: Users, layer: 'hris' },
+   { key: 'profile_admin', name: 'Kelola Perubahan Profil', desc: 'Review dan approve/reject pengajuan perubahan data pribadi karyawan', href: '/employee/profile/admin', status: 'live', icon: UserCheck, layer: 'hris' },
+-  { key: 'absensi_admin', name: 'Kelola Absensi Tim', desc: 'Jadwal kerja, rekap bulanan, dan approval koreksi absensi semua karyawan', href: '/employee/absensi/karyawan', status: 'live', icon: ClipboardCheck, layer: 'hris' },
++  { key: 'absensi_admin', name: 'Kelola Absensi Tim', desc: 'Jadwal kerja, rekap bulanan, dan approval koreksi absensi semua karyawan (khusus superadmin)', href: '/employee/absensi/karyawan', status: 'live', icon: ClipboardCheck, layer: 'hris', superadminOnly: true },
+   { key: 'leave_request_admin', name: 'Kelola Cuti Tim', desc: 'Approval pengajuan cuti semua karyawan', href: '/employee/leave-request/admin', status: 'live', icon: CalendarCheck, layer: 'hris' },
+   { key: 'payslip_admin', name: 'Kelola Payslip', desc: 'Kelola dan terbitkan payslip semua karyawan', href: '/employee/payslip/admin', status: 'live', icon: FileSpreadsheet, layer: 'hris' },
+   { key: 'payroll', name: 'Payroll', desc: 'Employee master data dan struktur gaji', href: '/employee/payroll', status: 'live', icon: Wallet, layer: 'hris' },
+@@ -52,6 +55,7 @@ export const MODULE_REGISTRY = [
+   { key: 'data_audit', name: 'Kelengkapan Data Karyawan', desc: 'Audit gap data Employee List, Payroll, dan Jadwal Kerja (khusus superadmin)', href: '/employee/data-audit', status: 'live', icon: ClipboardCheck, layer: 'general' },
+ ];
+ 
++// Modul superadminOnly (mis. absensi_admin) sengaja TIDAK ada di sini.
+ // Daftar module key yang bisa di-assign superadmin ke employee (checkbox di
+ // app/employee/list). Key granular (payslip_admin, nomor_surat,
+ // document_manage) mengontrol akses ke sub-menu/aksi spesifik di dalam modul
+@@ -65,7 +69,6 @@ export const MODULE_OPTIONS = [
+   { key: 'statistics', label: 'Statistics' },
+   { key: 'kalkulator', label: 'Kalkulator' },
+   { key: 'absensi', label: 'Absensi' },
+-  { key: 'absensi_admin', label: '— Sub: Kelola Absensi Tim' },
+   { key: 'payslip', label: 'Payslip' },
+   { key: 'payslip_admin', label: '— Sub: Kelola Payslip' },
+   { key: 'leave_request', label: 'Leave Request' },
+@@ -92,9 +95,14 @@ export const MODULE_OPTIONS = [
+ // "Kelola Akses" di Employee List.
+ export const EXPLICIT_ONLY_MODULES = ['support_access', 'peraturan_ketenagakerjaan'];
+ 
++// Key modul yang hanya boleh diakses superadmin, diturunkan dari flag
++// superadminOnly di MODULE_REGISTRY supaya tidak ada daftar kedua yang bisa lupa diubah.
++export const SUPERADMIN_ONLY_MODULES = MODULE_REGISTRY.filter((m) => m.superadminOnly).map((m) => m.key);
++
+ // Satu-satunya tempat aturan "boleh akses modul X?" — dipakai useModuleAccess,
+ // dashboard, dan (nanti) API route sisi server.
+ export function isModuleGranted({ isSuperadmin, moduleKeys, key }) {
++  if (SUPERADMIN_ONLY_MODULES.includes(key)) return !!isSuperadmin;
+   if (isSuperadmin && !EXPLICIT_ONLY_MODULES.includes(key)) return true;
+   return (moduleKeys || []).includes(key);
+ }
+diff --git a/lib/useModuleAccess.js b/lib/useModuleAccess.js
+index ffd62bd..6952d61 100644
+--- a/lib/useModuleAccess.js
++++ b/lib/useModuleAccess.js
+@@ -8,7 +8,7 @@ import { EXPLICIT_ONLY_MODULES, isModuleGranted } from '@/lib/employeeModules';
+ // moduleKey: string atau array of string — employee lolos kalau superadmin
+ // ATAU punya SALAH SATU dari key yang diminta (dipakai layout yang punya
+ // beberapa sub-halaman dengan permission granular berbeda, mis. absensi vs
+-// absensi_jadwal).
++// absensi_admin).
+ export function useModuleAccess(moduleKey) {
+   const router = useRouter();
+   const supabase = createClient();
+-- 
+2.43.0
+
