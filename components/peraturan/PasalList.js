@@ -20,6 +20,24 @@ const SEARCH_DEBOUNCE_MS = 350;
 const SEARCH_LIMIT = 200;
 const DETAIL_SELECT = `${PASAL_DETAIL_COLUMNS}, pengubah:updated_by ( nama )`;
 
+// Mode baca isi pasal: ukuran teks dipilih pembaca dan diingat di browser ini.
+// Lebar baris dibatasi ±70 karakter (satuan ch ikut membesar bersama teks).
+const UKURAN_TEKS = [
+  { key: 'normal', label: 'normal', className: 'text-base' },
+  { key: 'besar', label: 'besar', className: 'text-lg' },
+  { key: 'terbesar', label: 'sangat besar', className: 'text-xl' },
+];
+const UKURAN_TEKS_STORAGE_KEY = 'peraturan-pasal-ukuran-teks';
+
+function bacaUkuranTersimpan() {
+  try {
+    const saved = window.localStorage.getItem(UKURAN_TEKS_STORAGE_KEY);
+    return UKURAN_TEKS.some((u) => u.key === saved) ? saved : null;
+  } catch {
+    return null; // penyimpanan diblokir: pakai ukuran bawaan
+  }
+}
+
 function sortItems(list) {
   return [...list].sort(
     (a, b) =>
@@ -62,6 +80,23 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState('');
+
+  // Ukuran teks isi pasal. Komponen ini hanya dirender setelah data peraturan
+  // dimuat di browser (halaman detail menampilkan LoadingState saat SSR), jadi
+  // aman membaca penyimpanan langsung saat inisialisasi.
+  const [ukuranKey, setUkuranKey] = useState(() => (typeof window === 'undefined' ? null : bacaUkuranTersimpan()) || 'normal');
+  const ukuranIdx = Math.max(0, UKURAN_TEKS.findIndex((u) => u.key === ukuranKey));
+  const ukuran = UKURAN_TEKS[ukuranIdx];
+
+  const ubahUkuran = (arah) => {
+    const next = UKURAN_TEKS[Math.min(UKURAN_TEKS.length - 1, Math.max(0, ukuranIdx + arah))];
+    setUkuranKey(next.key);
+    try {
+      window.localStorage.setItem(UKURAN_TEKS_STORAGE_KEY, next.key);
+    } catch {
+      // abaikan: ukuran tetap berlaku untuk sesi ini
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -259,16 +294,45 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
         <h2 className="text-sm font-medium text-black">
           Pasal {!loading && !error && <span className="text-[#9A9A9A] font-normal">({items.length})</span>}
         </h2>
-        {canEdit && !form && (
-          <button
-            type="button"
-            onClick={() => { setActionError(''); setForm({ mode: 'new' }); }}
-            className="inline-flex items-center gap-2 border border-[#E0E0E0] px-3 py-1.5 text-sm text-black hover:border-madael-red hover:text-madael-red transition-colors"
-          >
-            <Plus size={14} />
-            Tambah Pasal
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-3">
+          {!loading && !error && items.length > 0 && (
+            <div className="inline-flex items-center border border-[#E0E0E0] bg-white" role="group" aria-label="Ukuran teks isi pasal">
+              <button
+                type="button"
+                onClick={() => ubahUkuran(-1)}
+                disabled={ukuranIdx === 0}
+                aria-label="Perkecil teks isi pasal"
+                title="Perkecil teks"
+                className="min-w-9 h-9 px-2 text-xs text-black hover:text-madael-red disabled:opacity-40 disabled:hover:text-black transition-colors"
+              >
+                A−
+              </button>
+              <span className="px-2 text-[11px] text-[#6B6B6B] border-x border-[#E0E0E0] h-9 inline-flex items-center" aria-live="polite">
+                Teks {ukuran.label}
+              </span>
+              <button
+                type="button"
+                onClick={() => ubahUkuran(1)}
+                disabled={ukuranIdx === UKURAN_TEKS.length - 1}
+                aria-label="Perbesar teks isi pasal"
+                title="Perbesar teks"
+                className="min-w-9 h-9 px-2 text-base text-black hover:text-madael-red disabled:opacity-40 disabled:hover:text-black transition-colors"
+              >
+                A+
+              </button>
+            </div>
+          )}
+          {canEdit && !form && (
+            <button
+              type="button"
+              onClick={() => { setActionError(''); setForm({ mode: 'new' }); }}
+              className="inline-flex items-center gap-2 border border-[#E0E0E0] px-3 py-1.5 text-sm text-black hover:border-madael-red hover:text-madael-red transition-colors"
+            >
+              <Plus size={14} />
+              Tambah Pasal
+            </button>
+          )}
+        </div>
       </div>
 
       {actionError && <p className="text-xs text-red-600 mb-3">{actionError}</p>}
@@ -365,7 +429,7 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
                           {detail?.status === 'ok' && (
                             <>
                               {/* Teks biasa ter-escape oleh React; tidak ada HTML mentah. */}
-                              <p className="text-sm text-[#3D3D3D] leading-relaxed whitespace-pre-line break-words mt-3">
+                              <p className={`${ukuran.className} font-serif text-[#3D3D3D] leading-[1.75] max-w-[70ch] whitespace-pre-line break-words mt-3`}>
                                 {detail.row.isi}
                               </p>
                               {detail.row.catatan && (
