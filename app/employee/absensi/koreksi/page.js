@@ -6,15 +6,13 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Pencil, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { notifyEmployee } from '@/lib/notify';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { logActivity } from '@/lib/activityLog';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
-import { friendlyError } from '@/lib/errorMessage';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 
 function currentMonthValue() {
@@ -215,132 +213,48 @@ export default function KoreksiAbsensiPage() {
     setSaving(true);
     setSaveError(null);
 
-    const newClockIn = timeInputToIso(editingRow.tanggal, form.clockIn);
-    const newClockOut = timeInputToIso(editingRow.tanggal, form.clockOut);
     const isNew = !editingRow.id;
 
-    if (isNew) {
-      const { data: inserted, error: insertError } = await supabase
-        .from('attendance')
-        .insert([{
-          employee_id: editingRow.employee_id,
+    try {
+      // Log koreksi + update/insert attendance + log aktivitas + notifikasi
+      // dikerjakan di server (urutan aman & kompensasi kalau gagal di tengah):
+      // lihat app/api/attendance/koreksi/manual/route.js.
+      const res = await fetch('/api/attendance/koreksi/manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attendanceId: editingRow.id,
+          employeeId: editingRow.employee_id,
           tanggal: editingRow.tanggal,
-          clock_in: newClockIn,
-          clock_out: newClockOut,
-          status_telat: form.statusTelat,
-          wajah_terverifikasi: false,
-        }])
-        .select()
-        .single();
+          clockIn: timeInputToIso(editingRow.tanggal, form.clockIn),
+          clockOut: timeInputToIso(editingRow.tanggal, form.clockOut),
+          statusTelat: form.statusTelat,
+          alasan: form.alasan.trim(),
+        }),
+      });
+      const result = await res.json().catch(() => ({}));
 
-      if (insertError) {
-        setSaving(false);
-        setSaveError(friendlyError(insertError, 'Gagal membuat record baru.'));
+      if (!res.ok) {
+        // 409 = data berubah di tempat lain; tabel dimuat ulang di latar belakang
+        // dan pesan error dipertahankan di modal.
+        if (res.status === 409) loadData();
+        setSaveError(result.error || (isNew ? 'Gagal membuat record baru.' : 'Gagal menyimpan koreksi, coba lagi.'));
         return;
       }
 
-      const { error: logError } = await supabase.from('attendance_corrections').insert([{
-        attendance_id: inserted.id,
-        employee_id: editingRow.employee_id,
-        corrected_by: employee.id,
-        alasan: form.alasan.trim(),
-        before_clock_in: null,
-        before_clock_out: null,
-        before_status_telat: null,
-        after_clock_in: newClockIn,
-        after_clock_out: newClockOut,
-        after_status_telat: form.statusTelat,
-      }]);
-
-      setSaving(false);
-      if (logError) {
-        // Record attendance sudah kebuat — jejak log gagal disimpan, tapi
-        // jangan rollback attendance-nya sendiri (butuh manual cleanup kalau ini terjadi).
-        setSaveError(`Record dibuat tapi log koreksi gagal disimpan: ${friendlyError(logError, 'terjadi kesalahan.')}`);
+      const saved = result.attendance;
+      if (isNew) {
+        setAttendance((prev) => [saved, ...prev]);
+        setAddForm({ employeeId: '', tanggal: '' });
+      } else {
+        setAttendance((prev) => prev.map((r) => (r.id === saved.id ? saved : r)));
       }
-      setAttendance((prev) => [inserted, ...prev]);
-      setAddForm({ employeeId: '', tanggal: '' });
-      if (!logError) setEditingRow(null);
-
-      logActivity(supabase, {
-        userId: employee.id,
-        aksi: 'koreksi_absensi_tambah',
-        targetTable: 'attendance',
-        targetId: inserted.id,
-        detail: { employee_id: editingRow.employee_id, tanggal: editingRow.tanggal, alasan: form.alasan.trim() },
-      });
-
-      notifyEmployee(supabase, {
-        userId: editingRow.employee_id,
-        tipe: 'absensi_dikoreksi',
-        pesan: `Record absensi tanggal ${formatTanggal(editingRow.tanggal)} ditambahkan oleh admin. Alasan: ${form.alasan.trim()}`,
-        link: '/employee/absensi',
-      });
-
-      return;
-    }
-
-    // Simpan jejak koreksi dulu (nilai sebelum & sesudah) sebelum meng-update
-    // record aslinya, supaya tidak ada perubahan yang overwrite tanpa jejak.
-    const { error: logError } = await supabase.from('attendance_corrections').insert([{
-      attendance_id: editingRow.id,
-      employee_id: editingRow.employee_id,
-      corrected_by: employee.id,
-      alasan: form.alasan.trim(),
-      before_clock_in: editingRow.clock_in,
-      before_clock_out: editingRow.clock_out,
-      before_status_telat: editingRow.status_telat,
-      after_clock_in: newClockIn,
-      after_clock_out: newClockOut,
-      after_status_telat: form.statusTelat,
-    }]);
-
-    if (logError) {
+      setEditingRow(null);
+    } catch (err) {
+      setSaveError(friendlyCaught(err, isNew ? 'Gagal membuat record baru.' : 'Gagal menyimpan koreksi, coba lagi.'));
+    } finally {
       setSaving(false);
-      setSaveError(friendlyError(logError, 'Gagal menyimpan log koreksi. Koreksi dibatalkan.'));
-      return;
     }
-
-    const { data, error } = await supabase
-      .from('attendance')
-      .update({
-        clock_in: newClockIn,
-        clock_out: newClockOut,
-        status_telat: form.statusTelat,
-      })
-      .eq('id', editingRow.id)
-      .select()
-      .single();
-
-    setSaving(false);
-    if (error) {
-      setSaveError(friendlyError(error, 'Gagal menyimpan koreksi, coba lagi.'));
-      return;
-    }
-
-    setAttendance((prev) => prev.map((r) => (r.id === data.id ? data : r)));
-    setEditingRow(null);
-
-    logActivity(supabase, {
-      userId: employee.id,
-      aksi: 'koreksi_absensi',
-      targetTable: 'attendance',
-      targetId: data.id,
-      detail: {
-        employee_id: editingRow.employee_id,
-        tanggal: editingRow.tanggal,
-        alasan: form.alasan.trim(),
-        before: { clock_in: editingRow.clock_in, clock_out: editingRow.clock_out, status_telat: editingRow.status_telat },
-        after: { clock_in: newClockIn, clock_out: newClockOut, status_telat: form.statusTelat },
-      },
-    });
-
-    notifyEmployee(supabase, {
-      userId: editingRow.employee_id,
-      tipe: 'absensi_dikoreksi',
-      pesan: `Record absensi tanggal ${formatTanggal(editingRow.tanggal)} dikoreksi oleh admin. Alasan: ${form.alasan.trim()}`,
-      link: '/employee/absensi',
-    });
   };
 
   if (status === 'loading') {
