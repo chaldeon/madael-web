@@ -20,7 +20,7 @@ import AbsensiReviewPanel from '@/components/AbsensiReviewPanel';
 import AbsensiSettingsPanel from '@/components/AbsensiSettingsPanel';
 import ShiftTemplateManager from '@/components/ShiftTemplateManager';
 import SortableHeader from '@/components/SortableHeader';
-import { parseToleransi, currentMonthValue, formatJam, formatTanggal, formatWaktu, countScheduledWorkdays, downloadRekapCsv, computeStatusTelat, HARI_OPTIONS, DEFAULT_HARI, EMPTY_JADWAL_FORM, JADWAL_SORT_COLUMNS, REKAP_SORT_COLUMNS, TABS } from '@/lib/absensiKaryawanConfig';
+import { parseToleransi, currentMonthValue, formatJam, formatTanggal, formatWaktu, countScheduledWorkdays, downloadRekapCsv, HARI_OPTIONS, DEFAULT_HARI, EMPTY_JADWAL_FORM, JADWAL_SORT_COLUMNS, REKAP_SORT_COLUMNS, TABS } from '@/lib/absensiKaryawanConfig';
 import { durasiMenit, formatDurasi, scheduleFieldsFromTemplate, shiftLabel } from '@/lib/shifts';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
@@ -519,94 +519,24 @@ export default function SemuaKaryawanPage() {
     setProcessingId(row.id);
     setKoreksiError(null);
     try {
-      // Karyawan bisa membatalkan pengajuan pending kapan saja. Cek status
-      // terbaru dulu supaya pengajuan yang sudah dibatalkan tidak diterapkan.
-      const { data: fresh, error: freshError } = await supabase
-        .from('attendance_corrections')
-        .select('status')
-        .eq('id', row.id)
-        .maybeSingle();
-      if (freshError) throw freshError;
-      if (!fresh || fresh.status !== 'pending') {
-        loadKoreksi(); // loadKoreksi mengosongkan error, jadi set pesan SETELAH dipanggil
-        setKoreksiError('Pengajuan ini sudah tidak berstatus menunggu (mungkin dibatalkan karyawan atau sudah diproses). Daftar dimuat ulang.');
+      // Seluruh proses (klaim status, tulis ke attendance, rollback kalau gagal,
+      // log aktivitas, notifikasi) ada di server: lihat
+      // app/api/attendance/koreksi/[id]/approve/route.js.
+      const res = await fetch(`/api/attendance/koreksi/${row.id}/approve`, { method: 'POST' });
+      const result = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (res.status === 409) loadKoreksi(); // loadKoreksi mengosongkan error, jadi set pesan SETELAH dipanggil
+        setKoreksiError(result.error || 'Gagal menyetujui pengajuan koreksi.');
         return;
-      }
-
-      const schedule = schedules[row.employee_id];
-      const statusTelat = computeStatusTelat(row.after_clock_in, schedule);
-
-      let attendanceId = row.attendance_id;
-      if (attendanceId) {
-        const { data, error } = await supabase
-          .from('attendance')
-          .update({
-            clock_in: row.after_clock_in,
-            clock_out: row.after_clock_out,
-            status_telat: statusTelat,
-            toleransi_menit: Number(schedule?.toleransi_menit) || 0,
-            wajah_terverifikasi: true,
-          })
-          .eq('id', attendanceId)
-          .select()
-          .single();
-        if (error) throw error;
-        attendanceId = data.id;
-      } else {
-        const { data, error } = await supabase
-          .from('attendance')
-          .insert([{
-            employee_id: row.employee_id,
-            tanggal: row.tanggal,
-            clock_in: row.after_clock_in,
-            clock_out: row.after_clock_out,
-            status_telat: statusTelat,
-            toleransi_menit: Number(schedule?.toleransi_menit) || 0,
-            wajah_terverifikasi: true,
-          }])
-          .select()
-          .single();
-        if (error) throw error;
-        attendanceId = data.id;
-      }
-
-      const { data: approvedRows, error: updateError } = await supabase
-        .from('attendance_corrections')
-        .update({
-          status: 'approved',
-          reviewed_by: employee.id,
-          reviewed_at: new Date().toISOString(),
-          corrected_by: employee.id,
-          attendance_id: attendanceId,
-        })
-        .eq('id', row.id)
-        .eq('status', 'pending')
-        .select('id');
-      if (updateError) throw updateError;
-      if (!approvedRows || approvedRows.length === 0) {
-        throw new Error('Pengajuan berubah status saat diproses (kemungkinan dibatalkan karyawan), padahal data absensi sudah terlanjur diperbarui. Cek data absensi karyawan ini.');
       }
 
       setCorrections((prev) =>
         koreksiStatusFilter === 'all'
-          ? prev.map((r) => (r.id === row.id ? { ...r, status: 'approved', attendance_id: attendanceId } : r))
+          ? prev.map((r) => (r.id === row.id ? { ...r, status: 'approved', attendance_id: result.attendance_id } : r))
           : prev.filter((r) => r.id !== row.id)
       );
-
-      logActivity(supabase, {
-        userId: employee.id,
-        aksi: 'approve_koreksi_absensi',
-        targetTable: 'attendance_corrections',
-        targetId: row.id,
-        detail: { employee_id: row.employee_id, tanggal: row.tanggal },
-      });
-
-      notifyEmployee(supabase, {
-        userId: row.employee_id,
-        tipe: 'koreksi_absensi_disetujui',
-        pesan: `Pengajuan koreksi absensi tanggal ${formatTanggal(row.tanggal)} disetujui. Data absensi kamu sudah diperbarui.`,
-        link: '/employee/absensi',
-      });
+      if (result.warning) setKoreksiError(result.warning);
     } catch (err) {
       setKoreksiError(friendlyCaught(err, 'Gagal menyetujui pengajuan koreksi.'));
     } finally {
