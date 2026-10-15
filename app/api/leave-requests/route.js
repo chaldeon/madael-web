@@ -9,6 +9,7 @@ import {
 import { ambilKonteksCuti, cariCutiBentrok, formatTanggal } from '@/lib/leaveServer';
 import { uploadLeaveAttachmentToDrive, deleteEmployeeDocumentFromDrive } from '@/lib/googleDrive';
 import { friendlyError } from '@/lib/errorMessage';
+import { notifySuperadmins } from '@/lib/notify';
 
 const MAKS_ALASAN = 500;
 
@@ -205,6 +206,14 @@ export async function POST(request) {
       console.error('Ajukan cuti error:', insertError);
       return NextResponse.json({ error: `Gagal mengirim pengajuan cuti: ${friendlyError(insertError, 'terjadi kesalahan pada server.', { context: 'Kirim pengajuan cuti' })}` }, { status: 500 });
     }
+
+    // Notifikasi ke superadmin disusun di server dari data yang baru disimpan
+    // (dulu dikirim dari browser dengan teks bebas).
+    await notifySuperadmins(admin, {
+      tipe: 'cuti_diajukan',
+      pesan: `${emp.nama || 'Karyawan'} mengajukan ${potongKuota(data.jenis) ? 'cuti' : labelJenisCuti(data.jenis).toLowerCase()} ${formatTanggal(data.tanggal_mulai)} – ${formatTanggal(data.tanggal_selesai)} (${jumlahHari} hari kerja).`,
+      link: '/employee/leave-request/admin',
+    });
 
     return NextResponse.json({ success: true, request: data, jumlahHari }, { status: 201 });
   } catch (err) {

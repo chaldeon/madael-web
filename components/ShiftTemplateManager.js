@@ -9,7 +9,7 @@
 
 import { useState } from 'react';
 import { Plus, Pencil, Trash2, X, AlertTriangle } from 'lucide-react';
-import { logActivity } from '@/lib/activityLog';
+import { logActivity } from '@/lib/activityLogClient';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
 import {
@@ -42,7 +42,7 @@ function formFromTemplate(tpl) {
   };
 }
 
-export default function ShiftTemplateManager({ supabase, userId, templates, linkedCounts, unavailable, onChanged }) {
+export default function ShiftTemplateManager({ supabase, templates, linkedCounts, unavailable, onChanged }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null); // template yang diedit, null = tambah baru
   const [form, setForm] = useState(EMPTY_FORM);
@@ -114,8 +114,8 @@ export default function ShiftTemplateManager({ supabase, userId, templates, link
         setFormError(error.code === '23505' ? 'Nama shift itu sudah dipakai.' : friendlyError(error, 'Gagal menyimpan shift.'));
         return;
       }
-      logActivity(supabase, {
-        userId, aksi: 'tambah_template_shift', targetTable: 'shift_templates', targetId: data.id,
+      logActivity({
+        aksi: 'tambah_template_shift', targetTable: 'shift_templates', targetId: data.id,
         detail: { nama: value.nama, jam_masuk: value.jam_masuk, jam_pulang: value.jam_pulang },
       });
       setShowForm(false);
@@ -151,8 +151,8 @@ export default function ShiftTemplateManager({ supabase, userId, templates, link
     }
 
     setSaving(false);
-    logActivity(supabase, {
-      userId, aksi: 'ubah_template_shift', targetTable: 'shift_templates', targetId: editing.id,
+    logActivity({
+      aksi: 'ubah_template_shift', targetTable: 'shift_templates', targetId: editing.id,
       detail: {
         before: { nama: editing.nama, jam_masuk: editing.jam_masuk, jam_pulang: editing.jam_pulang, toleransi_menit: editing.toleransi_menit, aktif: editing.aktif },
         after: value,
@@ -174,8 +174,8 @@ export default function ShiftTemplateManager({ supabase, userId, templates, link
       setListMsg({ type: 'error', text: friendlyError(error, 'Gagal menghapus shift.') });
       return;
     }
-    logActivity(supabase, {
-      userId, aksi: 'hapus_template_shift', targetTable: 'shift_templates', targetId: tpl.id,
+    logActivity({
+      aksi: 'hapus_template_shift', targetTable: 'shift_templates', targetId: tpl.id,
       detail: { nama: tpl.nama },
     });
     setListMsg({ type: 'ok', text: `Shift "${tpl.nama}" dihapus.` });

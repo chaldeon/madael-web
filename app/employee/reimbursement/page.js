@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from 'react';
 import { Banknote, Upload } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { notifySuperadmins } from '@/lib/notify';
+import { dispatchNotification } from '@/lib/notifyClient';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -178,11 +178,7 @@ export default function ReimbursementPage() {
     setFile(null);
     setSubmitSuccess(true);
 
-    notifySuperadmins(supabase, {
-      tipe: 'reimbursement_diajukan',
-      pesan: `${employeeName || 'Karyawan'} mengajukan klaim reimbursement ${formatRupiah(data.jumlah)} (${data.kategori}).`,
-      link: '/employee/reimbursement/admin',
-    });
+    dispatchNotification('reimbursement_diajukan', data.id);
   };
 
   if (loading) {

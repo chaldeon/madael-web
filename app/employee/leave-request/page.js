@@ -5,7 +5,6 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { notifySuperadmins } from '@/lib/notify';
 import {
   hitungHariKerja, tahunSekarang,
   JENIS_CUTI, JENIS_CUTI_DEFAULT, labelJenisCuti, potongKuota, lampiranWajib,
@@ -183,11 +182,6 @@ export default function LeaveRequestPage() {
     setFileInputKey((k) => k + 1);
     setSubmitSuccess(true);
 
-    notifySuperadmins(supabase, {
-      tipe: 'cuti_diajukan',
-      pesan: `${employeeName || 'Karyawan'} mengajukan ${potongKuota(data.jenis) ? 'cuti' : labelJenisCuti(data.jenis).toLowerCase()} ${formatTanggal(data.tanggal_mulai)} – ${formatTanggal(data.tanggal_selesai)} (${jumlahHari} hari kerja).`,
-      link: '/employee/leave-request/admin',
-    });
   };
 
   // Batalkan pengajuan yang masih pending. Validasi (milik sendiri + masih

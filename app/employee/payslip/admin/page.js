@@ -6,8 +6,8 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { Plus, Eye, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { notifyEmployee } from '@/lib/notify';
-import { logActivity } from '@/lib/activityLog';
+import { dispatchNotification } from '@/lib/notifyClient';
+import { logActivity } from '@/lib/activityLogClient';
 
 import { useModuleAccess } from '@/lib/useModuleAccess';
 
@@ -205,15 +205,9 @@ export default function PayslipAdminPage() {
 
     // Notif hanya saat publish (bukan saat unpublish/tarik-lagi).
     if (willPublish) {
-      notifyEmployee(supabase, {
-        userId: p.employee_id,
-        tipe: 'payslip_published',
-        pesan: `Slip gaji periode ${p.periode_label || p.periode} sudah bisa dilihat.`,
-        link: '/employee/payslip',
-      });
+      dispatchNotification('payslip_published', p.id);
 
-      logActivity(supabase, {
-        userId: employee?.id,
+      logActivity({
         aksi: 'publish_payslip',
         targetTable: 'payslips',
         targetId: p.id,

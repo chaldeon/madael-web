@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLog';
+import { logActivity } from '@/lib/activityLogClient';
 import { friendlyError } from '@/lib/errorMessage';
 import {
   LIMITS, PASAL_DETAIL_COLUMNS, EMPTY_PASAL_FORM, pasalFormFromRow, buildPasalPayload,
@@ -62,8 +62,7 @@ export default function PasalForm({
       const changed = Object.keys(payload).filter(
         (k) => JSON.stringify(payload[k]) !== JSON.stringify(initialRow[k] ?? null)
       );
-      logActivity(supabase, {
-        userId: employee.id,
+      logActivity({
         aksi: 'ubah_pasal_peraturan',
         targetTable: 'peraturan_pasal',
         targetId: initialRow.id,
@@ -88,8 +87,7 @@ export default function PasalForm({
       return;
     }
 
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'tambah_pasal_peraturan',
       targetTable: 'peraturan_pasal',
       targetId: data.id,

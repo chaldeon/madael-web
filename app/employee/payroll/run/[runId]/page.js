@@ -9,8 +9,8 @@ import { ArrowLeft, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { hitungBPJS, hitungBrutoPPh21, hitungPPh21TER } from '@/lib/payroll/calculations';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { notifyEmployees } from '@/lib/notify';
-import { logActivity } from '@/lib/activityLog';
+import { dispatchNotification } from '@/lib/notifyClient';
+import { logActivity } from '@/lib/activityLogClient';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -352,8 +352,7 @@ export default function PayrollRunDetailPage() {
     }
     setRun(data);
 
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'ubah_status_payroll',
       targetTable: 'payroll_runs',
       targetId: runId,
@@ -373,14 +372,7 @@ export default function PayrollRunDetailPage() {
       if (result.errors.length > 0) note += ` Error: ${result.errors.join('; ')}`;
       setGenerateNote(note);
 
-      notifyEmployees(supabase, {
-        userIds: (refreshedItems || [])
-          .map((i) => i.employees_master?.linked_employee_id)
-          .filter(Boolean),
-        tipe: 'payroll_approved',
-        pesan: `Payslip periode ${periodeLabel(run.periode)} sudah disetujui dan bisa dilihat.`,
-        link: '/employee/payslip',
-      });
+      dispatchNotification('payroll_approved', runId);
     }
 
     setConfirmIncomplete(false);

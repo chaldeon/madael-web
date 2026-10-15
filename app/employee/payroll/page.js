@@ -6,7 +6,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { X, Plus, Pencil, Calculator, Paperclip, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLog';
+import { logActivity } from '@/lib/activityLogClient';
 
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -211,8 +211,7 @@ export default function PayrollManagerPage() {
       return;
     }
 
-    logActivity(supabase, {
-      userId: actingEmployeeId,
+    logActivity({
       aksi: isEdit ? 'edit_struktur_gaji' : 'tambah_employee_master',
       targetTable: 'employees_master',
       targetId: form.id || null,

@@ -8,8 +8,8 @@ import { Pencil, X, AlertTriangle, ExternalLink, Check, XCircle } from 'lucide-r
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
-import { logActivity } from '@/lib/activityLog';
-import { notifyEmployee } from '@/lib/notify';
+import { logActivity } from '@/lib/activityLogClient';
+import { dispatchNotification } from '@/lib/notifyClient';
 import { isTelatEfektif, MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
 
 import LoadingState from '@/components/LoadingState';
@@ -409,8 +409,7 @@ export default function SemuaKaryawanPage() {
       (data || []).forEach((row) => { next[row.employee_id] = row; });
       return next;
     });
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'set_toleransi_telat_massal',
       targetTable: 'work_schedule',
       detail: { client_id: jadwalFilterClientId, toleransi_menit: toleransi, jumlah: (data || []).length },
@@ -461,8 +460,7 @@ export default function SemuaKaryawanPage() {
       (data || []).forEach((row) => { next[row.employee_id] = row; });
       return next;
     });
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'assign_shift_massal',
       targetTable: 'work_schedule',
       targetId: tpl.id,
@@ -579,20 +577,14 @@ export default function SemuaKaryawanPage() {
           : prev.filter((r) => r.id !== rejectingRow.id)
       );
 
-      logActivity(supabase, {
-        userId: employee.id,
+      logActivity({
         aksi: 'reject_koreksi_absensi',
         targetTable: 'attendance_corrections',
         targetId: rejectingRow.id,
         detail: { employee_id: rejectingRow.employee_id, tanggal: rejectingRow.tanggal, catatan: rejectCatatan.trim() || null },
       });
 
-      notifyEmployee(supabase, {
-        userId: rejectingRow.employee_id,
-        tipe: 'koreksi_absensi_ditolak',
-        pesan: `Pengajuan koreksi absensi tanggal ${formatTanggal(rejectingRow.tanggal)} ditolak.${rejectCatatan.trim() ? ` Alasan: ${rejectCatatan.trim()}` : ''}`,
-        link: '/employee/absensi',
-      });
+      dispatchNotification('koreksi_absensi_ditolak', rejectingRow.id);
       setRejectingRow(null);
     } catch (err) {
       setKoreksiError(friendlyCaught(err, 'Gagal menolak pengajuan koreksi.'));
@@ -1026,7 +1018,6 @@ export default function SemuaKaryawanPage() {
           {activeTab === 'shift' && (
             <ShiftTemplateManager
               supabase={supabase}
-              userId={employee.id}
               templates={shiftTemplates}
               linkedCounts={linkedCounts}
               unavailable={shiftUnavailable}

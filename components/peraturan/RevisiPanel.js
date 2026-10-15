@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, History, RotateCcw } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLog';
+import { logActivity } from '@/lib/activityLogClient';
 import { friendlyError } from '@/lib/errorMessage';
 import { formatTanggalWaktu, labelPeraturan } from '@/lib/peraturanConfig';
 import {
@@ -172,8 +172,7 @@ export default function RevisiPanel({ row, canEdit, employee, onRestored }) {
       return;
     }
 
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'pulihkan_revisi_peraturan',
       targetTable: 'peraturan',
       targetId: row.id,

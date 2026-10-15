@@ -8,7 +8,7 @@ import { formatNumberDisplay } from '@/lib/payrollConfig';
 import { WORK_MODES, EXPERIENCE_LEVELS } from '@/lib/jobListingOptions';
 import { getJobStatus, getDeadlineDate, isPastDeadline } from '@/lib/jobStatus';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { logActivity } from '@/lib/activityLog';
+import { logActivity } from '@/lib/activityLogClient';
 import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import JobReviewersPanel from '@/components/job-portal/JobReviewersPanel';
 import { friendlyError } from '@/lib/errorMessage';
@@ -164,7 +164,7 @@ export default function JobPortalLowonganPage() {
   // membatalkan aksi lowongan yang sudah tersimpan.
   const logJobActivity = (aksi, targetId, detail) => {
     if (!employeeId) return;
-    logActivity(supabase, { userId: employeeId, aksi, targetTable: 'job_listings', targetId, detail });
+    logActivity({ aksi, targetTable: 'job_listings', targetId, detail });
   };
 
   const [listings, setListings] = useState([]);

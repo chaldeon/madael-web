@@ -7,8 +7,8 @@ import Link from 'next/link';
 import { Trash2, PowerOff, Megaphone, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { notifyAllActive } from '@/lib/notify';
-import { logActivity } from '@/lib/activityLog';
+import { dispatchNotification } from '@/lib/notifyClient';
+import { logActivity } from '@/lib/activityLogClient';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -121,8 +121,7 @@ export default function AnnouncementsAdminPage() {
       setForm(EMPTY_FORM);
       setEditingId(null);
 
-      logActivity(supabase, {
-        userId: employee.id,
+      logActivity({
         aksi: 'edit_pengumuman',
         targetTable: 'announcements',
         targetId: data.id,
@@ -150,14 +149,9 @@ export default function AnnouncementsAdminPage() {
 
     // Broadcast — fire and forget, kegagalan notifikasi tidak menggagalkan
     // pengumuman yang sudah tersimpan.
-    notifyAllActive(supabase, {
-      tipe: 'pengumuman_baru',
-      pesan: `Pengumuman baru: ${data.judul}`,
-      link: '/employee/dashboard',
-    });
+    dispatchNotification('pengumuman_baru', data.id);
 
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'buat_pengumuman',
       targetTable: 'announcements',
       targetId: data.id,
@@ -204,8 +198,7 @@ export default function AnnouncementsAdminPage() {
     }
     setRows((prev) => prev.map((r) => (r.id === data.id ? data : r)));
 
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'nonaktifkan_pengumuman',
       targetTable: 'announcements',
       targetId: row.id,
@@ -235,8 +228,7 @@ export default function AnnouncementsAdminPage() {
     setRows((prev) => prev.filter((r) => r.id !== row.id));
     if (editingId === row.id) handleCancelEdit();
 
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'hapus_pengumuman',
       targetTable: 'announcements',
       targetId: row.id,

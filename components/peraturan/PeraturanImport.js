@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Download, Upload } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLog';
+import { logActivity } from '@/lib/activityLogClient';
 import { friendlyError } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import {
@@ -282,8 +282,7 @@ export default function PeraturanImport({ employee }) {
     gagal.sort((a, b) => a.rowNo - b.rowNo);
 
     // Satu entri log per impor (bukan per baris) supaya Activity Log tidak banjir.
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'impor_peraturan_massal',
       targetTable: 'peraturan',
       targetId: null,
