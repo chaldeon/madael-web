@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from 'react';
 import { UserCircle, Camera, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { notifySuperadmins } from '@/lib/notify';
+import { dispatchNotification } from '@/lib/notifyClient';
 import { PROFILE_EDITABLE_FIELDS, fieldLabel } from '@/lib/profileFields';
 import { getFaceDescriptor } from '@/lib/faceVerification';
 import LoadingState from '@/components/LoadingState';
@@ -214,11 +214,7 @@ export default function ProfilePage() {
     setCatatan('');
     setSubmitSuccess(true);
 
-    notifySuperadmins(supabase, {
-      tipe: 'profil_diajukan',
-      pesan: `${employeeName || 'Karyawan'} mengajukan perubahan profil (${Object.keys(fieldChanges).map(fieldLabel).join(', ')}).`,
-      link: '/employee/profile/admin',
-    });
+    dispatchNotification('profil_diajukan', data.id);
   };
 
   if (loading) {

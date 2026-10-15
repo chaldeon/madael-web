@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, RotateCcw, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { logActivity } from '@/lib/activityLog';
+import { logActivity } from '@/lib/activityLogClient';
 import { friendlyError } from '@/lib/errorMessage';
 import { PERATURAN_MODULE_KEY, formatTanggalWaktu, labelPeraturan } from '@/lib/peraturanConfig';
 import { pesanErrorRevisi, muatNamaKaryawan } from '@/lib/peraturanRevisi';
@@ -68,8 +68,7 @@ export default function PeraturanTerhapusPage() {
       return;
     }
 
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'pulihkan_revisi_peraturan',
       targetTable: 'peraturan',
       targetId: target.peraturan_id,

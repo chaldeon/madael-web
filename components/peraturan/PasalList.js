@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLog';
+import { logActivity } from '@/lib/activityLogClient';
 import { friendlyError } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import {
@@ -231,8 +231,7 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
       return;
     }
 
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'hapus_pasal_peraturan',
       targetTable: 'peraturan_pasal',
       targetId: snapshot.id,

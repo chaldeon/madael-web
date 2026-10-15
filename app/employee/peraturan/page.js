@@ -10,7 +10,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { friendlyError } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
-import { logActivity } from '@/lib/activityLog';
+import { logActivity } from '@/lib/activityLogClient';
 import { downloadCsv } from '@/lib/exportCsv';
 import {
   PERATURAN_MODULE_KEY, JENIS_OPTIONS, STATUS_OPTIONS, TOPIK_OPTIONS, PAGE_SIZE,
@@ -204,8 +204,7 @@ export default function PeraturanListPage() {
       );
 
       if (employee?.id) {
-        logActivity(supabase, {
-          userId: employee.id,
+        logActivity({
           aksi: 'ekspor_peraturan',
           targetTable: 'peraturan',
           targetId: null,

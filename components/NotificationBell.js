@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Bell } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { getNotificationMeta, NOTIFICATIONS_CHANGED_EVENT } from '@/lib/notificationTypes';
+import { safeInternalPath } from '@/lib/safeLink';
 
 // Komponen mandiri — cari employee dari auth user sendiri, jadi bisa dipakai
 // di header mana pun tanpa perlu prop drilling. Kalau auth user tidak match
@@ -189,10 +190,11 @@ export default function NotificationBell() {
 
                 // Notifikasi tanpa link tidak boleh jadi tautan ke '#' — cukup
                 // ditandai dibaca, dropdown tetap terbuka.
-                return n.link ? (
+                const href = safeInternalPath(n.link);
+                return href ? (
                   <Link
                     key={n.id}
-                    href={n.link}
+                    href={href}
                     onClick={() => { if (!n.is_read) markAsRead(n.id); setOpen(false); }}
                     className={rowClass}
                   >

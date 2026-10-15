@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Plus, Search, Trash2, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLog';
+import { logActivity } from '@/lib/activityLogClient';
 import { friendlyError } from '@/lib/errorMessage';
 import { RELASI_LABEL, RELASI_OPTIONS, LIMITS, labelPeraturan } from '@/lib/peraturanConfig';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -156,8 +156,7 @@ export default function RelasiManager({ peraturan, groups, employeeId, onChanged
       return;
     }
 
-    logActivity(supabase, {
-      userId: employeeId,
+    logActivity({
       aksi: 'tambah_relasi_peraturan',
       targetTable: 'peraturan_relasi',
       targetId: data.id,
@@ -203,8 +202,7 @@ export default function RelasiManager({ peraturan, groups, employeeId, onChanged
 
     const labelIni = labelPeraturan(peraturan);
     const labelLain = labelPeraturan(item.ref);
-    logActivity(supabase, {
-      userId: employeeId,
+    logActivity({
       aksi: 'hapus_relasi_peraturan',
       targetTable: 'peraturan_relasi',
       targetId: item.id,

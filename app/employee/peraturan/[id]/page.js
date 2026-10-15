@@ -8,7 +8,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ExternalLink, FileText, Pencil, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { logActivity } from '@/lib/activityLog';
+import { logActivity } from '@/lib/activityLogClient';
 import { friendlyError } from '@/lib/errorMessage';
 import {
   PERATURAN_MODULE_KEY, DETAIL_COLUMNS, RELASI_LABEL, labelPeraturan, formatTanggal,
@@ -137,8 +137,7 @@ export default function PeraturanDetailPage() {
       return;
     }
 
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'hapus_peraturan',
       targetTable: 'peraturan',
       targetId: row.id,

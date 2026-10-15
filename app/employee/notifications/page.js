@@ -9,6 +9,7 @@ import { Bell, CheckCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { friendlyError } from '@/lib/errorMessage';
+import { safeInternalPath } from '@/lib/safeLink';
 import {
   getNotificationMeta,
   NOTIFICATION_CATEGORY_OPTIONS,
@@ -307,10 +308,11 @@ export default function NotificationsPage() {
 
             // Tanpa link: tidak ada tujuan, jadi klik hanya menandai dibaca
             // (bukan tautan ke '#').
-            return n.link ? (
+            const href = safeInternalPath(n.link);
+            return href ? (
               <Link
                 key={n.id}
-                href={n.link}
+                href={href}
                 onClick={() => { if (!n.is_read) markAsRead(n.id); }}
                 className={rowClass}
               >

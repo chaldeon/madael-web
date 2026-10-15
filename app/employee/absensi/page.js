@@ -25,7 +25,7 @@ import { getBreakState, durasiIstirahatMenit, durasiKerjaMenit, formatDurasi } f
 import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
 import { getAttendanceStatus } from '@/lib/attendanceStatus';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
-import { notifySuperadmins } from '@/lib/notify';
+import { dispatchNotification } from '@/lib/notifyClient';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -310,11 +310,7 @@ export default function AbsensiPage() {
       setShowKoreksiForm(false);
 
       // Beri tahu superadmin (yang berwenang approve) ada pengajuan baru.
-      notifySuperadmins(supabase, {
-        tipe: 'koreksi_absensi_diajukan',
-        pesan: `${employee?.nama || 'Karyawan'} mengajukan koreksi absensi tanggal ${formatTanggal(inserted.tanggal)}.`,
-        link: '/employee/absensi/karyawan',
-      });
+      dispatchNotification('koreksi_absensi_diajukan', inserted.id);
     } catch (err) {
       setKoreksiError(friendlyCaught(err, 'Gagal mengirim pengajuan koreksi.'));
     } finally {

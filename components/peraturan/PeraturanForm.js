@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLog';
+import { logActivity } from '@/lib/activityLogClient';
 import { friendlyError } from '@/lib/errorMessage';
 import {
   JENIS_OPTIONS, STATUS_OPTIONS, TOPIK_OPTIONS, LIMITS, MIN_TAHUN, MAX_TAHUN,
@@ -145,8 +145,7 @@ export default function PeraturanForm({ initialRow = null, employee }) {
         (k) => bentuk(payload[k]) !== bentuk(initialRow[k] ?? (Array.isArray(payload[k]) ? [] : null))
       );
       if ('pdf_drive_id' in pdfColumns) changed.push('pdf_drive_id');
-      logActivity(supabase, {
-        userId: employee.id,
+      logActivity({
         aksi: 'ubah_peraturan',
         targetTable: 'peraturan',
         targetId: initialRow.id,
@@ -164,8 +163,7 @@ export default function PeraturanForm({ initialRow = null, employee }) {
       return;
     }
 
-    logActivity(supabase, {
-      userId: employee.id,
+    logActivity({
       aksi: 'tambah_peraturan',
       targetTable: 'peraturan',
       targetId: data.id,
