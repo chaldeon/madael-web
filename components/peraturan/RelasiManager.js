@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Plus, Search, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Plus, Search, Trash2, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { logActivity } from '@/lib/activityLogClient';
 import { friendlyError } from '@/lib/errorMessage';
-import { RELASI_LABEL, RELASI_OPTIONS, LIMITS, labelPeraturan } from '@/lib/peraturanConfig';
+import {
+  RELASI_LABEL, RELASI_OPTIONS, RELASI_STATUS_TARGET, LIMITS, labelPeraturan, perluNaikStatus,
+} from '@/lib/peraturanConfig';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import ErrorState from '@/components/ErrorState';
 import { StatusBadge, inputClass, labelClass } from '@/components/peraturan/PeraturanParts';
@@ -14,6 +16,39 @@ import { StatusBadge, inputClass, labelClass } from '@/components/peraturan/Pera
 const SEARCH_DEBOUNCE_MS = 350;
 const SEARCH_MIN_CHARS = 2;
 const SEARCH_LIMIT = 8;
+
+// Peraturan yang statusnya tertinggal dari relasinya, untuk daftar "Status tidak
+// sinkron". Dua sumber: relasi masuk (peraturan INI dicabut/diubah oleh yang lain)
+// dan relasi keluar (peraturan ini mencabut/mengubah yang lain, tetapi targetnya
+// belum berstatus Dicabut/Diubah). Hasil per peraturan, dengan status tertinggi
+// yang dituntut relasinya: [{ ref, statusBaru, sebab: [teks] }].
+function cariInkonsistensi(peraturan, groups) {
+  const perTarget = new Map();
+  const catat = (ref, statusBaru, sebab) => {
+    if (!perluNaikStatus(ref.status, statusBaru)) return;
+    const ada = perTarget.get(ref.id);
+    if (!ada) {
+      perTarget.set(ref.id, { ref, statusBaru, sebab: [sebab] });
+      return;
+    }
+    ada.sebab.push(sebab);
+    if (perluNaikStatus(ada.statusBaru, statusBaru)) ada.statusBaru = statusBaru;
+  };
+
+  groups.forEach((g) => {
+    const statusBaru = RELASI_STATUS_TARGET[g.jenisRelasi];
+    if (!statusBaru) return;
+    const kata = RELASI_LABEL[g.jenisRelasi].masuk.toLowerCase(); // "dicabut oleh"
+    g.items.forEach((item) => {
+      if (g.arah === 'masuk') {
+        catat(peraturan, statusBaru, `${kata} ${labelPeraturan(item.ref)}`);
+      } else {
+        catat(item.ref, statusBaru, `${kata} ${labelPeraturan(peraturan)}`);
+      }
+    });
+  });
+  return [...perTarget.values()];
+}
 
 // Panel kelola relasi (hanya dirender untuk superadmin pemegang flag; RLS tetap
 // penegak akhirnya). Menggantikan daftar relasi read-only di halaman detail.
@@ -44,6 +79,13 @@ export default function RelasiManager({ peraturan, groups, loadError = '', onRet
   const [deleteTarget, setDeleteTarget] = useState(null); // { group, item }
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+
+  // Sinkron status: dialog setelah relasi mencabut/mengubah tersimpan, dan tombol
+  // perbaikan di daftar "Status tidak sinkron".
+  const [statusPrompt, setStatusPrompt] = useState(null); // { ref, statusBaru, jenis }
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusError, setStatusError] = useState('');
+  const [statusNotice, setStatusNotice] = useState('');
 
   const reqRef = useRef(0);
 
@@ -115,9 +157,62 @@ export default function RelasiManager({ peraturan, groups, loadError = '', onRet
 
   const isDuplicate = target ? existingKeys.has(`${jenis}:${target.id}`) : false;
 
+  const inkonsistensi = loadError ? [] : cariInkonsistensi(peraturan, groups);
+
+  // Menaikkan status satu peraturan. Dikunci ke status yang terakhir terlihat
+  // (.eq('status', ...)) supaya tidak menimpa perubahan orang lain; .select()
+  // supaya terlihat kalau RLS menolak (0 baris). Mengembalikan true bila berhasil.
+  const ubahStatus = async ({ ref, statusBaru }, via) => {
+    setStatusBusy(true);
+    setStatusError('');
+    setStatusNotice('');
+    const { data, error: err } = await supabase
+      .from('peraturan')
+      .update({ status: statusBaru })
+      .eq('id', ref.id)
+      .eq('status', ref.status)
+      .select('id');
+    setStatusBusy(false);
+
+    if (err) {
+      setStatusError(friendlyError(err, 'Gagal mengubah status peraturan.', { context: 'Sinkron status peraturan' }));
+      return false;
+    }
+    if (!data || data.length === 0) {
+      setStatusError('Status tidak berubah: statusnya sudah diubah orang lain, kamu tidak punya izin, atau peraturannya sudah dihapus.');
+      onChanged?.();
+      return false;
+    }
+
+    logActivity({
+      aksi: 'ubah_peraturan',
+      targetTable: 'peraturan',
+      targetId: ref.id,
+      detail: {
+        peraturan: labelPeraturan(ref),
+        judul: ref.judul,
+        kolom_berubah: ['status'],
+        status_dari: ref.status,
+        status_ke: statusBaru,
+        via,
+      },
+    });
+    setStatusNotice(`Status ${labelPeraturan(ref)} diubah menjadi ${statusBaru}.`);
+    onChanged?.();
+    return true;
+  };
+
+  const handleKonfirmasiStatus = async () => {
+    if (!statusPrompt) return;
+    await ubahStatus(statusPrompt, `relasi_${statusPrompt.jenis}`);
+    setStatusPrompt(null);
+  };
+
   const handleAdd = async () => {
     setFormError('');
     setNotice('');
+    setStatusError('');
+    setStatusNotice('');
     if (!target) {
       setFormError('Pilih peraturan target terlebih dahulu.');
       return;
@@ -172,6 +267,13 @@ export default function RelasiManager({ peraturan, groups, loadError = '', onRet
       },
     });
 
+    // Relasi mencabut/mengubah tidak otomatis mengubah status targetnya: tawarkan
+    // lewat dialog (hanya bila status target memang perlu naik).
+    const statusBaru = RELASI_STATUS_TARGET[jenis];
+    if (statusBaru && perluNaikStatus(target.status, statusBaru)) {
+      setStatusPrompt({ ref: target, statusBaru, jenis });
+    }
+
     setNotice(`Relasi ke ${labelPeraturan(target)} ditambahkan.`);
     setTarget(null);
     setCatatan('');
@@ -220,7 +322,7 @@ export default function RelasiManager({ peraturan, groups, loadError = '', onRet
     onChanged?.();
   };
 
-  const busy = saving || deleting;
+  const busy = saving || deleting || statusBusy;
 
   return (
     <div className="mt-6 pt-6 border-t border-[#E0E0E0]">
@@ -262,6 +364,35 @@ export default function RelasiManager({ peraturan, groups, loadError = '', onRet
         </div>
       )}
       {deleteError && <p className="text-xs text-red-600 mt-3">{deleteError}</p>}
+
+      {inkonsistensi.length > 0 && (
+        <div className="mt-4 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <p className="font-medium flex items-center gap-2">
+            <AlertTriangle size={16} className="shrink-0" aria-hidden="true" />
+            Status tidak sinkron dengan relasi
+          </p>
+          <ul className="mt-2 space-y-2">
+            {inkonsistensi.map((item) => (
+              <li key={item.ref.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="flex-1 min-w-0 break-words">
+                  <strong>{labelPeraturan(item.ref)}</strong> berstatus {item.ref.status}, padahal{' '}
+                  {item.sebab.join('; ')}.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => ubahStatus(item, 'sinkron_relasi')}
+                  disabled={busy}
+                  className="shrink-0 border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {statusBusy ? 'Mengubah...' : `Ubah ke ${item.statusBaru}`}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {statusError && <p className="text-xs text-red-600 mt-3">{statusError}</p>}
+      {statusNotice && !statusError && <p className="text-xs text-green-700 mt-3">{statusNotice}</p>}
 
       {/* Form tambah disembunyikan saat relasi gagal dimuat: daftar relasi yang ada tidak
           diketahui, sehingga penanda duplikat tidak bisa diandalkan. */}
@@ -391,6 +522,27 @@ export default function RelasiManager({ peraturan, groups, loadError = '', onRet
         {isDuplicate && <p className="text-xs text-[#6B6B6B] mt-2">Relasi ini sudah ada.</p>}
       </div>
       )}
+
+      <ConfirmDialog
+        open={!!statusPrompt}
+        title={`Ubah Status Menjadi ${statusPrompt?.statusBaru ?? ''}?`}
+        message={
+          statusPrompt && (
+            <>
+              Relasi tersimpan, tetapi <strong>{labelPeraturan(statusPrompt.ref)}</strong> masih berstatus{' '}
+              {statusPrompt.ref.status}. Ubah statusnya menjadi <strong>{statusPrompt.statusBaru}</strong>{' '}
+              karena {labelPeraturan(peraturan)} {RELASI_LABEL[statusPrompt.jenis].keluar.toLowerCase()} peraturan itu?
+              Jika dibiarkan, ketidaksesuaian ini tetap tampil di daftar &quot;Status tidak sinkron&quot;.
+            </>
+          )
+        }
+        confirmLabel="Ya, Ubah Status"
+        cancelLabel="Biarkan"
+        busyLabel="Mengubah..."
+        busy={statusBusy}
+        onConfirm={handleKonfirmasiStatus}
+        onCancel={() => setStatusPrompt(null)}
+      />
 
       <ConfirmDialog
         open={!!deleteTarget}
