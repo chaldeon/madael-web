@@ -13,14 +13,14 @@ import { fetchAllRows } from '@/lib/fetchAllRows';
 import { logActivity } from '@/lib/activityLogClient';
 import { downloadCsv } from '@/lib/exportCsv';
 import {
-  PERATURAN_MODULE_KEY, JENIS_OPTIONS, STATUS_OPTIONS, TOPIK_OPTIONS, PAGE_SIZE,
+  PERATURAN_MODULE_KEY, JENIS_OPTIONS, STATUS_OPTIONS, TOPIK_OPTIONS, PAGE_SIZE, RELASI_PENGGANTI,
   MIN_TAHUN, MAX_TAHUN, labelPeraturan, formatTanggal,
   EXPORT_HEADERS, EXPORT_SELECT, EXPORT_ID_CHUNK, peraturanToExportRow, sortPeraturanExport,
 } from '@/lib/peraturanConfig';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
-import { Chip, Cuplikan, StatusBadge, inputClass } from '@/components/peraturan/PeraturanParts';
+import { Chip, Cuplikan, PenandaPeringatanStatus, StatusBadge, inputClass } from '@/components/peraturan/PeraturanParts';
 
 const selectClass = inputClass;
 
@@ -148,6 +148,39 @@ export default function PeraturanListPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // --- Penanda peraturan pengganti ---
+  // Untuk kartu berstatus Dicabut/Diubah: ambil peraturan yang mencabut/mengubahnya.
+  // Satu query tambahan per halaman (maks. PAGE_SIZE id) dan tidak menghalangi
+  // daftar tampil; RPC cari_peraturan sengaja tidak diubah. Kegagalan non-fatal:
+  // kartu tetap menampilkan penanda status tanpa nama pengganti.
+  // Hasil disimpan bersama kunci id-nya: hasil halaman lain dianggap belum termuat.
+  const [penggantiHasil, setPenggantiHasil] = useState({ key: '', peta: {} }); // peta: { [idPeraturan]: [{ id, jenis_relasi, ref }] }
+  const idsBermasalah = useMemo(
+    () => rows.filter((r) => RELASI_PENGGANTI[r.status]).map((r) => r.id),
+    [rows]
+  );
+  const idsBermasalahKey = idsBermasalah.join(',');
+  useEffect(() => {
+    if (!idsBermasalahKey) return undefined;
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase
+        .from('peraturan_relasi')
+        .select('id, terkait_id, jenis_relasi, ref:peraturan_id ( id, jenis, nomor, tahun, status )')
+        .in('terkait_id', idsBermasalahKey.split(','))
+        .in('jenis_relasi', Object.values(RELASI_PENGGANTI));
+      if (cancelled || err) return;
+      const peta = {};
+      idsBermasalahKey.split(',').forEach((id) => { peta[id] = []; });
+      (data || []).forEach((r) => {
+        if (r.ref) peta[r.terkait_id]?.push({ id: r.id, jenis_relasi: r.jenis_relasi, ref: r.ref });
+      });
+      setPenggantiHasil({ key: idsBermasalahKey, peta });
+    })();
+    return () => { cancelled = true; };
+  }, [supabase, idsBermasalahKey]);
+  const penggantiMap = penggantiHasil.key === idsBermasalahKey ? penggantiHasil.peta : {};
 
   // --- Ekspor CSV (sekaligus cadangan) ---
   // 'semua'  : seluruh tabel peraturan, langsung dari tabel (tidak lewat RPC pencarian).
@@ -410,6 +443,11 @@ export default function PeraturanListPage() {
                 >
                   {row.judul}
                 </Link>
+
+                <PenandaPeringatanStatus
+                  status={row.status}
+                  pengganti={penggantiMap[row.id]?.filter((p) => p.jenis_relasi === RELASI_PENGGANTI[row.status])}
+                />
 
                 {row.tentang && <p className="text-sm text-[#3D3D3D] mt-1 line-clamp-2">{row.tentang}</p>}
                 <Cuplikan text={row.cuplikan} />

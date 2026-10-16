@@ -11,7 +11,7 @@ import { useModuleAccess } from '@/lib/useModuleAccess';
 import { logActivity } from '@/lib/activityLogClient';
 import { friendlyError } from '@/lib/errorMessage';
 import {
-  PERATURAN_MODULE_KEY, DETAIL_COLUMNS, RELASI_LABEL, labelPeraturan, formatTanggal,
+  PERATURAN_MODULE_KEY, DETAIL_COLUMNS, RELASI_LABEL, RELASI_PENGGANTI, labelPeraturan, formatTanggal,
   formatTanggalWaktu, isHttpUrl, formatUkuranBerkas,
 } from '@/lib/peraturanConfig';
 import { hapusPdfPeraturan } from '@/lib/peraturanPdf';
@@ -19,7 +19,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { Chip, StatusBadge } from '@/components/peraturan/PeraturanParts';
+import { BannerPeringatanStatus, Chip, StatusBadge } from '@/components/peraturan/PeraturanParts';
 import RelasiManager from '@/components/peraturan/RelasiManager';
 import PasalList from '@/components/peraturan/PasalList';
 import RevisiPanel from '@/components/peraturan/RevisiPanel';
@@ -187,6 +187,15 @@ export default function PeraturanDetailPage() {
     );
   }
 
+  // Peraturan yang mencabut/mengubah peraturan ini (relasi masuk), untuk banner
+  // peringatan. Kosong bila status Berlaku atau belum ada relasinya.
+  const jenisPengganti = RELASI_PENGGANTI[row.status];
+  const pengganti = jenisPengganti
+    ? relasi
+        .filter((g) => g.arah === 'masuk' && g.jenisRelasi === jenisPengganti)
+        .flatMap((g) => g.items)
+    : [];
+
   return (
     <div className="max-w-[900px] mx-auto px-6 py-10">
       <Link
@@ -205,6 +214,13 @@ export default function PeraturanDetailPage() {
 
         <h1 className="font-serif text-[26px] font-normal text-black tracking-[-0.02em] leading-snug">{row.judul}</h1>
         {row.tentang && <p className="text-sm text-[#3D3D3D] mt-2">{row.tentang}</p>}
+
+        <BannerPeringatanStatus
+          status={row.status}
+          pengganti={pengganti}
+          loadError={relasiError}
+          onRetry={retryRelasi}
+        />
 
         {canEdit && (
           <div className="flex flex-wrap gap-3 mt-5">
