@@ -14,6 +14,7 @@ import { logActivity } from '@/lib/activityLogClient';
 import { downloadCsv } from '@/lib/exportCsv';
 import {
   PERATURAN_MODULE_KEY, JENIS_OPTIONS, STATUS_OPTIONS, TOPIK_OPTIONS, PAGE_SIZE, RELASI_PENGGANTI,
+  PASAL_LINTAS_LIMIT, PASAL_LINTAS_MIN_LENGTH,
   MIN_TAHUN, MAX_TAHUN, labelPeraturan, formatTanggal,
   EXPORT_HEADERS, EXPORT_SELECT, EXPORT_ID_CHUNK, peraturanToExportRow, sortPeraturanExport,
 } from '@/lib/peraturanConfig';
@@ -21,6 +22,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { Chip, Cuplikan, PenandaPeringatanStatus, StatusBadge, inputClass } from '@/components/peraturan/PeraturanParts';
+import HasilPasalLintas from '@/components/peraturan/HasilPasalLintas';
 
 const selectClass = inputClass;
 
@@ -148,6 +150,41 @@ export default function PeraturanListPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // --- Pencarian lintas-pasal (RPC cari_pasal_lintas) ---
+  // Jalan paralel dengan load() dengan filter yang sama, tapi tidak ikut paginasi
+  // (kunci tidak memuat `hal`) dan non-fatal: gagal tidak mengganggu daftar peraturan.
+  // Hasil disimpan bersama kuncinya; hasil milik pencarian/filter lama dianggap belum siap.
+  const qTrim = q.trim();
+  const pasalAktif = qTrim.length >= PASAL_LINTAS_MIN_LENGTH;
+  const [pasalUlang, setPasalUlang] = useState(0);
+  const pasalKey = JSON.stringify([qTrim, jenis, tahun, status, topik, keywordsKey, pasalUlang]);
+  const [pasalHasil, setPasalHasil] = useState({ key: '', rows: [], error: '' });
+  useEffect(() => {
+    if (!pasalAktif) return undefined;
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase.rpc('cari_pasal_lintas', {
+        p_q: qTrim,
+        p_jenis: jenis || null,
+        p_tahun: tahun ? Number(tahun) : null,
+        p_status: status || null,
+        p_topik: topik || null,
+        p_keywords: keywordsKey ? keywordsKey.split('\u0001') : null,
+        p_limit: PASAL_LINTAS_LIMIT,
+      });
+      if (cancelled) return; // pencarian/filter sudah berubah lagi
+      setPasalHasil({
+        key: pasalKey,
+        rows: err ? [] : data || [],
+        error: err ? friendlyError(err, 'Pencarian di dalam pasal gagal.', { context: 'Cari pasal lintas peraturan' }) : '',
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [supabase, pasalAktif, qTrim, jenis, tahun, status, topik, keywordsKey, pasalKey]);
+  const pasalSiap = pasalAktif && pasalHasil.key === pasalKey;
+  const pasalRows = pasalSiap ? pasalHasil.rows : [];
+  const pasalError = pasalSiap ? pasalHasil.error : '';
 
   // --- Penanda peraturan pengganti ---
   // Untuk kartu berstatus Dicabut/Diubah: ambil peraturan yang mencabut/mengubahnya.
@@ -376,6 +413,15 @@ export default function PeraturanListPage() {
         )}
       </div>
 
+      {pasalAktif && (
+        <HasilPasalLintas
+          rows={pasalRows}
+          ready={pasalSiap}
+          error={pasalError}
+          onRetry={() => setPasalUlang((n) => n + 1)}
+        />
+      )}
+
       {/* Hasil */}
       {error ? (
         <ErrorState message={error} onRetry={load} />
@@ -387,7 +433,9 @@ export default function PeraturanListPage() {
             icon={Scale}
             message={
               hasFilter
-                ? 'Tidak ada peraturan yang cocok dengan pencarian atau filter ini.'
+                ? pasalRows.length > 0
+                  ? 'Tidak ada peraturan yang judul, ringkasan, atau keyword-nya cocok. Lihat hasil di dalam pasal di atas.'
+                  : 'Tidak ada peraturan yang cocok dengan pencarian atau filter ini.'
                 : canEdit
                   ? 'Belum ada peraturan. Klik "Tambah Peraturan" untuk mulai mengisi.'
                   : 'Belum ada peraturan di perpustakaan.'
