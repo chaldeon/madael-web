@@ -8,6 +8,7 @@ import { logActivity } from '@/lib/activityLogClient';
 import { friendlyError } from '@/lib/errorMessage';
 import { RELASI_LABEL, RELASI_OPTIONS, LIMITS, labelPeraturan } from '@/lib/peraturanConfig';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import ErrorState from '@/components/ErrorState';
 import { StatusBadge, inputClass, labelClass } from '@/components/peraturan/PeraturanParts';
 
 const SEARCH_DEBOUNCE_MS = 350;
@@ -22,8 +23,11 @@ const SEARCH_LIMIT = 8;
 // - groups    : relasi yang sudah dikelompokkan halaman detail
 //               [{ key, label, arah: 'keluar' | 'masuk', jenisRelasi, items: [{ id, ref, catatan }] }]
 // - employeeId: id employee yang login (untuk activity log)
+// - loadError: pesan error kalau relasi gagal dimuat (string kosong = berhasil). Saat
+//               terisi, `groups` tidak bisa dipercaya: tampilkan error, bukan "Belum ada relasi"
+// - onRetry   : dipanggil tombol "Coba Lagi" pada error di atas
 // - onChanged : dipanggil setelah tambah/hapus berhasil (halaman memuat ulang relasi)
-export default function RelasiManager({ peraturan, groups, employeeId, onChanged }) {
+export default function RelasiManager({ peraturan, groups, loadError = '', onRetry, employeeId, onChanged }) {
   const supabase = createClient();
 
   const [jenis, setJenis] = useState(RELASI_OPTIONS[0].value);
@@ -222,7 +226,9 @@ export default function RelasiManager({ peraturan, groups, employeeId, onChanged
     <div className="mt-6 pt-6 border-t border-[#E0E0E0]">
       <h2 className="text-sm font-medium text-black mb-3">Relasi Peraturan</h2>
 
-      {groups.length === 0 ? (
+      {loadError ? (
+        <ErrorState message={loadError} onRetry={onRetry} />
+      ) : groups.length === 0 ? (
         <p className="text-sm text-[#6B6B6B]">Belum ada relasi.</p>
       ) : (
         <div className="space-y-4">
@@ -257,6 +263,9 @@ export default function RelasiManager({ peraturan, groups, employeeId, onChanged
       )}
       {deleteError && <p className="text-xs text-red-600 mt-3">{deleteError}</p>}
 
+      {/* Form tambah disembunyikan saat relasi gagal dimuat: daftar relasi yang ada tidak
+          diketahui, sehingga penanda duplikat tidak bisa diandalkan. */}
+      {!loadError && (
       <div className="mt-5 border border-[#E0E0E0] bg-[#FAFAFA] p-4">
         <p className="text-xs font-medium text-black mb-3">Tambah relasi</p>
 
@@ -381,6 +390,7 @@ export default function RelasiManager({ peraturan, groups, employeeId, onChanged
         </button>
         {isDuplicate && <p className="text-xs text-[#6B6B6B] mt-2">Relasi ini sudah ada.</p>}
       </div>
+      )}
 
       <ConfirmDialog
         open={!!deleteTarget}
