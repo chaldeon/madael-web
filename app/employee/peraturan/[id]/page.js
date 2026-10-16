@@ -47,6 +47,9 @@ export default function PeraturanDetailPage() {
 
   const [row, setRow] = useState(null);
   const [relasi, setRelasi] = useState([]); // [{ key, label, items: [{ id, ref, catatan }] }]
+  // Pesan error khusus relasi. Dipisah dari `error` karena detail tetap tampil,
+  // tapi daftar relasi tidak boleh dianggap kosong saat query-nya gagal.
+  const [relasiError, setRelasiError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notFound, setNotFound] = useState(false);
@@ -66,6 +69,7 @@ export default function PeraturanDetailPage() {
     }
     if (!silent) setLoading(true);
     setError('');
+    setRelasiError('');
     setNotFound(false);
 
     const [mainRes, outRes, inRes] = await Promise.all([
@@ -95,9 +99,13 @@ export default function PeraturanDetailPage() {
       return;
     }
 
-    // Relasi bersifat tambahan: kalau gagal dimuat, detail utama tetap tampil.
+    // Relasi bersifat tambahan: kalau gagal dimuat, detail utama tetap tampil, tetapi
+    // kegagalannya ditandai (relasiError) supaya tidak tampil sebagai "Belum ada relasi".
     const groups = [];
-    if (!outRes.error && !inRes.error) {
+    const relasiErr = outRes.error || inRes.error;
+    if (relasiErr) {
+      setRelasiError(friendlyError(relasiErr, 'Gagal memuat relasi peraturan.', { context: 'Relasi peraturan' }));
+    } else {
       Object.entries(RELASI_LABEL).forEach(([jenisRelasi, label]) => {
         const keluar = (outRes.data || []).filter((r) => r.jenis_relasi === jenisRelasi && r.ref);
         const masuk = (inRes.data || []).filter((r) => r.jenis_relasi === jenisRelasi && r.ref);
@@ -118,6 +126,9 @@ export default function PeraturanDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Muat ulang diam-diam (tanpa LoadingState) supaya halaman tidak berkedip.
+  const retryRelasi = () => load({ silent: true });
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -306,12 +317,21 @@ export default function PeraturanDetailPage() {
           <RelasiManager
             peraturan={row}
             groups={relasi}
+            loadError={relasiError}
+            onRetry={retryRelasi}
             employeeId={employee.id}
             onChanged={() => load({ silent: true })}
           />
         )}
 
-        {!canEdit && relasi.length > 0 && (
+        {!canEdit && relasiError && (
+          <div className="mt-6 pt-6 border-t border-[#E0E0E0]">
+            <h2 className="text-sm font-medium text-black mb-3">Relasi Peraturan</h2>
+            <ErrorState message={relasiError} onRetry={retryRelasi} />
+          </div>
+        )}
+
+        {!canEdit && !relasiError && relasi.length > 0 && (
           <div className="mt-6 pt-6 border-t border-[#E0E0E0]">
             <h2 className="text-sm font-medium text-black mb-3">Relasi Peraturan</h2>
             <div className="space-y-4">
