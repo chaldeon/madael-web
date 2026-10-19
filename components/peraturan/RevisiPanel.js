@@ -309,7 +309,8 @@ export default function RevisiPanel({ row, canEdit, employee, onRestored }) {
               </ul>
               <p className="text-[11px] text-[#9A9A9A] mt-2">
                 Menampilkan maksimal {REVISI_LIMIT} revisi terbaru. Memulihkan versi lama menambah revisi baru; riwayat tidak
-                ditimpa. Berkas PDF unggahan, relasi, dan pasal tidak ikut dikembalikan saat memulihkan versi lama.
+                ditimpa. Berkas PDF unggahan, relasi, dan pasal tidak ikut dikembalikan saat memulihkan versi lama;
+                riwayat dan pemulihan tiap pasal ada di bagian Pasal (tombol Riwayat).
               </p>
             </>
           )}
