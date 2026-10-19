@@ -40,6 +40,10 @@ import {
 
 const STATUS_OPTIONS = APPLICATION_STATUSES;
 
+// Jumlah baris pelamar per halaman. Pagination hanya di sisi tampilan (client):
+// data tetap dimuat sekaligus karena pencarian di isi jawaban butuh `answers`.
+const PAGE_SIZE = 50;
+
 const STATUS_STYLES = {
   Baru: 'bg-[#E8F0FE] text-[#1A56DB]',
   Review: 'bg-[#FEF3C7] text-[#92700C]',
@@ -385,6 +389,9 @@ export default function JobPortalCandidatesPage() {
   const [dupExpandedId, setDupExpandedId] = useState(null); // lamaran yang detail pelamar gandanya dibuka
   const [sortField, setSortField] = useState('tanggal');
   const [sortDir, setSortDir] = useState('desc');
+  // Halaman aktif disimpan bersama kunci filter-nya (lihat bagian Pagination).
+  const [pageState, setPageState] = useState({ page: 1, key: '' });
+  const tableTopRef = useRef(null);
   // Pilihan untuk aksi massal (id lamaran). Yang diproses hanya yang sedang tampil.
   const [selectedIds, setSelectedIds] = useState(() => new Set());
 
@@ -1039,6 +1046,22 @@ export default function JobPortalCandidatesPage() {
     return { filtered: sortDir === 'desc' ? sorted.reverse() : sorted, answerOnlyIds: answerOnly };
   }, [applications, filterJob, filterStatus, activeTag, tagsById, searchTerms, searchIndex, searchInAnswers, sortField, sortDir]);
 
+  // --- Pagination (client) ---
+  // Filter, pencarian, atau urutan berubah -> kunci berubah -> kembali ke halaman 1
+  // (tanpa effect). `page` juga dijepit ke rentang valid, jadi kalau jumlah hasil
+  // berkurang (ubah status saat filter status aktif, muat ulang data) halaman
+  // tidak pernah kosong.
+  const pageKey = [filterJob, filterStatus, activeTag, searchQuery, searchInAnswers, sortField, sortDir].join('\u0000');
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const page = pageState.key === pageKey ? Math.min(pageState.page, totalPages) : 1;
+  const pageStart = (page - 1) * PAGE_SIZE;
+  const pagedApps = useMemo(() => filtered.slice(pageStart, pageStart + PAGE_SIZE), [filtered, pageStart]);
+
+  const goToPage = (next) => {
+    setPageState({ page: Math.min(totalPages, Math.max(1, next)), key: pageKey });
+    tableTopRef.current?.scrollIntoView({ block: 'start' });
+  };
+
   const handleSort = (colKey) => {
     if (sortField === colKey) {
       setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
@@ -1053,7 +1076,12 @@ export default function JobPortalCandidatesPage() {
   // tersembunyi oleh filter/pencarian tidak ikut diubah tanpa terlihat.
   const selectedApps = useMemo(() => filtered.filter((a) => selectedIds.has(a.id)), [filtered, selectedIds]);
   const hiddenSelectedCount = selectedIds.size - selectedApps.length;
-  const allVisibleSelected = filtered.length > 0 && selectedApps.length === filtered.length;
+  // Kotak centang di header hanya mengurus baris pada halaman yang sedang tampil.
+  // Pilihan di halaman lain tetap tersimpan (dan ikut diproses aksi massal);
+  // "Pilih semua hasil" di bawah menjangkau semua halaman sekaligus.
+  const pageSelectedCount = pagedApps.filter((a) => selectedIds.has(a.id)).length;
+  const allVisibleSelected = pagedApps.length > 0 && pageSelectedCount === pagedApps.length;
+  const allFilteredSelected = filtered.length > 0 && selectedApps.length === filtered.length;
 
   const toggleSelected = (id) => {
     setSelectedIds((prev) => {
@@ -1067,8 +1095,16 @@ export default function JobPortalCandidatesPage() {
   const toggleAllVisible = () => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (allVisibleSelected) filtered.forEach((a) => next.delete(a.id));
-      else filtered.forEach((a) => next.add(a.id));
+      if (allVisibleSelected) pagedApps.forEach((a) => next.delete(a.id));
+      else pagedApps.forEach((a) => next.add(a.id));
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      filtered.forEach((a) => next.add(a.id));
       return next;
     });
   };
@@ -1255,7 +1291,22 @@ export default function JobPortalCandidatesPage() {
         onClear={() => setSelectedIds(new Set())}
       />
 
-      <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
+      {!loading && !error && totalPages > 1 && allVisibleSelected && (
+        <div className="mb-3 px-4 py-2 bg-[#F7F7F7] border border-[#E0E0E0] text-xs text-[#3D3D3D]">
+          {allFilteredSelected ? (
+            <>Semua {filtered.length} pelamar dari hasil ini dipilih.</>
+          ) : (
+            <>
+              {pagedApps.length} pelamar di halaman ini dipilih.{' '}
+              <button type="button" onClick={selectAllFiltered} className="text-madael-red hover:text-madael-dark font-medium">
+                Pilih semua {filtered.length} pelamar dari hasil ini
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      <div ref={tableTopRef} className="bg-white border border-[#E0E0E0] overflow-x-auto scroll-mt-4">
         {loading ? (
           <LoadingState label="Memuat data..." />
         ) : error ? (
@@ -1270,7 +1321,7 @@ export default function JobPortalCandidatesPage() {
                   <input
                     type="checkbox"
                     checked={allVisibleSelected}
-                    ref={(el) => { if (el) el.indeterminate = selectedApps.length > 0 && !allVisibleSelected; }}
+                    ref={(el) => { if (el) el.indeterminate = pageSelectedCount > 0 && !allVisibleSelected; }}
                     onChange={toggleAllVisible}
                     aria-label="Pilih semua pelamar yang ditampilkan"
                     className="accent-[#B91C1C] cursor-pointer"
@@ -1288,7 +1339,7 @@ export default function JobPortalCandidatesPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((a) => {
+              {pagedApps.map((a) => {
                 const hasAnswers = Array.isArray(a.answers) && a.answers.length > 0;
                 const isExpanded = expandedId === a.id;
                 const duplicates = duplicateMap.get(a.id);
@@ -1495,6 +1546,35 @@ export default function JobPortalCandidatesPage() {
           </table>
         )}
       </div>
+
+      {!loading && !error && filtered.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-4 text-sm text-[#6B6B6B]">
+          <div>
+            Menampilkan {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, filtered.length)} dari {filtered.length} pelamar
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => goToPage(page - 1)}
+                disabled={page <= 1}
+                className="px-3 py-1.5 border border-[#E0E0E0] disabled:opacity-40 hover:border-madael-red hover:text-madael-red transition-colors"
+              >
+                Sebelumnya
+              </button>
+              <span className="px-1 whitespace-nowrap">Halaman {page} / {totalPages}</span>
+              <button
+                type="button"
+                onClick={() => goToPage(page + 1)}
+                disabled={page >= totalPages}
+                className="px-3 py-1.5 border border-[#E0E0E0] disabled:opacity-40 hover:border-madael-red hover:text-madael-red transition-colors"
+              >
+                Berikutnya
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {cvApp && (
         <CvPreviewModal
