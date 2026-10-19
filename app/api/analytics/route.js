@@ -1,17 +1,43 @@
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
 import { NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase-admin';
+import { requireModuleAccess } from '@/lib/moduleAccessServer';
 
 function getAnalyticsClient() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
   return new BetaAnalyticsDataClient({ credentials });
 }
 
+// Cache singkat per periode (best-effort, per instance serverless): mengurangi
+// pemakaian kuota GA Data API saat halaman Statistics sering dibuka/diganti
+// periode. Hanya respons sukses yang disimpan, dan hanya diisi setelah cek
+// akses lolos.
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const analyticsCache = new Map(); // period -> { at, body }
+
+// Respons berisi data internal: private = tidak boleh di-cache proxy/CDN.
+const PRIVATE_CACHE_HEADERS = { 'Cache-Control': 'private, max-age=60' };
+
 export async function GET(request) {
   try {
+    // Route ini memakai service account Google, jadi harus login + punya modul
+    // Statistics (sama dengan gate halaman /employee/statistics). middleware.js
+    // hanya mencocokkan /employee/*, jadi /api/* tidak terlindungi di sana.
+    const admin = createAdminClient();
+    const access = await requireModuleAccess(admin, ['statistics']);
+    if (access.error) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
+    }
+
     const { searchParams } = new URL(request.url);
     const periodParam = searchParams.get('period');
     const validPeriods = ['weekly', 'monthly', 'annually', 'all'];
     const period = validPeriods.includes(periodParam) ? periodParam : 'monthly';
+
+    const cached = analyticsCache.get(period);
+    if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+      return NextResponse.json(cached.body, { headers: PRIVATE_CACHE_HEADERS });
+    }
 
     // GA4 startDate bisa berupa 'NdaysAgo' atau tanggal literal (YYYY-MM-DD).
     // Untuk "all" pakai tanggal jauh ke belakang — GA4 baru ada sejak
@@ -121,7 +147,7 @@ export async function GET(request) {
       sessions: Number(row.metricValues[0].value),
     }));
 
-    return NextResponse.json({
+    const body = {
       period,
       totalSessions,
       totalUsers,
@@ -130,7 +156,10 @@ export async function GET(request) {
       sessionsPerDay,
       deviceBreakdown,
       topCountries,
-    });
+    };
+    analyticsCache.set(period, { at: Date.now(), body });
+
+    return NextResponse.json(body, { headers: PRIVATE_CACHE_HEADERS });
   } catch (err) {
     console.error('GA analytics error:', err);
     return NextResponse.json(
