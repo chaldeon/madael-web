@@ -12,6 +12,7 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { formatRupiah } from '@/lib/format';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 
 const STATUS_OPTIONS = ['draft', 'terkirim', 'lunas'];
 const STATUS_LABEL = { draft: 'Draft', terkirim: 'Terkirim', lunas: 'Lunas' };
@@ -225,6 +226,10 @@ export default function InvoiceTrackerPage() {
       setAttachError('Lampiran invoice harus berformat PDF.');
       return;
     }
+    if (file.size > UPLOAD_MAX_BYTES) {
+      setAttachError(PESAN_UKURAN_UPLOAD);
+      return;
+    }
 
     setAttachError(null);
     setAttachingId(row.id);
@@ -237,8 +242,7 @@ export default function InvoiceTrackerPage() {
         method: 'POST',
         body: formData,
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Gagal mengupload lampiran.');
+      const body = await readUploadJson(res, 'Gagal mengupload lampiran.');
       setInvoices((prev) => prev.map((i) => (i.id === body.invoice.id ? body.invoice : i)));
     } catch (err) {
       setAttachError(friendlyCaught(err, 'Gagal mengupload lampiran.'));

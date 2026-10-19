@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { uploadAttendanceEvidenceToDrive } from '@/lib/googleDrive';
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL } from '@/lib/uploadLimits';
 
-const MAX_SIZE = 5 * 1024 * 1024; // 5MB — cukup untuk foto bukti kehadiran
 const ALLOWED_MIME = ['image/jpeg', 'image/jpg', 'image/png'];
 
 // POST /api/attendance/koreksi-bukti — upload foto bukti pengajuan koreksi
@@ -53,8 +53,8 @@ export async function POST(request) {
     if (!ALLOWED_MIME.includes(file.type)) {
       return NextResponse.json({ error: 'Format foto harus JPG atau PNG.' }, { status: 400 });
     }
-    if (file.size > MAX_SIZE) {
-      return NextResponse.json({ error: 'Ukuran foto maksimal 5MB.' }, { status: 400 });
+    if (file.size > UPLOAD_MAX_BYTES) {
+      return NextResponse.json({ error: `Ukuran foto maksimal ${UPLOAD_MAX_LABEL}.` }, { status: 400 });
     }
 
     const arrayBuffer = await file.arrayBuffer();
