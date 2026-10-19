@@ -9,6 +9,7 @@ import { WORK_MODES, EXPERIENCE_LEVELS } from '@/lib/jobListingOptions';
 import { getJobStatus, getDeadlineDate, isPastDeadline } from '@/lib/jobStatus';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { logActivity } from '@/lib/activityLogClient';
+import { revalidateKarir } from '@/lib/revalidateKarirClient';
 import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import JobReviewersPanel from '@/components/job-portal/JobReviewersPanel';
 import { friendlyError } from '@/lib/errorMessage';
@@ -475,6 +476,9 @@ export default function JobPortalLowonganPage() {
       });
     }
 
+    // Segarkan cache halaman publik (slug lama ikut kalau slug diganti).
+    revalidateKarir([payload.slug, listingBefore?.slug]);
+
     setSaving(false);
     closeForm();
     fetchData();
@@ -486,6 +490,7 @@ export default function JobPortalLowonganPage() {
 
     if (!error) {
       setListings((prev) => prev.map((j) => (j.id === job.id ? { ...j, is_active: !j.is_active } : j)));
+      revalidateKarir([job.slug]);
       logJobActivity('ubah_status_lowongan', job.id, {
         judul: job.title,
         slug: job.slug,
@@ -536,6 +541,7 @@ export default function JobPortalLowonganPage() {
         sumber_id: job.id,
         sumber_judul: job.title,
       });
+      revalidateKarir([payload.slug]);
       fetchData();
     }
     setDuplicatingId(null);
