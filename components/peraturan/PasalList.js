@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, History, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { logActivity } from '@/lib/activityLogClient';
 import { friendlyError } from '@/lib/errorMessage';
@@ -14,6 +14,8 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import PasalForm from '@/components/peraturan/PasalForm';
+import PasalRiwayat from '@/components/peraturan/PasalRiwayat';
+import PasalTerhapus from '@/components/peraturan/PasalTerhapus';
 
 const SEARCH_MIN_LENGTH = 2;
 const SEARCH_DEBOUNCE_MS = 350;
@@ -76,6 +78,8 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
     detailsRef.current = details;
   }, [details]);
 
+  const [riwayat, setRiwayat] = useState(() => new Set()); // id pasal yang riwayatnya dibuka
+  const [terhapusToken, setTerhapusToken] = useState(0); // naik tiap pasal dihapus -> daftar Pasal Terhapus dimuat ulang
   const [form, setForm] = useState(null); // null | { mode: 'new' } | { mode: 'edit', row }
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -235,6 +239,31 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
     setForm(again ? { mode: 'new', key: row.id } : null);
   };
 
+  const toggleRiwayat = (id) => {
+    setRiwayat((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Setelah sebuah versi dipulihkan: segarkan isi dan header pasal itu tanpa
+  // memuat ulang seluruh daftar (panel riwayat tetap terpasang).
+  const handleRestored = async (id) => {
+    const { data, error: err } = await supabase
+      .from('peraturan_pasal')
+      .select(DETAIL_SELECT)
+      .eq('id', id)
+      .maybeSingle();
+    if (err || !data) {
+      load();
+      return;
+    }
+    setDetails((prev) => ({ ...prev, [id]: { status: 'ok', row: data } }));
+    setItems((prev) => sortItems([...prev.filter((it) => it.id !== id), headerOf(data)]));
+  };
+
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -286,6 +315,12 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
       next.delete(snapshot.id);
       return next;
     });
+    setRiwayat((prev) => {
+      const next = new Set(prev);
+      next.delete(snapshot.id);
+      return next;
+    });
+    setTerhapusToken((n) => n + 1);
   };
 
   return (
@@ -442,8 +477,8 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
                                 Diperbarui {formatTanggalWaktu(detail.row.updated_at)}
                                 {detail.row.pengubah?.nama && ` oleh ${detail.row.pengubah.nama}`}
                               </p>
-                              {canEdit && (
-                                <div className="flex flex-wrap gap-3 mt-3">
+                              <div className="flex flex-wrap gap-3 mt-3">
+                                {canEdit && (
                                   <button
                                     type="button"
                                     onClick={() => startEdit(item)}
@@ -452,6 +487,17 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
                                     <Pencil size={12} />
                                     Ubah
                                   </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleRiwayat(item.id)}
+                                  aria-expanded={riwayat.has(item.id)}
+                                  className="inline-flex items-center gap-2 border border-[#E0E0E0] px-3 py-1.5 text-xs text-black hover:border-madael-red hover:text-madael-red transition-colors"
+                                >
+                                  <History size={12} />
+                                  Riwayat
+                                </button>
+                                {canEdit && (
                                   <button
                                     type="button"
                                     onClick={() => { setActionError(''); setDeleteTarget(item); }}
@@ -460,7 +506,17 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
                                     <Trash2 size={12} />
                                     Hapus
                                   </button>
-                                </div>
+                                )}
+                              </div>
+                              {riwayat.has(item.id) && (
+                                <PasalRiwayat
+                                  pasalId={item.id}
+                                  peraturanId={peraturanId}
+                                  peraturanLabel={peraturanLabel}
+                                  row={detail.row}
+                                  canEdit={canEdit}
+                                  onRestored={handleRestored}
+                                />
                               )}
                             </>
                           )}
@@ -485,6 +541,14 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
         </>
       )}
 
+      <PasalTerhapus
+        peraturanId={peraturanId}
+        peraturanLabel={peraturanLabel}
+        canEdit={canEdit}
+        refreshToken={terhapusToken}
+        onRestored={load}
+      />
+
       <p className="text-[11px] text-[#9A9A9A] mt-4">
         Teks pasal adalah salinan internal yang diinput manual. Rujuk teks resmi di sumbernya sebelum dipakai sebagai dasar hukum.
       </p>
@@ -492,7 +556,7 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
       <ConfirmDialog
         open={!!deleteTarget}
         title="Hapus Pasal"
-        message={<>Hapus <strong>{deleteTarget ? labelPasal(deleteTarget) : ''}</strong>? Isinya dicadangkan di Log Aktivitas, tetapi pasal tidak bisa dipulihkan dari halaman ini.</>}
+        message={<>Hapus <strong>{deleteTarget ? labelPasal(deleteTarget) : ''}</strong>? Isinya dicadangkan di Log Aktivitas dan bisa dipulihkan dari bagian Pasal Terhapus.</>}
         confirmLabel="Hapus"
         busyLabel="Menghapus..."
         busy={deleting}
