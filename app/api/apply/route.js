@@ -6,8 +6,8 @@ import { notifyByModule, notifyEmployees } from '@/lib/notify';
 import { isJobOpen } from '@/lib/jobStatus';
 import { EMAIL_RE, isMailConfigured, sendApplicationReceivedEmail } from '@/lib/applicationEmail';
 import { APPLY_RATE_LIMIT, HONEYPOT_FIELD, getClientIp, rateLimit } from '@/lib/antiSpam';
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL } from '@/lib/uploadLimits';
 
-const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 const GENERAL_FOLDER_NAME = 'Umum';
 
 // Maksimal satu email konfirmasi per alamat email dalam jendela ini, supaya
@@ -103,8 +103,8 @@ export async function POST(request) {
       return NextResponse.json({ error: 'File CV harus berformat PDF.' }, { status: 400 });
     }
 
-    if (file.size > MAX_SIZE) {
-      return NextResponse.json({ error: 'Ukuran file CV maksimal 5MB.' }, { status: 400 });
+    if (file.size > UPLOAD_MAX_BYTES) {
+      return NextResponse.json({ error: `Ukuran file CV maksimal ${UPLOAD_MAX_LABEL}.` }, { status: 400 });
     }
 
     // Tolak lamaran ke lowongan yang sudah nonaktif atau lewat deadline.

@@ -13,6 +13,7 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { formatRupiahOrDash } from '@/lib/format';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 import Toast from '@/components/employee-list/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
 
@@ -129,6 +130,10 @@ export default function EmployeeDetailPage() {
       setUploadError('Pilih file terlebih dahulu.');
       return;
     }
+    if (file.size > UPLOAD_MAX_BYTES) {
+      setUploadError(PESAN_UKURAN_UPLOAD);
+      return;
+    }
 
     setUploading(true);
     try {
@@ -140,8 +145,7 @@ export default function EmployeeDetailPage() {
         method: 'POST',
         body: formData,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Gagal mengupload dokumen.');
+      await readUploadJson(res, 'Gagal mengupload dokumen.');
 
       setFile(null);
       setNamaDokumen('KTP');
@@ -287,7 +291,7 @@ export default function EmployeeDetailPage() {
             )}
 
             <label className="flex flex-col gap-1">
-              <span className="text-xs text-[#6B6B6B]">File (PDF/JPG/PNG, maks 10MB)</span>
+              <span className="text-xs text-[#6B6B6B]">File (PDF/JPG/PNG, maks {UPLOAD_MAX_LABEL})</span>
               <input
                 id="doc-file-input"
                 type="file"

@@ -16,6 +16,7 @@ const CLIENTS = [
   { file: 'client-10.png', alt: 'PHILIPS' },
   { file: 'client-11.png', alt: 'NEXIA' },
   { file: 'client-12.png', alt: 'XYLEM' },
+  { file: 'client-13.png', alt: 'ELECMETAL LONGTENG INDONESIA' },
 ];
 
 // duplicated for a seamless loop

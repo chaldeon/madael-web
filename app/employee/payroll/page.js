@@ -20,6 +20,7 @@ import HitungModal from '@/components/payroll/HitungModal';
 import { currentMonthValue, EMPTY_FORM, totalTunjangan, SORT_COLUMNS, objToPairs, pairsToObj } from '@/lib/payrollConfig';
 import { formatRupiah } from '@/lib/format';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 
 export default function PayrollManagerPage() {
   const supabase = createClient();
@@ -224,6 +225,10 @@ export default function PayrollManagerPage() {
 
   const handleAttach = async (row, file) => {
     if (!file) return;
+    if (file.size > UPLOAD_MAX_BYTES) {
+      setAttachError(PESAN_UKURAN_UPLOAD);
+      return;
+    }
 
     setAttachError(null);
     setAttachingId(row.id);
@@ -236,8 +241,7 @@ export default function PayrollManagerPage() {
         method: 'POST',
         body: formData,
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Gagal mengupload dokumen.');
+      const body = await readUploadJson(res, 'Gagal mengupload dokumen.');
       setEmployees((prev) => prev.map((e) => (e.id === body.employee.id ? { ...e, ...body.employee } : e)));
     } catch (err) {
       setAttachError(friendlyCaught(err, 'Gagal mengupload dokumen.'));

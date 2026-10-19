@@ -3,17 +3,18 @@
 import { useState } from 'react';
 import { useLanguage } from '@/context/LanguageContext';
 import { HONEYPOT_FIELD } from '@/lib/antiSpam';
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL } from '@/lib/uploadLimits';
 
 const translations = {
   id: {
     applyTitleJob: 'Lamar Posisi Ini',
-    applySubtitleJob: 'Isi data di bawah dan lampirkan CV Anda (PDF, maks. 5MB).',
+    applySubtitleJob: `Isi data di bawah dan lampirkan CV Anda (PDF, maks. ${UPLOAD_MAX_LABEL}).`,
     fieldName: 'Nama Lengkap',
     fieldEmail: 'Email',
     fieldPhone: 'Nomor Telepon',
     fieldPosition: 'Posisi yang Diminati',
     fieldPositionPlaceholder: 'Contoh: HR Business Partner, Legal Officer',
-    fieldCV: 'Upload CV (PDF, maks. 5MB)',
+    fieldCV: `Upload CV (PDF, maks. ${UPLOAD_MAX_LABEL})`,
     submitButton: 'Kirim Lamaran',
     submitButtonGeneral: 'Kirim CV',
     submitting: 'Mengirim...',
@@ -24,7 +25,7 @@ const translations = {
     successBodyGeneral:
       'Terima kasih sudah menghubungi kami. Tim kami akan meninjau CV Anda dan menghubungi jika ada posisi yang cocok.',
     errFileType: 'File harus berformat PDF.',
-    errFileSize: 'Ukuran file maksimal 5MB.',
+    errFileSize: `Ukuran file maksimal ${UPLOAD_MAX_LABEL}. Perkecil atau kompres PDF Anda lalu coba lagi.`,
     errRequiredJob: 'Nama, email, dan CV wajib diisi.',
     errRequiredGeneral: 'Nama, email, posisi yang diminati, dan CV wajib diisi.',
     errRequiredQuestions: 'Mohon jawab semua pertanyaan yang wajib diisi.',
@@ -35,13 +36,13 @@ const translations = {
   },
   en: {
     applyTitleJob: 'Apply for This Position',
-    applySubtitleJob: 'Fill in your details below and attach your CV (PDF, max 5MB).',
+    applySubtitleJob: `Fill in your details below and attach your CV (PDF, max ${UPLOAD_MAX_LABEL}).`,
     fieldName: 'Full Name',
     fieldEmail: 'Email',
     fieldPhone: 'Phone Number',
     fieldPosition: 'Position of Interest',
     fieldPositionPlaceholder: 'e.g. HR Business Partner, Legal Officer',
-    fieldCV: 'Upload CV (PDF, max 5MB)',
+    fieldCV: `Upload CV (PDF, max ${UPLOAD_MAX_LABEL})`,
     submitButton: 'Submit Application',
     submitButtonGeneral: 'Send CV',
     submitting: 'Submitting...',
@@ -52,7 +53,7 @@ const translations = {
     successBodyGeneral:
       "Thank you for reaching out. Our team will review your CV and contact you if there's a matching role.",
     errFileType: 'File must be a PDF.',
-    errFileSize: 'File size must be under 5MB.',
+    errFileSize: `File size must be ${UPLOAD_MAX_LABEL} or less. Please shrink or compress your PDF and try again.`,
     errRequiredJob: 'Name, email, and CV are required.',
     errRequiredGeneral: 'Name, email, position of interest, and CV are required.',
     errRequiredQuestions: 'Please answer all required questions.',
@@ -62,8 +63,6 @@ const translations = {
     noLabel: 'No',
   },
 };
-
-const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 
 /**
  * Shared apply form.
@@ -111,7 +110,7 @@ export default function JobApplyForm({
       e.target.value = '';
       return;
     }
-    if (file.size > MAX_SIZE) {
+    if (file.size > UPLOAD_MAX_BYTES) {
       setFormError(t.errFileSize);
       setCvFile(null);
       e.target.value = '';
@@ -169,10 +168,16 @@ export default function JobApplyForm({
         body: payload,
       });
 
-      const result = await res.json();
+      // 413 / respons non-JSON datang dari platform (body melebihi batas fungsi
+      // serverless) sebelum sampai ke route, jadi res.json() akan gagal.
+      if (res.status === 413) {
+        setFormError(t.errFileSize);
+        return;
+      }
+      const result = await res.json().catch(() => null);
 
       if (!res.ok) {
-        setFormError(result.error || t.errGeneric);
+        setFormError(result?.error || t.errGeneric);
       } else {
         setSubmitted(true);
         setForm({ nama: '', email: '', telepon: '', posisi_minat: '' });

@@ -25,6 +25,7 @@ import { getBreakState, durasiIstirahatMenit, durasiKerjaMenit, formatDurasi } f
 import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
 import { getAttendanceStatus } from '@/lib/attendanceStatus';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 import { dispatchNotification } from '@/lib/notifyClient';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -257,6 +258,10 @@ export default function AbsensiPage() {
       setKoreksiError('Foto bukti wajib diupload (mis. foto absen fisik, selfie di lokasi kerja, dsb).');
       return;
     }
+    if (koreksiFoto.size > UPLOAD_MAX_BYTES) {
+      setKoreksiError(`Ukuran foto maksimal ${UPLOAD_MAX_LABEL}. Perkecil foto (mis. turunkan resolusi kamera atau kompres) lalu coba lagi.`);
+      return;
+    }
 
     setKoreksiSaving(true);
     try {
@@ -265,8 +270,7 @@ export default function AbsensiPage() {
       fd.append('file', koreksiFoto);
       fd.append('tanggal', koreksiForm.tanggal);
       const uploadRes = await fetch('/api/attendance/koreksi-bukti', { method: 'POST', body: fd });
-      const uploadData = await uploadRes.json();
-      if (!uploadRes.ok) throw new Error(uploadData.error || 'Gagal mengupload foto bukti.');
+      const uploadData = await readUploadJson(uploadRes, 'Gagal mengupload foto bukti.');
 
       // 2. Ambil record attendance existing di tanggal itu (kalau ada) untuk jejak before_*
       const { data: existingRow } = await supabase
@@ -866,7 +870,7 @@ export default function AbsensiPage() {
             <label className="block text-xs font-medium text-[#6B6B6B] mb-1.5">Foto Bukti (wajib)</label>
             <label className="flex items-center gap-2 border border-dashed border-[#E0E0E0] px-3 py-3 text-xs text-[#6B6B6B] mb-1 cursor-pointer hover:border-madael-red">
               <Upload size={14} />
-              {koreksiFoto ? koreksiFoto.name : 'Pilih atau ambil foto (JPG/PNG, maks 5MB)'}
+              {koreksiFoto ? koreksiFoto.name : `Pilih atau ambil foto (JPG/PNG, maks ${UPLOAD_MAX_LABEL})`}
               <input
                 type="file"
                 accept="image/jpeg,image/png"

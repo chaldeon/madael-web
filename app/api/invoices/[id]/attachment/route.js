@@ -4,8 +4,8 @@ import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { uploadInvoiceFileToDrive, deleteInvoiceFileFromDrive } from '@/lib/googleDrive';
 import { friendlyError } from '@/lib/errorMessage';
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL } from '@/lib/uploadLimits';
 
-const MAX_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_MIME = ['application/pdf'];
 
 async function getSupabaseAndRequester() {
@@ -75,8 +75,8 @@ export async function POST(request, { params }) {
     if (!ALLOWED_MIME.includes(file.type)) {
       return NextResponse.json({ error: 'Format file harus PDF.' }, { status: 400 });
     }
-    if (file.size > MAX_SIZE) {
-      return NextResponse.json({ error: 'Ukuran file maksimal 10MB.' }, { status: 400 });
+    if (file.size > UPLOAD_MAX_BYTES) {
+      return NextResponse.json({ error: `Ukuran file maksimal ${UPLOAD_MAX_LABEL}.` }, { status: 400 });
     }
 
     const arrayBuffer = await file.arrayBuffer();
