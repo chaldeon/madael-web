@@ -13,11 +13,9 @@ import {
 } from 'recharts';
 import { createClient } from '@/lib/supabase-browser';
 import ExportCsvButton from '@/components/ExportCsvButton';
-import { isTelatEfektif } from '@/lib/attendanceStatus';
 import { formatRupiah } from '@/lib/format';
 import { isJobOpen } from '@/lib/jobStatus';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
-import { fetchAllRows } from '@/lib/fetchAllRows';
 
 const PERIODS = [
   { value: 'weekly', label: 'Mingguan' },
@@ -94,7 +92,7 @@ function HrAnalyticsSection({ supabase }) {
 
   const [employees, setEmployees] = useState([]); // { id, status, created_at }
   const [masterRows, setMasterRows] = useState([]); // { status, linked_employee_id }
-  const [attendanceRows, setAttendanceRows] = useState([]); // { tanggal, status_telat }
+  const [attendanceSummary, setAttendanceSummary] = useState([]); // { bulan: 'YYYY-MM', total, telat } dari RPC
   const [payrollCostByMonth, setPayrollCostByMonth] = useState({}); // { 'YYYY-MM': total }
 
   const loadData = useCallback(async () => {
@@ -102,15 +100,12 @@ function HrAnalyticsSection({ supabase }) {
     setLoadError(null);
 
     const months = last6Months();
-    const firstDay = `${months[0]}-01`;
 
     const [empRes, masterRes, attendanceRes, runsRes] = await Promise.all([
       supabase.from('employees').select('id, status, created_at'),
       supabase.from('employees_master').select('status, linked_employee_id'),
-      // Enam bulan absensi jauh melewati 1.000 baris (batas max-rows PostgREST).
-      fetchAllRows(() =>
-        supabase.from('attendance').select('tanggal, status_telat, justified').gte('tanggal', firstDay)
-      ),
+      // Agregasi 6 bulan absensi dihitung di database (RPC), bukan ditarik per baris.
+      supabase.rpc('attendance_monthly_summary', { p_months: 6 }),
       supabase.from('payroll_runs').select('id, periode').eq('status', 'Approved').gte('periode', months[0]),
     ]);
 
@@ -123,7 +118,7 @@ function HrAnalyticsSection({ supabase }) {
 
     setEmployees(empRes.data || []);
     setMasterRows(masterRes.data || []);
-    setAttendanceRows(attendanceRes.data || []);
+    setAttendanceSummary(attendanceRes.data || []);
 
     // Biaya payroll per bulan: payroll_run_items.take_home_pay dijumlah per
     // payroll_runs.periode, dibatasi run berstatus Approved saja (dianggap
@@ -193,18 +188,17 @@ function HrAnalyticsSection({ supabase }) {
     const months = last6Months();
     const totals = {};
     months.forEach((m) => { totals[m] = { total: 0, telat: 0 }; });
-    attendanceRows.forEach((row) => {
-      if (!row.tanggal) return;
-      const key = row.tanggal.slice(0, 7);
-      if (!(key in totals)) return;
-      totals[key].total += 1;
-      if (isTelatEfektif(row)) totals[key].telat += 1; // Justified tidak dihitung telat
+    // telat dari RPC sudah telat efektif (Justified tidak dihitung telat).
+    attendanceSummary.forEach((row) => {
+      if (!(row.bulan in totals)) return;
+      totals[row.bulan].total = Number(row.total) || 0;
+      totals[row.bulan].telat = Number(row.telat) || 0;
     });
     return months.map((m) => ({
       bulan: monthLabel(m),
       persenTelat: totals[m].total > 0 ? Math.round((totals[m].telat / totals[m].total) * 100) : 0,
     }));
-  }, [attendanceRows]);
+  }, [attendanceSummary]);
 
   const biayaPayrollPerBulan = useMemo(() => {
     const months = last6Months();
@@ -348,9 +342,11 @@ export default function StatisticsPage() {
   const [gaLoading, setGaLoading] = useState(true);
   const [gaError, setGaError] = useState(null);
 
-  const [applications, setApplications] = useState([]);
+  const [pelamarPerPosisi, setPelamarPerPosisi] = useState([]); // { posisi, jumlah } dari RPC
+  const [applyPerBulan, setApplyPerBulan] = useState([]); // { bulan: 'YYYY-MM', jumlah } dari RPC
   const [jobListings, setJobListings] = useState([]);
   const [supabaseLoading, setSupabaseLoading] = useState(true);
+  const [supabaseError, setSupabaseError] = useState(null);
 
   // --- Fetch Google Analytics data (refetch tiap ganti periode) ---
   const loadGaData = useCallback(async (selectedPeriod) => {
@@ -376,48 +372,29 @@ export default function StatisticsPage() {
   useEffect(() => {
     (async () => {
       setSupabaseLoading(true);
-      const [{ data: apps }, { data: jobs }] = await Promise.all([
-        // Seluruh lamaran bisa > 1.000 baris (batas max-rows PostgREST): ambil semua halaman.
-        fetchAllRows(() =>
-          supabase
-            .from('applications')
-            .select('id, created_at, job_id, job_listings(title)')
-        ),
+      setSupabaseError(null);
+      // Jumlah pelamar dihitung di database (RPC), bukan ditarik per baris.
+      const [funnelRes, monthlyRes, jobsRes] = await Promise.all([
+        supabase.rpc('applications_funnel'),
+        supabase.rpc('applications_monthly'),
         supabase
           .from('job_listings')
           .select('id, title, is_active, closes_at'),
       ]);
-      setApplications(apps || []);
-      setJobListings(jobs || []);
+      const err = funnelRes.error || monthlyRes.error || jobsRes.error;
+      if (err) setSupabaseError(friendlyError(err, 'Gagal memuat data rekrutmen.'));
+      setPelamarPerPosisi(funnelRes.data || []);
+      setApplyPerBulan(monthlyRes.data || []);
+      setJobListings(jobsRes.data || []);
       setSupabaseLoading(false);
     })();
   }, [supabase]);
 
-  const totalPelamar = applications.length;
+  const totalPelamar = useMemo(
+    () => pelamarPerPosisi.reduce((sum, row) => sum + (Number(row.jumlah) || 0), 0),
+    [pelamarPerPosisi]
+  );
   const totalLowonganAktif = jobListings.filter((j) => isJobOpen(j)).length;
-
-  const pelamarPerPosisi = useMemo(() => {
-    const map = {};
-    applications.forEach((app) => {
-      const title = app.job_listings?.title || 'Tidak diketahui';
-      map[title] = (map[title] || 0) + 1;
-    });
-    return Object.entries(map)
-      .map(([posisi, jumlah]) => ({ posisi, jumlah }))
-      .sort((a, b) => b.jumlah - a.jumlah);
-  }, [applications]);
-
-  const applyPerBulan = useMemo(() => {
-    const map = {};
-    applications.forEach((app) => {
-      const d = new Date(app.created_at);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      map[key] = (map[key] || 0) + 1;
-    });
-    return Object.entries(map)
-      .map(([bulan, jumlah]) => ({ bulan, jumlah }))
-      .sort((a, b) => (a.bulan > b.bulan ? 1 : -1));
-  }, [applications]);
 
   return (
     <div className="max-w-[1100px] mx-auto px-6 py-10">
@@ -481,6 +458,12 @@ export default function StatisticsPage() {
       {gaError && (
         <div className="mb-6 border border-madael-red bg-white p-4 text-sm text-madael-red">
           {gaError}
+        </div>
+      )}
+
+      {supabaseError && (
+        <div className="mb-6 border border-madael-red bg-white p-4 text-sm text-madael-red">
+          {supabaseError}
         </div>
       )}
 
