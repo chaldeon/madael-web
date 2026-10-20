@@ -4,9 +4,9 @@ import GlobalSearchBar from '@/components/GlobalSearchBar';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Lock, Megaphone, X } from 'lucide-react';
+import { ChevronDown, Lock, Megaphone, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { MODULE_REGISTRY, EXPLICIT_ONLY_MODULES, isModuleGranted } from '@/lib/employeeModules';
+import { MODULE_REGISTRY, EXPLICIT_ONLY_MODULES, PENDING_QUEUE_MODULES, isModuleGranted } from '@/lib/employeeModules';
 import EmployeeHeader from '@/components/EmployeeHeader';
 import QuickClockInCard from '@/components/QuickClockInCard';
 import { missingFieldsForEmployee, EMPLOYEE_COMPLETENESS_COLUMNS } from '@/lib/dataCompleteness';
@@ -95,6 +95,7 @@ export default function EmployeeDashboardPage() {
   const [employee, setEmployee] = useState(null);
   const [moduleKeys, setModuleKeys] = useState([]);
   const [profileIncomplete, setProfileIncomplete] = useState(false);
+  const [pendingCounts, setPendingCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -178,6 +179,42 @@ export default function EmployeeDashboardPage() {
   const hasAccess = (key) => isModuleGranted({ isSuperadmin: !!employee?.is_superadmin, moduleKeys, key });
   const hasAnyAccess = (mod) => hasAccess(mod.key) || (mod.altKeys || []).some(hasAccess);
 
+  // Badge antrean persetujuan: hanya diminta kalau user punya minimal satu modul
+  // approval, supaya karyawan biasa tidak memicu request sia-sia. Best-effort —
+  // gagal = badge tidak tampil, dashboard tetap jalan. Dimuat ulang saat tab
+  // kembali aktif supaya angka tidak basi kalau dashboard dibiarkan terbuka.
+  const hasPendingQueueAccess = !!employee && PENDING_QUEUE_MODULES.some(hasAccess);
+  useEffect(() => {
+    if (!hasPendingQueueAccess) return undefined;
+
+    let cancelled = false;
+    let lastFetch = 0;
+    const loadCounts = async () => {
+      lastFetch = Date.now();
+      try {
+        const res = await fetch('/api/dashboard/pending-counts', { cache: 'no-store' });
+        if (!res.ok) return;
+        const body = await res.json();
+        if (!cancelled) setPendingCounts(body.counts || {});
+      } catch {
+        // Diabaikan: badge cuma pelengkap.
+      }
+    };
+    const onVisible = () => {
+      // Jeda 30 detik supaya pindah-pindah tab tidak membanjiri endpoint.
+      if (document.visibilityState === 'visible' && Date.now() - lastFetch > 30_000) loadCounts();
+    };
+
+    loadCounts();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    // hasAccess/hasAnyAccess dibuat ulang tiap render; yang menentukan hasilnya
+    // cuma employee + moduleKeys, jadi flag turunan hasPendingQueueAccess cukup.
+  }, [hasPendingQueueAccess]);
+
   if (loading) {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
@@ -248,12 +285,12 @@ export default function EmployeeDashboardPage() {
               return (
                 <>
                   {hrisModules.length > 0 && (
-                    <div className="border border-madael-red/30 bg-madael-red/5 p-5 mb-6">
-                      <p className="text-xs font-medium tracking-[0.08em] text-madael-red mb-4">
-                        HRIS
-                      </p>
-                      <ModuleGrid modules={hrisModules} hasAnyAccess={hasAnyAccess} />
-                    </div>
+                    <HrisFolder
+                      employeeId={employee.id}
+                      modules={hrisModules}
+                      hasAnyAccess={hasAnyAccess}
+                      badges={pendingCounts}
+                    />
                   )}
                   <ModuleGrid modules={generalModules} hasAnyAccess={hasAnyAccess} />
                 </>
@@ -295,12 +332,12 @@ export default function EmployeeDashboardPage() {
               return (
                 <>
                   {showHris && (
-                    <div className="border border-madael-red/30 bg-madael-red/5 p-5 mb-6">
-                      <p className="text-xs font-medium tracking-[0.08em] text-madael-red mb-4">
-                        HRIS
-                      </p>
-                      <ModuleGrid modules={hrisModules} hasAnyAccess={hasAnyAccess} />
-                    </div>
+                    <HrisFolder
+                      employeeId={employee.id}
+                      modules={hrisModules}
+                      hasAnyAccess={hasAnyAccess}
+                      badges={pendingCounts}
+                    />
                   )}
                   <ModuleGrid
                     modules={generalModules.filter((m) => m.status === 'live' && hasAnyAccess(m))}
@@ -316,7 +353,84 @@ export default function EmployeeDashboardPage() {
   );
 }
 
-function ModuleGrid({ modules, hasAnyAccess, isSuperadmin = false, attentionKeys = [] }) {
+// Lencana angka antrean persetujuan. Dibatasi 99+ supaya lebarnya tetap kecil.
+function CountBadge({ count }) {
+  const label = `${count} pengajuan menunggu persetujuan`;
+  return (
+    <span
+      className="min-w-[22px] h-[22px] px-1.5 inline-flex items-center justify-center rounded-full bg-madael-red text-white text-[11px] font-medium leading-none"
+      title={label}
+      role="img"
+      aria-label={label}
+    >
+      {count > 99 ? '99+' : count}
+    </span>
+  );
+}
+
+const HRIS_OPEN_STORAGE_KEY = 'madael.dashboard.hrisOpen';
+
+// Folder HRIS: terlipat bawaan, pilihan buka/tutup diingat di localStorage per
+// akun (perangkat bersama tidak saling menimpa). Komponen ini hanya dirender
+// setelah dashboard selesai dimuat di client, jadi membaca localStorage di
+// initializer aman dari hydration mismatch. Akses storage dibungkus try/catch
+// (mode privat / storage diblokir) — kalau gagal, folder tetap terlipat.
+// Saat terlipat, kartu-kartunya tersembunyi, jadi total antrean ditampilkan di
+// header supaya approver tetap tahu ada yang menunggu tanpa membuka folder.
+function HrisFolder({ employeeId, modules, hasAnyAccess, badges }) {
+  const storageKey = `${HRIS_OPEN_STORAGE_KEY}.${employeeId}`;
+  const [open, setOpen] = useState(() => {
+    try {
+      return typeof window !== 'undefined' && window.localStorage.getItem(storageKey) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    try {
+      window.localStorage.setItem(storageKey, next ? '1' : '0');
+    } catch {
+      // Diabaikan: status lipatan cuma preferensi tampilan.
+    }
+  };
+
+  const total = modules
+    .filter((m) => m.status === 'live' && hasAnyAccess(m))
+    .reduce((sum, m) => sum + (badges[m.key] || 0), 0);
+  const panelId = 'hris-folder-panel';
+
+  return (
+    <div className="border border-madael-red/30 bg-madael-red/5 mb-6">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className="w-full flex items-center justify-between gap-3 p-5 text-left"
+      >
+        <span className="text-xs font-medium tracking-[0.08em] text-madael-red">HRIS</span>
+        <span className="flex items-center gap-3">
+          {!open && total > 0 && <CountBadge count={total} />}
+          <ChevronDown
+            size={16}
+            className={`text-madael-red transition-transform ${open ? 'rotate-180' : ''}`}
+            aria-hidden="true"
+          />
+        </span>
+      </button>
+      {open && (
+        <div id={panelId} className="px-5 pb-5">
+          <ModuleGrid modules={modules} hasAnyAccess={hasAnyAccess} badges={badges} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModuleGrid({ modules, hasAnyAccess, isSuperadmin = false, attentionKeys = [], badges = {} }) {
   const visible = modules.filter((mod) => {
     const isLive = mod.status === 'live';
     const active = isLive && hasAnyAccess(mod);
@@ -360,6 +474,8 @@ function ModuleGrid({ modules, hasAnyAccess, isSuperadmin = false, attentionKeys
                 </span>
               ) : !active ? (
                 <Lock size={14} className="text-[#9A9A9A]" />
+              ) : badges[mod.key] > 0 ? (
+                <CountBadge count={badges[mod.key]} />
               ) : attentionKeys.includes(mod.key) ? (
                 <span
                   className="w-2.5 h-2.5 rounded-full bg-madael-red mt-1"
