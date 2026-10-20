@@ -3,10 +3,11 @@
 export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback } from 'react';
-import { UserCircle, Camera, CheckCircle2 } from 'lucide-react';
+import { UserCircle, Camera, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { dispatchNotification } from '@/lib/notifyClient';
 import { PROFILE_EDITABLE_FIELDS, fieldLabel } from '@/lib/profileFields';
+import { missingFieldsForEmployee } from '@/lib/dataCompleteness';
 import { getFaceDescriptor } from '@/lib/faceVerification';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -233,6 +234,12 @@ export default function ProfilePage() {
     );
   }
 
+  // Pengingat kelengkapan: dihitung dari data master yang berlaku saat ini.
+  // Pengajuan yang masih menunggu belum mengubah master, jadi banner tetap
+  // tampil — tapi diberi catatan supaya karyawan tidak mengajukan dobel.
+  const missingFields = missingFieldsForEmployee(master);
+  const pendingCount = requests.filter((r) => r.status === 'pending').length;
+
   return (
     <div className="max-w-[800px] mx-auto px-6 py-10">
       <div className="mb-6">
@@ -241,6 +248,31 @@ export default function ProfilePage() {
           Update alamat, kontak darurat, rekening, NPWP, dan BPJS. Perubahan perlu disetujui superadmin sebelum berlaku.
         </p>
       </div>
+
+      {/* Pengingat kelengkapan data — hanya field yang bisa diisi karyawan sendiri */}
+      {missingFields.length > 0 && (
+        <div role="status" className="border-l-4 border-madael-red bg-white p-4 mb-6 flex items-start gap-3">
+          <AlertTriangle size={18} className="text-madael-red shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-black">Data profilmu belum lengkap</p>
+            <p className="text-xs text-[#6B6B6B] mt-1">
+              Mohon lengkapi supaya HR tidak perlu menagih data menjelang payroll:{' '}
+              <span className="text-black">{missingFields.join(', ')}</span>.
+            </p>
+            {pendingCount > 0 && (
+              <p className="text-xs text-[#6B6B6B] mt-1">
+                Kamu punya {pendingCount} pengajuan yang masih menunggu persetujuan — data di atas mungkin sudah kamu ajukan.
+              </p>
+            )}
+            <a
+              href="#form-pengajuan"
+              className="inline-block text-xs font-medium text-madael-red hover:text-madael-dark mt-2 transition-colors"
+            >
+              Lengkapi sekarang →
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Data read-only — hanya diubah superadmin lewat Payroll Manager */}
       <div className="bg-white border border-[#E0E0E0] p-5 mb-6">
@@ -323,7 +355,7 @@ export default function ProfilePage() {
 
       {/* Form pengajuan perubahan */}
       {master && (
-        <form onSubmit={handleSubmit} className="bg-white border border-[#E0E0E0] p-6 mb-10">
+        <form id="form-pengajuan" onSubmit={handleSubmit} className="bg-white border border-[#E0E0E0] p-6 mb-10">
           <p className="text-xs font-semibold text-black tracking-[0.02em] mb-4">Ajukan Perubahan</p>
           <div className="grid grid-cols-2 gap-4 mb-4">
             {PROFILE_EDITABLE_FIELDS.map((f) => (

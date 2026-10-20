@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { MODULE_REGISTRY, EXPLICIT_ONLY_MODULES, isModuleGranted } from '@/lib/employeeModules';
 import EmployeeHeader from '@/components/EmployeeHeader';
 import QuickClockInCard from '@/components/QuickClockInCard';
+import { missingFieldsForEmployee, EMPLOYEE_COMPLETENESS_COLUMNS } from '@/lib/dataCompleteness';
 
 // Pengumuman aktif = belum ada expired_at, atau expired_at masih di masa
 // depan. Dicek ulang di RLS/insert admin, ini cuma filter tampilan.
@@ -93,6 +94,7 @@ export default function EmployeeDashboardPage() {
 
   const [employee, setEmployee] = useState(null);
   const [moduleKeys, setModuleKeys] = useState([]);
+  const [profileIncomplete, setProfileIncomplete] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -145,10 +147,20 @@ export default function EmployeeDashboardPage() {
       .eq('employee_id', emp.id);
     if (emp.is_superadmin) modsQuery = modsQuery.in('module_name', EXPLICIT_ONLY_MODULES);
 
-    const [{ data: company }, { data: mods }] = await Promise.all([companyQuery, modsQuery]);
+    // Data master untuk titik pengingat di kartu Profil Saya — juga best-effort
+    // dan paralel: kalau gagal atau akun belum terhubung ke master, titiknya
+    // sekadar tidak muncul (halaman Profil Saya yang menjelaskan kasus itu).
+    const masterQuery = supabase
+      .from('employees_master')
+      .select(EMPLOYEE_COMPLETENESS_COLUMNS)
+      .eq('linked_employee_id', emp.id)
+      .maybeSingle();
+
+    const [{ data: company }, { data: mods }, { data: master }] = await Promise.all([companyQuery, modsQuery, masterQuery]);
 
     setEmployee({ ...emp, companyName: company?.nama_perusahaan || null });
     setModuleKeys((mods || []).map((m) => m.module_name));
+    setProfileIncomplete(missingFieldsForEmployee(master).length > 0);
 
     setLoading(false);
   }, [supabase, router]);
@@ -217,6 +229,7 @@ export default function EmployeeDashboardPage() {
         <ModuleGrid
           modules={MODULE_REGISTRY.filter((m) => m.layer === 'personal')}
           hasAnyAccess={hasAnyAccess}
+          attentionKeys={profileIncomplete ? ['profile'] : []}
         />
 
         {employee?.is_superadmin ? (
@@ -303,7 +316,7 @@ export default function EmployeeDashboardPage() {
   );
 }
 
-function ModuleGrid({ modules, hasAnyAccess, isSuperadmin = false }) {
+function ModuleGrid({ modules, hasAnyAccess, isSuperadmin = false, attentionKeys = [] }) {
   const visible = modules.filter((mod) => {
     const isLive = mod.status === 'live';
     const active = isLive && hasAnyAccess(mod);
@@ -347,6 +360,13 @@ function ModuleGrid({ modules, hasAnyAccess, isSuperadmin = false }) {
                 </span>
               ) : !active ? (
                 <Lock size={14} className="text-[#9A9A9A]" />
+              ) : attentionKeys.includes(mod.key) ? (
+                <span
+                  className="w-2.5 h-2.5 rounded-full bg-madael-red mt-1"
+                  title="Data profil belum lengkap"
+                  role="img"
+                  aria-label="Data profil belum lengkap"
+                />
               ) : null}
             </div>
             <p className={`text-sm font-medium mb-1 ${active ? 'text-black' : 'text-[#9A9A9A]'}`}>
