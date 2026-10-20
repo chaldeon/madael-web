@@ -11,6 +11,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { formatRupiah } from '@/lib/format';
+import { todayJakarta } from '@/lib/serverTime';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 
@@ -30,7 +31,7 @@ function formatTanggal(value) {
 }
 
 function todayValue() {
-  return new Date().toISOString().slice(0, 10);
+  return todayJakarta();
 }
 
 function StatusBadge({ status }) {
