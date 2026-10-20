@@ -14,7 +14,6 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import { formatRupiah } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
-import { fetchAllRows } from '@/lib/fetchAllRows';
 
 const MADAEL_RED = '#C1272D';
 const STATUS_COLOR = { Draft: '#9CA3AF', Review: '#F59E0B', Approved: '#16A34A' };
@@ -57,7 +56,7 @@ export default function ReportsDashboardPage() {
   const [loadError, setLoadError] = useState(null);
   const [stats, setStats] = useState(null);
 
-  const [attendanceRows, setAttendanceRows] = useState([]);
+  const [attendanceSummary, setAttendanceSummary] = useState([]); // { bulan: 'YYYY-MM', total, telat } dari RPC
   const [trendLoading, setTrendLoading] = useState(true);
   const [trendError, setTrendError] = useState(null);
 
@@ -127,17 +126,8 @@ export default function ReportsDashboardPage() {
     setTrendLoading(true);
     setTrendError(null);
 
-    const months = last6Months();
-    const firstDay = `${months[0]}-01`;
-
-    // Enam bulan absensi jauh melewati 1.000 baris (batas max-rows PostgREST),
-    // sehingga grafik tren akan kurang tanpa paginasi.
-    const { data, error } = await fetchAllRows(() =>
-      supabase
-        .from('attendance')
-        .select('tanggal')
-        .gte('tanggal', firstDay)
-    );
+    // Agregasi per bulan dihitung di database (RPC), bukan ditarik per baris.
+    const { data, error } = await supabase.rpc('attendance_monthly_summary', { p_months: 6 });
 
     if (error) {
       setTrendError(friendlyError(error, 'Gagal memuat tren kehadiran.'));
@@ -145,7 +135,7 @@ export default function ReportsDashboardPage() {
       return;
     }
 
-    setAttendanceRows(data || []);
+    setAttendanceSummary(data || []);
     setTrendLoading(false);
   }, [supabase]);
 
@@ -176,12 +166,11 @@ export default function ReportsDashboardPage() {
   const attendanceTrend = useMemo(() => {
     const map = {};
     last6Months().forEach((bulan) => { map[bulan] = 0; });
-    attendanceRows.forEach((row) => {
-      const key = (row.tanggal || '').slice(0, 7); // 'YYYY-MM-DD' -> 'YYYY-MM'
-      if (key in map) map[key] += 1;
+    attendanceSummary.forEach((row) => {
+      if (row.bulan in map) map[row.bulan] = Number(row.total) || 0;
     });
     return Object.entries(map).map(([bulan, jumlah]) => ({ bulan, jumlah }));
-  }, [attendanceRows]);
+  }, [attendanceSummary]);
 
   const payrollByClient = useMemo(() => {
     const map = {};
