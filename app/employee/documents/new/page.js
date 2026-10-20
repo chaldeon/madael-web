@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { todayJakarta } from '@/lib/serverTime';
 
 const JENIS_LABEL = {
   PRO: 'Proposal',
@@ -424,7 +425,7 @@ export default function NewDocumentPage() {
 
   const [judul, setJudul] = useState('');
   const [clientId, setClientId] = useState('');
-  const [tanggalDokumen, setTanggalDokumen] = useState(() => new Date().toISOString().slice(0, 10));
+  const [tanggalDokumen, setTanggalDokumen] = useState(() => todayJakarta());
   const [catatan, setCatatan] = useState('');
   const [content, setContent] = useState(() => getDefaultContent(type));
 

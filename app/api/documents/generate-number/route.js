@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { friendlyError } from '@/lib/errorMessage';
+import { todayJakarta } from '@/lib/serverTime';
 
 // Jenis dokumen yang boleh diminta form -> label kode di nomor surat + counter yang dipakai
 const JENIS_CONFIG = {
@@ -76,10 +77,12 @@ export async function POST(request) {
       );
     }
 
-    const now = new Date();
+    // Bulan & tahun nomor surat memakai waktu Jakarta (server berjalan di UTC,
+    // jadi getMonth()/getFullYear() salah pada 00:00-06:59 WIB tanggal 1).
+    const [tahunJakarta, bulanJakarta] = todayJakarta().split('-');
     const nomorPadded = String(newNumber).padStart(3, '0');
-    const bulanRomawi = ROMAWI_BULAN[now.getMonth()];
-    const tahun = now.getFullYear();
+    const bulanRomawi = ROMAWI_BULAN[Number(bulanJakarta) - 1];
+    const tahun = Number(tahunJakarta);
 
     const nomorSurat = kode_jenis === 'INV'
       ? `${config.label}/${tahun}/${nomorPadded}`

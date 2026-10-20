@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { formatRupiahOrDash } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
+import { todayJakarta } from '@/lib/serverTime';
 import Toast from '@/components/employee-list/Toast';
 
 const STAGES = [
@@ -120,7 +121,7 @@ export default function ClientDetailPage() {
   // "tambah baru" lainnya).
   const editFormBaselineRef = useRef(null);
 
-  const emptyActivity = { tipe: 'Email', judul: '', deskripsi: '', tanggal: new Date().toISOString().slice(0, 10), follow_up_date: '' };
+  const emptyActivity = { tipe: 'Email', judul: '', deskripsi: '', tanggal: todayJakarta(), follow_up_date: '' };
   const emptyProject = { nama_project: '', jenis_layanan: '', status: 'Aktif', nilai_kontrak: '', tanggal_mulai: '', tanggal_selesai: '', pic_madael: '', catatan: '' };
   const emptyDeal = { stage: 'Prospek', nilai_potensial: '', pic_internal: '', catatan: '' };
 
