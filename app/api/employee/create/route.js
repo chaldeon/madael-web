@@ -48,7 +48,13 @@ export async function POST(request) {
     const { nama, email, client_id, status, is_superadmin } = body;
     let { employee_id } = body;
 
-    if (!nama || !email) {
+    // Email = identitas login. Supabase Auth menyimpan email dalam huruf kecil
+    // dan semua lookup `.eq('email', user.email)` membandingkan persis, jadi
+    // email WAJIB dinormalisasi (trim + lowercase) sebelum dipakai di Auth
+    // maupun tabel employees — sama seperti bulk-create.
+    const emailNorm = String(email ?? '').trim().toLowerCase();
+
+    if (!nama || !emailNorm) {
       return NextResponse.json({ error: 'Nama dan email wajib diisi.' }, { status: 400 });
     }
 
@@ -68,7 +74,7 @@ export async function POST(request) {
     // employee klik link di email lalu diarahkan ke /employee/set-password
     // untuk buat password sendiri. Lihat juga: middleware.js (path ini wajib
     // masuk PUBLIC_EMPLOYEE_PATHS) dan app/employee/set-password/page.js.
-    const { data: authUser, error: authError } = await admin.auth.admin.inviteUserByEmail(email, {
+    const { data: authUser, error: authError } = await admin.auth.admin.inviteUserByEmail(emailNorm, {
       redirectTo: `${request.nextUrl.origin}/employee/set-password`,
       data: { nama, employee_id },
     });
@@ -86,7 +92,7 @@ export async function POST(request) {
         {
           nama,
           employee_id,
-          email,
+          email: emailNorm,
           client_id: client_id || null,
           status: status || 'Aktif',
           is_superadmin: !!is_superadmin,
