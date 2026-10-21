@@ -20,11 +20,14 @@ import { resolveFotoRef } from '@/lib/attendanceFotoRef';
 // body: {
 //   mode: 'in' | 'out',
 //   lat: number, lng: number,
+//   accuracy: number | undefined   (coords.accuracy, meter)
+//     - dicatat; buruk (> GPS_AKURASI_MAKS_METER) atau tidak ada -> masuk "Perlu Review"
 //   fotoPath: string | null,
 //   descriptor: number[] | null | undefined
 //     - array   : wajah terdeteksi di frame, ini descriptor-nya
 //     - null    : kamera sempat jalan tapi wajah tidak terdeteksi jelas
-//     - (absen) : deteksi tidak sempat dicoba (model gagal dimuat, dll)
+//     - (absen) : deteksi tidak sempat dicoba (model gagal dimuat, dll). Sekali wajar;
+//                 berulang (lihat WAJAH_DILEWATI_* di lib/attendanceClock.js) -> "Perlu Review"
 //   qr: string | undefined
 //     - kalau ada, absen dilakukan via QR lokasi (fotoPath & descriptor diabaikan)
 // }
@@ -34,7 +37,7 @@ export async function POST(request) {
     if (!body) {
       return NextResponse.json({ error: 'Data tidak valid.' }, { status: 400 });
     }
-    const { mode, lat, lng, descriptor } = body;
+    const { mode, lat, lng, accuracy, descriptor } = body;
     const qr = typeof body.qr === 'string' && body.qr ? body.qr : null;
     const fotoRaw = qr ? null : (body.fotoPath ?? null);
 
@@ -66,7 +69,7 @@ export async function POST(request) {
     const now = new Date();
     const tanggal = todayJakarta(now);
 
-    const ev = await evaluateClock(admin, { empId: emp.id, lat, lng, descriptor, qr });
+    const ev = await evaluateClock(admin, { empId: emp.id, lat, lng, accuracy, descriptor, tanggal, qr });
     if (ev.fail) {
       return NextResponse.json({ error: ev.fail.error }, { status: ev.fail.status });
     }
@@ -80,6 +83,7 @@ export async function POST(request) {
       fotoPath,
       geo: toGeo(ev.geofence),
       wajah: ev.wajah,
+      akurasi: ev.akurasi,
       schedule: ev.schedule,
       scheduleError: ev.scheduleError,
       metode: ev.metode,

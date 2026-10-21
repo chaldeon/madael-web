@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { getSessionEmployee } from '@/lib/sessionEmployee';
 import { todayJakarta } from '@/lib/serverTime';
-import { saveClock } from '@/lib/attendanceClock';
+import { saveClock, normalizeAkurasi } from '@/lib/attendanceClock';
 import { resolveFotoRef } from '@/lib/attendanceFotoRef';
 import { verifyConfirmToken } from '@/lib/attendanceConfirmToken';
 
@@ -94,7 +94,15 @@ export async function POST(request) {
         jarakMeter: p.geo.jarakMeter ?? null,
         lokasiNama: p.geo.lokasiNama ?? null,
       },
-      wajah: { ok: p.wajah.ok ?? null, distance: p.wajah.distance ?? null },
+      wajah: {
+        ok: p.wajah.ok ?? null,
+        distance: p.wajah.distance ?? null,
+        // Token lama (sebelum penandaan wajah dilewati) tidak punya field ini -> false.
+        dilewati: p.wajah.dilewati === true,
+        berulang: p.wajah.berulang === true,
+      },
+      // Token lama tanpa akurasi tidak ditandai (hanya token yang berumur <= 5 menit).
+      akurasi: { meter: normalizeAkurasi(p.akurasi), buruk: p.gpsBuruk === true },
       schedule: scheduleRes.data,
       scheduleError: scheduleRes.error,
       metode,
