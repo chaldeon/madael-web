@@ -9,8 +9,10 @@ import { dispatchNotification } from '@/lib/notifyClient';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import Toast from '@/components/employee-list/Toast';
 import { formatRupiah } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
+import { STATUS_REIMBURSEMENT_LABEL } from '@/lib/reimbursement';
 
 const KATEGORI_OPTIONS = [
   { value: 'transport', label: 'Transport' },
@@ -43,11 +45,11 @@ function StatusBadge({ status }) {
     approved: 'bg-green-100 text-green-700',
     rejected: 'bg-red-100 text-red-700',
     paid: 'bg-blue-100 text-blue-700',
+    cancelled: 'bg-[#F4F4F4] text-[#6B6B6B]',
   };
-  const label = { pending: 'MENUNGGU', approved: 'DISETUJUI', rejected: 'DITOLAK', paid: 'SUDAH DIBAYAR' };
   return (
     <span className={`text-[10px] font-medium tracking-[0.04em] px-2 py-1 ${map[status] || 'bg-[#F4F4F4] text-[#6B6B6B]'}`}>
-      {label[status] || status?.toUpperCase()}
+      {STATUS_REIMBURSEMENT_LABEL[status] || status?.toUpperCase()}
     </span>
   );
 }
@@ -66,6 +68,10 @@ export default function ReimbursementPage() {
   const [formError, setFormError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [confirmCancelId, setConfirmCancelId] = useState(null);
+  const [cancelingId, setCancelingId] = useState(null);
+  const [toast, setToast] = useState(null);
+  const dismissToast = useCallback(() => setToast(null), []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -181,6 +187,29 @@ export default function ReimbursementPage() {
     dispatchNotification('reimbursement_diajukan', data.id);
   };
 
+  // Pembatalan lewat rute server (hanya pemilik, hanya pending, update
+  // bersyarat). Saat 409/404 daftar dimuat ulang karena status berubah di
+  // sisi lain (mis. admin baru saja memproses klaim).
+  const handleCancel = async (row) => {
+    setCancelingId(row.id);
+    try {
+      const res = await fetch(`/api/reimbursement/${row.id}/cancel`, { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast({ type: 'error', message: json.error || 'Gagal membatalkan klaim reimbursement.' });
+        if (res.status === 409 || res.status === 404) loadData();
+      } else {
+        setRequests((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: 'cancelled' } : r)));
+        setToast({ type: 'success', message: 'Klaim reimbursement dibatalkan.' });
+      }
+    } catch (err) {
+      console.error('Batalkan reimbursement error:', err);
+      setToast({ type: 'error', message: 'Gagal membatalkan klaim. Periksa koneksi lalu coba lagi.' });
+    }
+    setCancelingId(null);
+    setConfirmCancelId(null);
+  };
+
   if (loading) {
     return (
       <div className="max-w-[700px] mx-auto px-6 py-10">
@@ -202,6 +231,7 @@ export default function ReimbursementPage() {
 
   return (
     <div className="max-w-[700px] mx-auto px-6 py-10">
+      <Toast toast={toast} onDismiss={dismissToast} />
       <div className="mb-6">
         <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Ajukan Klaim Reimbursement</h1>
         <p className="text-sm text-[#6B6B6B] mt-1">Isi form di bawah untuk mengajukan klaim biaya. Admin akan meninjau pengajuanmu.</p>
@@ -285,6 +315,7 @@ export default function ReimbursementPage() {
                 <th className="px-4 py-3 font-medium">Jumlah</th>
                 <th className="px-4 py-3 font-medium">Deskripsi</th>
                 <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody>
@@ -298,6 +329,35 @@ export default function ReimbursementPage() {
                     <StatusBadge status={r.status} />
                     {r.status === 'rejected' && r.rejection_reason && (
                       <p className="text-[11px] text-[#9A9A9A] mt-1 max-w-[160px]" title={r.rejection_reason}>{r.rejection_reason}</p>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    {r.status === 'pending' && confirmCancelId !== r.id && (
+                      <button
+                        onClick={() => setConfirmCancelId(r.id)}
+                        className="text-xs text-madael-red hover:text-madael-dark font-medium"
+                      >
+                        Batalkan
+                      </button>
+                    )}
+                    {r.status === 'pending' && confirmCancelId === r.id && (
+                      <span className="inline-flex items-center gap-3 text-xs">
+                        <span className="text-[#6B6B6B]">Yakin?</span>
+                        <button
+                          onClick={() => handleCancel(r)}
+                          disabled={cancelingId === r.id}
+                          className="text-madael-red hover:text-madael-dark font-medium disabled:opacity-50"
+                        >
+                          {cancelingId === r.id ? 'Membatalkan...' : 'Ya, batalkan'}
+                        </button>
+                        <button
+                          onClick={() => setConfirmCancelId(null)}
+                          disabled={cancelingId === r.id}
+                          className="text-[#6B6B6B] hover:text-black"
+                        >
+                          Tidak
+                        </button>
+                      </span>
                     )}
                   </td>
                 </tr>

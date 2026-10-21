@@ -12,6 +12,7 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { formatRupiah } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
+import { STATUS_REIMBURSEMENT_LABEL } from '@/lib/reimbursement';
 import Toast from '@/components/employee-list/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
 
@@ -26,11 +27,11 @@ function StatusBadge({ status }) {
     approved: 'bg-green-100 text-green-700',
     rejected: 'bg-red-100 text-red-700',
     paid: 'bg-blue-100 text-blue-700',
+    cancelled: 'bg-[#F4F4F4] text-[#6B6B6B]',
   };
-  const label = { pending: 'MENUNGGU', approved: 'DISETUJUI', rejected: 'DITOLAK', paid: 'SUDAH DIBAYAR' };
   return (
     <span className={`text-[10px] font-medium tracking-[0.04em] px-2 py-1 ${map[status] || 'bg-[#F4F4F4] text-[#6B6B6B]'}`}>
-      {label[status] || status?.toUpperCase()}
+      {STATUS_REIMBURSEMENT_LABEL[status] || status?.toUpperCase()}
     </span>
   );
 }
@@ -245,6 +246,7 @@ export default function ReimbursementAdminPage() {
           <option value="approved">Disetujui (belum dibayar)</option>
           <option value="rejected">Ditolak</option>
           <option value="paid">Sudah Dibayar</option>
+          <option value="cancelled">Dibatalkan</option>
           <option value="all">Semua</option>
         </select>
       </div>
@@ -333,7 +335,7 @@ export default function ReimbursementAdminPage() {
                           <Wallet size={12} /> Tandai Dibayar
                         </button>
                       )}
-                      {(row.status === 'rejected' || row.status === 'paid') && (
+                      {(row.status === 'rejected' || row.status === 'paid' || row.status === 'cancelled') && (
                         <span className="text-xs text-[#9A9A9A]">—</span>
                       )}
                     </td>
