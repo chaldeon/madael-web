@@ -3,7 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { logActivity } from '@/lib/activityLog';
-import { notifySuperadmins } from '@/lib/notify';
+import { notifyByModule } from '@/lib/notify';
 import { friendlyError } from '@/lib/errorMessage';
 
 const STATUS_LABEL = {
@@ -115,7 +115,8 @@ export async function POST(request, { params }) {
       },
     });
 
-    await notifySuperadmins(admin, {
+    await notifyByModule(admin, {
+      moduleKey: 'leave_request_admin',
       tipe: 'cuti_dibatalkan',
       pesan: `${emp.nama || 'Karyawan'} membatalkan pengajuan cuti ${formatTanggal(updated.tanggal_mulai)} – ${formatTanggal(updated.tanggal_selesai)}.`,
       link: '/employee/leave-request/admin',

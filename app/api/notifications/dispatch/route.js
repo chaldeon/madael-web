@@ -5,6 +5,7 @@ import {
   notifyEmployee,
   notifyEmployees,
   notifySuperadmins,
+  notifyByModule,
   notifyAllActive,
 } from '@/lib/notify';
 import {
@@ -72,6 +73,8 @@ export async function POST(request) {
       await notifySuperadmins(admin, payload);
     } else if (to === 'all_active') {
       await notifyAllActive(admin, payload);
+    } else if (typeof to?.module === 'string') {
+      await notifyByModule(admin, { moduleKey: to.module, ...payload });
     } else if (to?.userId) {
       await notifyEmployee(admin, { userId: to.userId, ...payload });
     } else if (Array.isArray(to?.userIds)) {
