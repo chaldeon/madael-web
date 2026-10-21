@@ -17,7 +17,7 @@ import { signConfirmToken } from '@/lib/attendanceConfirmToken';
 // peringatan di layar review; kasusnya tetap ditangkap tab "Perlu Review" admin
 // setelah disimpan, sama seperti jalur simpan langsung.
 //
-// body: { mode: 'in' | 'out', lat, lng, descriptor, qr? }  (tanpa fotoPath: foto baru
+// body: { mode: 'in' | 'out', lat, lng, accuracy?, descriptor, qr? }  (tanpa fotoPath: foto baru
 // diupload saat konfirmasi, jadi karyawan yang membatalkan tidak meninggalkan file).
 // `qr` (teks hasil scan) -> absen via QR: tidak ada foto/wajah, lokasi mengikuti QR.
 export async function POST(request) {
@@ -26,7 +26,7 @@ export async function POST(request) {
     if (!body) {
       return NextResponse.json({ error: 'Data tidak valid.' }, { status: 400 });
     }
-    const { mode, lat, lng, descriptor } = body;
+    const { mode, lat, lng, accuracy, descriptor } = body;
     const qr = typeof body.qr === 'string' && body.qr ? body.qr : null;
 
     if (mode !== 'in' && mode !== 'out') {
@@ -49,7 +49,7 @@ export async function POST(request) {
     const now = new Date();
     const tanggal = todayJakarta(now);
 
-    const ev = await evaluateClock(admin, { empId: emp.id, lat, lng, descriptor, qr });
+    const ev = await evaluateClock(admin, { empId: emp.id, lat, lng, accuracy, descriptor, tanggal, qr });
     if (ev.fail) {
       return NextResponse.json({ error: ev.fail.error }, { status: ev.fail.status });
     }
@@ -75,7 +75,14 @@ export async function POST(request) {
       lat,
       lng,
       geo,
-      wajah: { ok: ev.wajah.ok, distance: ev.wajah.distance },
+      wajah: {
+        ok: ev.wajah.ok,
+        distance: ev.wajah.distance,
+        dilewati: ev.wajah.dilewati,
+        berulang: ev.wajah.berulang,
+      },
+      akurasi: ev.akurasi.meter,
+      gpsBuruk: ev.akurasi.buruk,
     });
 
     return NextResponse.json({
@@ -89,6 +96,7 @@ export async function POST(request) {
         statusTelat,
         geofence: ev.geofence,
         wajah: ev.wajah,
+        akurasi: ev.akurasi,
         lat,
         lng,
         clockInAt: mode === 'out' ? pre.todayRow?.clock_in || null : null,

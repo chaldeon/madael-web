@@ -1,7 +1,8 @@
 'use client';
 
-// Daftar absensi yang di-flag: di luar radius lokasi kerja, atau wajah tidak
-// cocok foto referensi. Absensinya tetap tersimpan (tidak diblokir) — panel
+// Daftar absensi yang di-flag: di luar radius lokasi kerja, wajah tidak cocok
+// foto referensi, akurasi GPS buruk/tidak terbaca, atau verifikasi wajah
+// dilewati berulang. Absensinya tetap tersimpan (tidak diblokir) — panel
 // ini murni buat review manual. Dirender sebagai tab "Perlu Review" di
 // app/employee/absensi/karyawan/page.js.
 
@@ -30,6 +31,16 @@ function formatWaktu(iso) {
   return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 }
 
+// "AKURASI GPS BURUK (masuk ±120 m · pulang ±300 m)"; kalau tidak ada angka sama
+// sekali (klien lama / panggilan API langsung) -> "AKURASI GPS TIDAK TERBACA".
+function formatAkurasiBadge(row) {
+  const bagian = [];
+  if (row.clock_in_akurasi_meter != null) bagian.push(`masuk ±${Math.round(row.clock_in_akurasi_meter)} m`);
+  if (row.clock_out_akurasi_meter != null) bagian.push(`pulang ±${Math.round(row.clock_out_akurasi_meter)} m`);
+  if (bagian.length === 0) return 'AKURASI GPS TIDAK TERBACA';
+  return `AKURASI GPS BURUK (${bagian.join(' · ')})`;
+}
+
 export default function AbsensiReviewPanel({ supabase }) {
   const [monthValue, setMonthValue] = useState(currentMonthValue());
   const [rows, setRows] = useState([]);
@@ -49,11 +60,11 @@ export default function AbsensiReviewPanel({ supabase }) {
       .select('*, employees:employee_id ( nama )')
       .gte('tanggal', firstDay)
       .lte('tanggal', lastDay)
-      .or('clock_in_dalam_radius.eq.false,clock_out_dalam_radius.eq.false,wajah_terverifikasi.eq.false')
+      .or('clock_in_dalam_radius.eq.false,clock_out_dalam_radius.eq.false,wajah_terverifikasi.eq.false,gps_akurasi_buruk.eq.true,wajah_dilewati_berulang.eq.true')
       .order('tanggal', { ascending: false });
 
     if (error) {
-      setLoadError(friendlyError(error, 'Gagal memuat data yang perlu direview. Pastikan migrasi geofencing sudah dijalankan.'));
+      setLoadError(friendlyError(error, 'Gagal memuat data yang perlu direview. Pastikan migrasi geofencing dan migrasi akurasi GPS sudah dijalankan.'));
       setLoading(false);
       return;
     }
@@ -67,8 +78,9 @@ export default function AbsensiReviewPanel({ supabase }) {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <p className="text-xs text-[#6B6B6B] max-w-[520px]">
-          Absensi yang tercatat di luar radius lokasi kerja terdaftar, atau wajah tidak cocok dengan
-          foto referensi. Absensinya tetap tersimpan — ini cuma daftar untuk direview manual.
+          Absensi yang tercatat di luar radius lokasi kerja terdaftar, wajah tidak cocok dengan
+          foto referensi, akurasi GPS buruk, atau verifikasi wajah berulang kali dilewati.
+          Absensinya tetap tersimpan — ini cuma daftar untuk direview manual.
         </p>
         <input
           type="month"
@@ -115,6 +127,16 @@ export default function AbsensiReviewPanel({ supabase }) {
                       {row.clock_out_dalam_radius === false && (
                         <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-amber-100 text-amber-800">
                           PULANG DI LUAR RADIUS{row.clock_out_jarak_meter != null ? ` (${row.clock_out_jarak_meter}m)` : ''}
+                        </span>
+                      )}
+                      {row.gps_akurasi_buruk && (
+                        <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-amber-100 text-amber-800">
+                          {formatAkurasiBadge(row)}
+                        </span>
+                      )}
+                      {row.wajah_dilewati_berulang && (
+                        <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-amber-100 text-amber-800">
+                          VERIFIKASI WAJAH DILEWATI BERULANG
                         </span>
                       )}
                       {row.wajah_terverifikasi === false && (
