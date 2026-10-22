@@ -19,6 +19,7 @@ import SelectField from '@/components/payroll/SelectField';
 import HitungModal from '@/components/payroll/HitungModal';
 import { currentMonthValue, EMPTY_FORM, totalTunjangan, SORT_COLUMNS, objToPairs, pairsToObj } from '@/lib/payrollConfig';
 import { formatRupiah } from '@/lib/format';
+import { validateKepegawaian } from '@/lib/kepegawaian';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 
@@ -77,7 +78,7 @@ export default function PayrollManagerPage() {
       supabase.from('companies').select('id, nama_perusahaan').order('nama_perusahaan', { ascending: true }),
       supabase
         .from('employees_master')
-        .select('id, nama, client_id, posisi, status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan, nama_rekening, no_rekening, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, created_at, drive_file_id, drive_file_name, drive_file_link, employees:linked_employee_id ( nama )')
+        .select('id, nama, client_id, posisi, status, tanggal_bergabung, jenis_hubungan_kerja, kontrak_berakhir, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan, nama_rekening, no_rekening, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, created_at, drive_file_id, drive_file_name, drive_file_link, employees:linked_employee_id ( nama )')
         .order('created_at', { ascending: false }),
       supabase.from('employees').select('id, nama, client_id').eq('status', 'Aktif').order('nama'),
       // Fase 1.5 — dipakai hanya untuk badge "Jadwal belum diisi" di tabel
@@ -156,6 +157,9 @@ export default function PayrollManagerPage() {
       client_id: row.client_id || '',
       posisi: row.posisi || '',
       status: row.status || 'PHL',
+      tanggal_bergabung: row.tanggal_bergabung || '',
+      jenis_hubungan_kerja: row.jenis_hubungan_kerja || '',
+      kontrak_berakhir: row.kontrak_berakhir || '',
       gaji_pokok: row.gaji_pokok || 0,
       tunjangan: row.tunjangan || 0,
       komponen_lain: objToPairs(row.komponen_lain),
@@ -177,14 +181,23 @@ export default function PayrollManagerPage() {
 
   const handleSubmit = async () => {
     if (!form.nama.trim()) return;
-    setSaving(true);
     setSaveError(null);
+
+    const kepegawaianError = validateKepegawaian(form);
+    if (kepegawaianError) {
+      setSaveError(kepegawaianError);
+      return;
+    }
+    setSaving(true);
 
     const payload = {
       nama: form.nama.trim(),
       client_id: form.client_id || null,
       posisi: form.posisi.trim(),
       status: form.status,
+      tanggal_bergabung: form.tanggal_bergabung || null,
+      jenis_hubungan_kerja: form.jenis_hubungan_kerja || null,
+      kontrak_berakhir: form.jenis_hubungan_kerja === 'PKWTT' ? null : (form.kontrak_berakhir || null),
       gaji_pokok: form.gaji_pokok,
       tunjangan: form.tunjangan,
       komponen_lain: pairsToObj(form.komponen_lain),

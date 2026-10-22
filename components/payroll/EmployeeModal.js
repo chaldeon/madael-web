@@ -8,10 +8,20 @@ import { STATUS_OPTIONS, NPWP_OPTIONS, PTKP_OPTIONS, JKK_SELECT_OPTIONS, formatN
 import NumberField from '@/components/payroll/NumberField';
 import TextField from '@/components/payroll/TextField';
 import SelectField from '@/components/payroll/SelectField';
+import DateField from '@/components/payroll/DateField';
+import { JENIS_HUBUNGAN_KERJA_OPTIONS } from '@/lib/kepegawaian';
+
+const JENIS_HUBUNGAN_SELECT_OPTIONS = [
+  { value: '', label: '— Belum diisi —' },
+  ...JENIS_HUBUNGAN_KERJA_OPTIONS,
+];
 
 export default function EmployeeModal({ clients, linkableEmployees, form, setForm, onClose, onSubmit, saving, saveError, isDirty }) {
   const set = (key) => (val) => setForm((f) => ({ ...f, [key]: val }));
   const [pendingConfirm, setPendingConfirm] = useState(false);
+  // PKWTT tidak punya tanggal berakhir: ganti ke PKWTT langsung mengosongkannya.
+  const setJenis = (val) =>
+    setForm((f) => ({ ...f, jenis_hubungan_kerja: val, kontrak_berakhir: val === 'PKWTT' ? '' : f.kontrak_berakhir }));
   const handleModalBackdrop = useModalDismiss(true, onClose, undefined, isDirty);
 
   const updatePair = (idx, field, val) => {
@@ -75,6 +85,15 @@ export default function EmployeeModal({ clients, linkableEmployees, form, setFor
           />
           <TextField label="Posisi" value={form.posisi} onChange={set('posisi')} />
           <SelectField label="Status" value={form.status} onChange={set('status')} options={STATUS_OPTIONS} />
+          <DateField label="Tanggal Bergabung" value={form.tanggal_bergabung} onChange={set('tanggal_bergabung')} />
+          <SelectField label="Jenis Hubungan Kerja" value={form.jenis_hubungan_kerja} onChange={setJenis} options={JENIS_HUBUNGAN_SELECT_OPTIONS} />
+          <DateField
+            label="Kontrak Berakhir"
+            value={form.kontrak_berakhir}
+            onChange={set('kontrak_berakhir')}
+            disabled={form.jenis_hubungan_kerja === 'PKWTT'}
+            hint={form.jenis_hubungan_kerja === 'PKWTT' ? 'PKWTT tidak punya tanggal berakhir.' : 'Untuk PKWT/Magang. Dipakai pengingat di dashboard.'}
+          />
           <NumberField label="Gaji Pokok" value={form.gaji_pokok} onChange={set('gaji_pokok')} />
           <NumberField label="Allowance (Transport/Travel/Communication)" value={form.tunjangan} onChange={set('tunjangan')} />
           <SelectField label="Status PTKP" value={form.status_ptkp} onChange={set('status_ptkp')} options={PTKP_OPTIONS} />

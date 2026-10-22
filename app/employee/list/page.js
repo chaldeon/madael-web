@@ -14,6 +14,8 @@ import SkeletonRows from '@/components/employee-list/SkeletonRows';
 import CompletenessBadge from '@/components/employee-list/CompletenessBadge';
 import SortableHeader from '@/components/SortableHeader';
 import { emptyForm, TEMPLATE_URL, MODULE_GROUPS, PAGE_SIZE_OPTIONS, SORT_COLUMNS } from '@/lib/employeeListConfig';
+import KontrakBadge from '@/components/KontrakBadge';
+import { KONTRAK_FILTER_OPTIONS, isKontrakFilterValid, applyKontrakFilter, formatTanggalKepegawaian } from '@/lib/kepegawaian';
 import { EXPLICIT_ONLY_MODULES } from '@/lib/employeeModules';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { sanitizeSearchTerm } from '@/lib/searchTerm';
@@ -34,6 +36,8 @@ export default function EmployeeListPage() {
 
   const [filterClientId, setFilterClientId] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  // Filter kontrak (employees_master): '' | 'segera' | 'berakhir' | 'jenis:PKWT' | ...
+  const [filterKontrak, setFilterKontrak] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   // Search di-debounce sebelum dipakai buat query server — supaya tiap
   // ketikan tidak langsung nembak request baru ke Supabase.
@@ -133,6 +137,34 @@ export default function EmployeeListPage() {
     const from = (currentPage - 1) * pageSize;
     const to = from + pageSize - 1;
 
+    // Filter kontrak hidup di employees_master (bukan di tabel employees), jadi
+    // cari dulu id akun yang cocok, lalu batasi query employees ke id itu.
+    let kontrakIds = null;
+    if (filterKontrak) {
+      const { data: kontrakRows, error: kontrakError } = await applyKontrakFilter(
+        supabase.from('employees_master').select('linked_employee_id').not('linked_employee_id', 'is', null),
+        filterKontrak
+      );
+      if (kontrakError) {
+        setError(friendlyError(kontrakError, 'Gagal memuat data karyawan.'));
+        setEmployees([]);
+        setTotalCount(0);
+        setMasterByEmployeeId({});
+        setScheduledIds(new Set());
+        setLoading(false);
+        return;
+      }
+      kontrakIds = (kontrakRows || []).map((r) => r.linked_employee_id);
+      if (kontrakIds.length === 0) {
+        setEmployees([]);
+        setTotalCount(0);
+        setMasterByEmployeeId({});
+        setScheduledIds(new Set());
+        setLoading(false);
+        return;
+      }
+    }
+
     let query = supabase
       .from('employees')
       .select(
@@ -142,6 +174,7 @@ export default function EmployeeListPage() {
 
     if (filterClientId) query = query.eq('client_id', filterClientId);
     if (filterStatus) query = query.eq('status', filterStatus);
+    if (kontrakIds) query = query.in('id', kontrakIds);
 
     // Aturan sanitasi yang sama dengan pencarian global (lib/searchTerm.js):
     // koma/kurung/kutip/wildcard tidak boleh ikut ke string filter .or().
@@ -188,7 +221,7 @@ export default function EmployeeListPage() {
     const [masterRes, scheduleRes] = await Promise.all([
       supabase
         .from('employees_master')
-        .select('linked_employee_id, status_ptkp, npwp_status, jkk_rate, nama_rekening, no_rekening, alamat, kontak_darurat_nama, kontak_darurat_telepon')
+        .select('linked_employee_id, status_ptkp, npwp_status, jkk_rate, nama_rekening, no_rekening, alamat, kontak_darurat_nama, kontak_darurat_telepon, jenis_hubungan_kerja, kontrak_berakhir')
         .in('linked_employee_id', ids),
       supabase.from('work_schedule').select('employee_id').in('employee_id', ids),
     ]);
@@ -198,7 +231,7 @@ export default function EmployeeListPage() {
     );
     setScheduledIds(new Set((scheduleRes.data || []).map((r) => r.employee_id)));
     setLoading(false);
-  }, [supabase, currentPage, pageSize, filterClientId, filterStatus, debouncedSearch, sortField, sortDir]);
+  }, [supabase, currentPage, pageSize, filterClientId, filterStatus, filterKontrak, debouncedSearch, sortField, sortDir]);
 
   useEffect(() => {
     fetchEmployees();
@@ -229,7 +262,13 @@ export default function EmployeeListPage() {
   // nggak nyangkut di halaman yang tiba-tiba jadi nggak relevan).
   useEffect(() => {
     setCurrentPage(1);
-  }, [filterClientId, filterStatus, debouncedSearch, pageSize, sortField, sortDir]);
+  }, [filterClientId, filterStatus, filterKontrak, debouncedSearch, pageSize, sortField, sortDir]);
+
+  // Tautan dari widget dashboard: /employee/list?kontrak=segera
+  useEffect(() => {
+    const value = new URLSearchParams(window.location.search).get('kontrak');
+    if (value && isKontrakFilterValid(value)) setFilterKontrak(value);
+  }, []);
 
   // Tambah perusahaan baru langsung dari sini — nulis ke tabel `companies`
   // yang sama, jadi otomatis muncul juga di Payroll Manager/CRM/dll.
@@ -596,6 +635,12 @@ export default function EmployeeListPage() {
           <option value="Aktif">Aktif</option>
           <option value="Nonaktif">Nonaktif</option>
         </select>
+
+        <select value={filterKontrak} onChange={(e) => setFilterKontrak(e.target.value)} className={selectClass} aria-label="Filter kontrak">
+          {KONTRAK_FILTER_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
       </div>
 
       <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
@@ -618,6 +663,7 @@ export default function EmployeeListPage() {
                 <SortableHeader colKey="perusahaan" label="Perusahaan" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="status" label="Status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortableHeader colKey="is_superadmin" label="Superadmin" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <th className="px-5 py-3 font-medium whitespace-nowrap">Kontrak</th>
                 <th className="px-5 py-3 font-medium whitespace-nowrap">Kelengkapan Data</th>
                 <th className="px-5 py-3 font-medium text-right">Akses</th>
               </tr>
@@ -650,6 +696,23 @@ export default function EmployeeListPage() {
                     >
                       {emp.is_superadmin ? 'Ya' : 'Tidak'}
                     </span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    {(() => {
+                      const m = masterByEmployeeId[emp.id];
+                      if (!m?.jenis_hubungan_kerja) return <span className="text-[#6B6B6B]">—</span>;
+                      return (
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="text-black">{m.jenis_hubungan_kerja}</span>
+                          {m.kontrak_berakhir && (
+                            <>
+                              <span className="text-xs text-[#6B6B6B]">s.d. {formatTanggalKepegawaian(m.kontrak_berakhir)}</span>
+                              <KontrakBadge kontrakBerakhir={m.kontrak_berakhir} />
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-5 py-3.5">
                     <Link href={`/employee/list/${emp.id}`}>

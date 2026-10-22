@@ -4,8 +4,11 @@ import { requireModuleAccess } from '@/lib/moduleAccessServer';
 import { logActivity } from '@/lib/activityLog';
 import { friendlyError } from '@/lib/errorMessage';
 import { STATUS_OPTIONS } from '@/lib/payrollConfig';
+import { validateKepegawaian } from '@/lib/kepegawaian';
 
-// PATCH /api/payroll/master/[id]   body: { posisi?, status?, gaji_pokok?, tunjangan? }
+// PATCH /api/payroll/master/[id]
+//   body: { posisi?, status?, gaji_pokok?, tunjangan?,
+//           tanggal_bergabung?, jenis_hubungan_kerja?, kontrak_berakhir? }
 //
 // Edit data HR/payroll ringkas dari halaman detail employee (employees_master).
 // Dulu browser meng-update employees_master langsung tanpa activity log sama
@@ -15,7 +18,8 @@ import { STATUS_OPTIONS } from '@/lib/payrollConfig';
 //
 // Cakupan sengaja sempit: form lengkap di Payroll Manager
 // (app/employee/payroll/page.js) belum lewat rute ini.
-const EDITABLE = ['posisi', 'status', 'gaji_pokok', 'tunjangan'];
+const KEPEGAWAIAN_KEYS = ['tanggal_bergabung', 'jenis_hubungan_kerja', 'kontrak_berakhir'];
+const EDITABLE = ['posisi', 'status', 'gaji_pokok', 'tunjangan', ...KEPEGAWAIAN_KEYS];
 const MAX_POSISI_LENGTH = 200;
 const MAX_NOMINAL = 1_000_000_000_000;
 
@@ -63,6 +67,21 @@ export async function PATCH(request, { params }) {
       }
       patch[key] = nominal;
     }
+    // Data kepegawaian: string 'YYYY-MM-DD' / jenis, atau ''/null untuk
+    // mengosongkan. Aturan antar-field divalidasi setelah baris lama dimuat
+    // (di bawah), karena PATCH boleh hanya mengirim sebagian field.
+    for (const key of KEPEGAWAIAN_KEYS) {
+      if (body[key] === undefined) continue;
+      if (body[key] !== null && typeof body[key] !== 'string') {
+        return NextResponse.json({ error: 'Data kepegawaian tidak valid.' }, { status: 400 });
+      }
+      patch[key] = body[key] ? body[key].trim() : null;
+    }
+    // Ganti ke PKWTT tanpa menyebut tanggal berakhir = kosongkan tanggal itu
+    // (PKWTT tidak punya tanggal berakhir), sama seperti form di Payroll Manager.
+    if (patch.jenis_hubungan_kerja === 'PKWTT' && body.kontrak_berakhir === undefined) {
+      patch.kontrak_berakhir = null;
+    }
     if (Object.keys(patch).length === 0) {
       return NextResponse.json({ error: 'Tidak ada perubahan yang dikirim.' }, { status: 400 });
     }
@@ -83,6 +102,17 @@ export async function PATCH(request, { params }) {
     }
     if (!before) {
       return NextResponse.json({ error: 'Data employee tidak ditemukan.' }, { status: 404 });
+    }
+
+    if (KEPEGAWAIAN_KEYS.some((key) => key in patch)) {
+      const kepegawaianError = validateKepegawaian({
+        tanggal_bergabung: 'tanggal_bergabung' in patch ? patch.tanggal_bergabung : before.tanggal_bergabung,
+        jenis_hubungan_kerja: 'jenis_hubungan_kerja' in patch ? patch.jenis_hubungan_kerja : before.jenis_hubungan_kerja,
+        kontrak_berakhir: 'kontrak_berakhir' in patch ? patch.kontrak_berakhir : before.kontrak_berakhir,
+      });
+      if (kepegawaianError) {
+        return NextResponse.json({ error: kepegawaianError }, { status: 400 });
+      }
     }
 
     const { data: updated, error: updateError } = await admin
