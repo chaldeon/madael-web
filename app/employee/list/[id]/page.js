@@ -10,6 +10,13 @@ import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { formatRupiahOrDash } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
+import KontrakBadge from '@/components/KontrakBadge';
+import {
+  JENIS_HUBUNGAN_KERJA_OPTIONS,
+  formatTanggalKepegawaian,
+  masaKerja,
+  validateKepegawaian,
+} from '@/lib/kepegawaian';
 
 const inputClass =
   'w-full border border-[#E0E0E0] px-3 py-2 text-sm text-black focus:outline-none focus:border-madael-red';
@@ -72,7 +79,7 @@ export default function EmployeeDetailPage() {
         .select('id, nama, employee_id, email, client_id, status, is_superadmin, created_at, companies:client_id ( id, nama_perusahaan )')
         .eq('id', employeeId)
         .maybeSingle(),
-      supabase.from('employees_master').select('id, posisi, status, gaji_pokok, tunjangan').eq('linked_employee_id', employeeId).maybeSingle(),
+      supabase.from('employees_master').select('id, posisi, status, gaji_pokok, tunjangan, tanggal_bergabung, jenis_hubungan_kerja, kontrak_berakhir').eq('linked_employee_id', employeeId).maybeSingle(),
       supabase.from('work_schedule').select('jam_masuk, jam_pulang, hari_kerja').eq('employee_id', employeeId).maybeSingle(),
       supabase.from('companies').select('id, nama_perusahaan').order('nama_perusahaan', { ascending: true }),
       supabase.from('profile_change_requests').select('id', { count: 'exact', head: true }).eq('employee_id', employeeId).eq('status', 'pending'),
@@ -109,6 +116,9 @@ export default function EmployeeDetailPage() {
       status_karyawan: master?.status || 'PHL',
       gaji_pokok: master?.gaji_pokok ?? 0,
       tunjangan: master?.tunjangan ?? 0,
+      tanggal_bergabung: master?.tanggal_bergabung || '',
+      jenis_hubungan_kerja: master?.jenis_hubungan_kerja || '',
+      kontrak_berakhir: master?.kontrak_berakhir || '',
     };
     editFormBaselineRef.current = initial;
     setEditForm(initial);
@@ -120,10 +130,28 @@ export default function EmployeeDetailPage() {
     setEditForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  // PKWTT tidak punya tanggal berakhir: ganti ke PKWTT langsung mengosongkannya.
+  const handleJenisChange = (value) => {
+    setEditForm((prev) => ({
+      ...prev,
+      jenis_hubungan_kerja: value,
+      kontrak_berakhir: value === 'PKWTT' ? '' : prev.kontrak_berakhir,
+    }));
+  };
+
   const handleEditSubmit = async (e) => {
     e.preventDefault();
-    setSavingEdit(true);
     setEditError(null);
+    // Validasi data kepegawaian sebelum akun disimpan, supaya tidak terjadi
+    // "akun tersimpan tapi data HR gagal" hanya karena tanggal tidak valid.
+    if (master) {
+      const kepegawaianError = validateKepegawaian(editForm);
+      if (kepegawaianError) {
+        setEditError(kepegawaianError);
+        return;
+      }
+    }
+    setSavingEdit(true);
 
     try {
       // Data akun login (employees) — lewat API supaya konsisten dengan
@@ -159,6 +187,9 @@ export default function EmployeeDetailPage() {
             status: editForm.status_karyawan,
             gaji_pokok: editForm.gaji_pokok,
             tunjangan: editForm.tunjangan,
+            tanggal_bergabung: editForm.tanggal_bergabung,
+            jenis_hubungan_kerja: editForm.jenis_hubungan_kerja,
+            kontrak_berakhir: editForm.kontrak_berakhir,
           }),
         });
         const masterData = await masterRes.json().catch(() => ({}));
@@ -242,6 +273,18 @@ export default function EmployeeDetailPage() {
             <div className="flex flex-col gap-3 text-sm">
               <InfoRow label="Posisi" value={master.posisi || '-'} />
               <InfoRow label="Status Karyawan" value={master.status || '-'} />
+              <InfoRow label="Tanggal Bergabung" value={formatTanggalKepegawaian(master.tanggal_bergabung)} />
+              <InfoRow label="Masa Kerja" value={master.tanggal_bergabung ? masaKerja(master.tanggal_bergabung) : '-'} />
+              <InfoRow label="Jenis Hubungan Kerja" value={master.jenis_hubungan_kerja || '-'} />
+              <InfoRow
+                label="Kontrak Berakhir"
+                value={
+                  <span className="inline-flex flex-wrap items-center gap-2">
+                    {formatTanggalKepegawaian(master.kontrak_berakhir)}
+                    <KontrakBadge kontrakBerakhir={master.kontrak_berakhir} />
+                  </span>
+                }
+              />
               <InfoRow label="Gaji Pokok" value={formatRupiahOrDash(master.gaji_pokok)} />
               <InfoRow label="Tunjangan" value={formatRupiahOrDash(master.tunjangan)} />
             </div>
@@ -395,6 +438,43 @@ export default function EmployeeDetailPage() {
                       onChange={(e) => handleEditChange('tunjangan', Number(e.target.value))}
                       className={inputClass}
                     />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Tanggal Bergabung</label>
+                    <input
+                      type="date"
+                      value={editForm.tanggal_bergabung}
+                      onChange={(e) => handleEditChange('tanggal_bergabung', e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Jenis Hubungan Kerja</label>
+                    <select
+                      value={editForm.jenis_hubungan_kerja}
+                      onChange={(e) => handleJenisChange(e.target.value)}
+                      className={inputClass}
+                    >
+                      <option value="">— Belum diisi —</option>
+                      {JENIS_HUBUNGAN_KERJA_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Kontrak Berakhir</label>
+                    <input
+                      type="date"
+                      value={editForm.kontrak_berakhir}
+                      onChange={(e) => handleEditChange('kontrak_berakhir', e.target.value)}
+                      disabled={editForm.jenis_hubungan_kerja === 'PKWTT'}
+                      className={`${inputClass} disabled:bg-[#F4F4F4] disabled:text-[#9A9A9A]`}
+                    />
+                    <p className="text-[11px] text-[#9A9A9A] mt-1">
+                      {editForm.jenis_hubungan_kerja === 'PKWTT'
+                        ? 'PKWTT tidak punya tanggal berakhir.'
+                        : 'Untuk PKWT/Magang. Dipakai pengingat di dashboard.'}
+                    </p>
                   </div>
                 </>
               ) : (

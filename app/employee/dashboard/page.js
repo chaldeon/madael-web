@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { ChevronDown, Lock, Megaphone, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { MODULE_REGISTRY, EXPLICIT_ONLY_MODULES, PENDING_QUEUE_MODULES, isModuleGranted } from '@/lib/employeeModules';
+import KontrakBerakhirWidget from '@/components/KontrakBerakhirWidget';
 import EmployeeHeader from '@/components/EmployeeHeader';
 import QuickClockInCard from '@/components/QuickClockInCard';
 import { missingFieldsForEmployee, EMPLOYEE_COMPLETENESS_COLUMNS } from '@/lib/dataCompleteness';
@@ -178,6 +179,8 @@ export default function EmployeeDashboardPage() {
 
   const hasAccess = (key) => isModuleGranted({ isSuperadmin: !!employee?.is_superadmin, moduleKeys, key });
   const hasAnyAccess = (mod) => hasAccess(mod.key) || (mod.altKeys || []).some(hasAccess);
+  // Widget kontrak berakhir: untuk HR yang mengelola data karyawan/payroll.
+  const canSeeKontrakWidget = hasAccess('employee_list') || hasAccess('payroll');
 
   // Badge antrean persetujuan: hanya diminta kalau user punya minimal satu modul
   // approval, supaya karyawan biasa tidak memicu request sia-sia. Best-effort —
@@ -278,6 +281,8 @@ export default function EmployeeDashboardPage() {
             </h2>
             <p className="text-sm text-[#6B6B6B] mb-8">Semua modul kerja — akses penuh sebagai superadmin.</p>
 
+            {canSeeKontrakWidget && <KontrakBerakhirWidget />}
+
             {(() => {
               const hrisModules = MODULE_REGISTRY.filter((m) => m.layer === 'hris' && m.status === 'live');
               const generalModules = MODULE_REGISTRY.filter((m) => m.layer === 'general' && m.status === 'live');
@@ -323,6 +328,8 @@ export default function EmployeeDashboardPage() {
               My Work
             </h2>
             <p className="text-sm text-[#6B6B6B] mb-8">Modul kerjaan sesuai akses kamu.</p>
+
+            {canSeeKontrakWidget && <KontrakBerakhirWidget />}
 
             {(() => {
               const hrisModules = MODULE_REGISTRY.filter((m) => m.layer === 'hris');

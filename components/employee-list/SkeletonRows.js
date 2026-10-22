@@ -10,7 +10,7 @@ export default function SkeletonRows({ rows = 6 }) {
       <tbody>
         {Array.from({ length: rows }).map((_, i) => (
           <tr key={i} className="border-b border-[#F0F0F0] last:border-0 animate-pulse">
-            {Array.from({ length: 8 }).map((__, j) => (
+            {Array.from({ length: 9 }).map((__, j) => (
               <td key={j} className="px-5 py-3.5">
                 <div className="h-3 bg-[#EFEFEF] rounded-sm" style={{ width: j === 0 ? '70%' : '55%' }} />
               </td>

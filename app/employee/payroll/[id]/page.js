@@ -16,6 +16,8 @@ import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 import Toast from '@/components/employee-list/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import KontrakBadge from '@/components/KontrakBadge';
+import { formatTanggalKepegawaian, masaKerja } from '@/lib/kepegawaian';
 
 const DOKUMEN_OPTIONS = ['KTP', 'PKWT', 'Ijazah', 'Lainnya'];
 
@@ -247,6 +249,15 @@ export default function EmployeeDetailPage() {
           <Field label="Status">{empMaster.status || '-'}</Field>
           <Field label="Klien">{clientName}</Field>
           <Field label="Posisi">{empMaster.posisi || '-'}</Field>
+          <Field label="Tanggal Bergabung">{formatTanggalKepegawaian(empMaster.tanggal_bergabung)}</Field>
+          <Field label="Masa Kerja">{empMaster.tanggal_bergabung ? masaKerja(empMaster.tanggal_bergabung) : '-'}</Field>
+          <Field label="Jenis Hubungan Kerja">{empMaster.jenis_hubungan_kerja || '-'}</Field>
+          <Field label="Kontrak Berakhir">
+            <span className="inline-flex flex-wrap items-center gap-2">
+              {formatTanggalKepegawaian(empMaster.kontrak_berakhir)}
+              <KontrakBadge kontrakBerakhir={empMaster.kontrak_berakhir} />
+            </span>
+          </Field>
           <Field label="Gaji Pokok">{formatRupiahOrDash(empMaster.gaji_pokok)}</Field>
           <Field label="Total Tunjangan">{formatRupiahOrDash(totalTunjangan(empMaster))}</Field>
           <Field label="Jatah Cuti Tahunan">{empMaster.jatah_cuti_tahunan ?? 12} hari</Field>
