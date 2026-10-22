@@ -18,6 +18,7 @@ import {
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import NotificationEmailPreferences from '@/components/NotificationEmailPreferences';
 
 // Jumlah notifikasi yang ditampilkan per "halaman" — seluruh data dimuat sekali
 // (fetchAllRows), lalu ditampilkan bertahap lewat tombol "Tampilkan lebih banyak".
@@ -241,6 +242,8 @@ export default function NotificationsPage() {
       </div>
 
       {actionError && <p className="text-xs text-red-600 mb-4">{actionError}</p>}
+
+      {employeeId && <NotificationEmailPreferences />}
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex">
