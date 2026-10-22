@@ -1,34 +1,14 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { getSessionEmployee } from '@/lib/sessionEmployee';
-import { PENDING_QUEUE_MODULES, isModuleGranted } from '@/lib/employeeModules';
-import { SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN } from '@/lib/leave';
-
-// Satu query count per modul antrean persetujuan. Kuncinya = key modul di
-// MODULE_REGISTRY (flag pendingQueue). Tiap fungsi menerima query builder
-// `select(..., { count: 'exact', head: true })` dan emp yang sedang login.
-//
-// ownColumn: kolom pemilik pengajuan. Pengajuan milik approver sendiri tidak
-// dihitung karena route keputusannya menolak memprosesnya (lihat
-// SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN di lib/leave.js), jadi badge tidak
-// menjanjikan antrean yang tidak bisa dia kerjakan.
-const PENDING_QUERIES = {
-  leave_request_admin: { table: 'leave_requests', ownColumn: 'employee_id' },
-  overtime_admin: { table: 'overtime_requests', ownColumn: 'employee_id' },
-  reimbursement_admin: { table: 'reimbursement_requests', ownColumn: 'employee_id' },
-  profile_admin: { table: 'profile_change_requests', ownColumn: 'employee_id' },
-  // Koreksi absensi: hanya pengajuan mandiri karyawan (requested_by terisi),
-  // sama dengan route approve. Route itu tidak punya cek milik-sendiri.
-  absensi_admin: {
-    table: 'attendance_corrections',
-    extra: (q) => q.not('requested_by', 'is', null),
-  },
-};
+import { PENDING_QUERIES, applyPendingFilters } from '@/lib/pendingQueue';
+import { getApproverContext } from '@/lib/pendingQueueServer';
 
 // GET /api/dashboard/pending-counts
 // Jumlah pengajuan berstatus 'pending' untuk modul approval yang boleh diakses
 // user (dicek per modul lewat isModuleGranted — superadmin tetap tidak
 // bypass EXPLICIT_ONLY_MODULES, dan absensi_admin khusus superadmin).
+// Definisi antrean (tabel, filter pemilik-sendiri) ada di lib/pendingQueue.js,
+// dipakai bersama Inbox Persetujuan supaya badge dan isi inbox selalu sama.
 // Respons: { counts: { <module_key>: number } } — hanya key yang dia punya
 // aksesnya. User tanpa modul approval mendapat { counts: {} }, bukan 403,
 // karena dashboard memanggil ini untuk semua karyawan yang punya modul HRIS.
@@ -36,39 +16,19 @@ const PENDING_QUERIES = {
 // di log; satu tabel bermasalah tidak boleh mematikan badge lainnya.
 export async function GET() {
   try {
-    const session = await getSessionEmployee('id, status, is_superadmin');
-    if (session.error) return NextResponse.json({ error: session.error }, { status: session.status });
-    const { emp } = session;
-
     const admin = createAdminClient();
-    const { data: mods, error: modsError } = await admin
-      .from('employee_modules')
-      .select('module_name')
-      .eq('employee_id', emp.id)
-      .in('module_name', PENDING_QUEUE_MODULES);
-    if (modsError) {
-      console.error('Muat modul untuk badge dashboard error:', modsError);
-      return NextResponse.json({ error: 'Gagal memuat.' }, { status: 500 });
-    }
-
-    const moduleKeys = (mods || []).map((m) => m.module_name);
-    const keys = PENDING_QUEUE_MODULES.filter(
-      (key) =>
-        PENDING_QUERIES[key] &&
-        isModuleGranted({ isSuperadmin: !!emp.is_superadmin, moduleKeys, key })
-    );
-
-    const excludeOwn = !(SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN && emp.is_superadmin);
+    const ctx = await getApproverContext(admin);
+    if (ctx.error) return NextResponse.json({ error: ctx.error }, { status: ctx.status });
+    const { emp, keys, excludeOwn } = ctx;
 
     const results = await Promise.all(
       keys.map(async (key) => {
-        const { table, ownColumn, extra } = PENDING_QUERIES[key];
-        let query = admin
-          .from(table)
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'pending');
-        if (ownColumn && excludeOwn) query = query.neq(ownColumn, emp.id);
-        if (extra) query = extra(query);
+        const config = PENDING_QUERIES[key];
+        const query = applyPendingFilters(
+          admin.from(config.table).select('id', { count: 'exact', head: true }),
+          config,
+          { empId: emp.id, excludeOwn }
+        );
 
         const { count, error } = await query;
         if (error) {
