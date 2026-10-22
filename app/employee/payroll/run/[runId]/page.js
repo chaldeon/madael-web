@@ -9,21 +9,20 @@ import { ArrowLeft, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { hitungBPJS, hitungBrutoPPh21, hitungPPh21TER } from '@/lib/payroll/calculations';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { dispatchNotification } from '@/lib/notifyClient';
-import { logActivity } from '@/lib/activityLogClient';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { computeSnapshot } from '@/lib/payroll/runSnapshot';
 import RunItemsTable from '@/components/payroll-run/RunItemsTable';
-import { STATUS_OPTIONS, STATUS_STYLE, SORT_COLUMNS, periodeLabel, downloadTransferCsv } from '@/lib/payrollRunConfig';
+import { STATUS_STYLE, SORT_COLUMNS, periodeLabel, downloadTransferCsv } from '@/lib/payrollRunConfig';
+import { statusOptionsFor } from '@/lib/payrollRun';
 import { formatRupiah } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
 
 export default function PayrollRunDetailPage() {
   const { runId } = useParams();
   const supabase = createClient();
-  const { status, employee } = useModuleAccess('payroll');
+  const { status } = useModuleAccess('payroll');
 
   const [run, setRun] = useState(null);
   const [client, setClient] = useState(null);
@@ -36,6 +35,7 @@ export default function PayrollRunDetailPage() {
   const [saveError, setSaveError] = useState(null);
   const [generateNote, setGenerateNote] = useState(null);
   const [confirmIncomplete, setConfirmIncomplete] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState(null);
   const [lemburLoading, setLemburLoading] = useState(false);
@@ -256,127 +256,79 @@ export default function PayrollRunDetailPage() {
   };
   const approvingWithIssue = statusDraft === 'Approved' && run?.status !== 'Approved' && hasIncomplete;
 
-  // Generate/update entry Payslip Portal untuk tiap item yang employee-nya
-  // sudah terhubung ke akun Absensi (linked_employee_id). Item yang belum
-  // terhubung dilewati — dilaporkan lewat generateNote, tidak menghentikan
-  // proses untuk item lain.
-  const generateSlips = async (currentItems, periode) => {
-    let generated = 0;
-    let skipped = 0;
-    const errors = [];
+  // Employee yang sudah terhubung ke akun Absensi tetapi item run-nya belum
+  // punya slip. Pada run Approved ini berarti generate slip terputus atau
+  // gagal untuk item tersebut — dilengkapi lewat "Generate ulang slip".
+  const slipBelumAda = useMemo(
+    () => items.filter((i) => i.employees_master?.linked_employee_id && !i.payslip_id).length,
+    [items]
+  );
 
-    for (const item of currentItems) {
-      const linkedId = item.employees_master?.linked_employee_id;
-      if (!linkedId) { skipped += 1; continue; }
-
-      // Cek slip yang sudah pernah dibuat run ini, atau slip manual yang
-      // sudah ada untuk employee+periode ini — supaya klik Approved dua kali
-      // tidak membuat slip dobel.
-      let existingPayslipId = item.payslip_id;
-      if (!existingPayslipId) {
-        const { data: existing } = await supabase
-          .from('payslips')
-          .select('id')
-          .eq('employee_id', linkedId)
-          .eq('periode', periode)
-          .maybeSingle();
-        existingPayslipId = existing?.id || null;
-      }
-
-      const payload = {
-        employee_id: linkedId,
-        periode,
-        periode_label: periodeLabel(periode),
-        gaji_pokok: item.gaji_pokok,
-        tunjangan_lain: item.allowance,
-        lembur: item.overtime,
-        insentif: item.insentif,
-        kompensasi: item.kompensasi,
-        jht_karyawan: 0,
-        jp_karyawan: 0,
-        bpjs_k_karyawan: 0,
-        pph21: item.pph21,
-        penalty: item.penalty,
-        is_published: true,
-      };
-      // BPJS employee di atas disederhanakan jadi satu baris "allowance" +
-      // pph21/penalty eksak dari snapshot; breakdown detail BPJS per komponen
-      // (JHT/JP/Kesehatan) bisa dilengkapi manual di Kelola Slip Gaji kalau
-      // Daniel butuh rincian itu tampil di slip cetak.
-
-      if (existingPayslipId) {
-        const { error } = await supabase.from('payslips').update(payload).eq('id', existingPayslipId);
-        if (error) { errors.push(`${item.employees_master?.nama}: ${friendlyError(error, 'terjadi kesalahan.')}`); continue; }
-      } else {
-        const res = await fetch('/api/documents/generate-number', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ kode_jenis: 'INV' }),
-        });
-        const numberData = await res.json();
-        if (!res.ok) { errors.push(`${item.employees_master?.nama}: gagal generate nomor dokumen`); continue; }
-
-        const { data: inserted, error } = await supabase
-          .from('payslips')
-          .insert([{ ...payload, nomor_dokumen: numberData.nomor_surat }])
-          .select()
-          .single();
-        if (error) { errors.push(`${item.employees_master?.nama}: ${friendlyError(error, 'terjadi kesalahan.')}`); continue; }
-        existingPayslipId = inserted.id;
-      }
-
-      await supabase.from('payroll_run_items').update({ payslip_id: existingPayslipId }).eq('id', item.id);
-      generated += 1;
-    }
-
-    return { generated, skipped, errors };
+  const reloadItems = async () => {
+    const { data: refreshedItems } = await supabase
+      .from('payroll_run_items')
+      .select('*, employees_master ( id, nama, posisi, linked_employee_id, nama_rekening, no_rekening, jkk_rate, status_ptkp )')
+      .eq('payroll_run_id', runId);
+    setItems(refreshedItems || []);
   };
 
+  // Perubahan status dan generate slip dilakukan di SERVER (PATCH
+  // /api/payroll/runs/[runId]/status): transisi divalidasi, slip digenerate
+  // idempoten, dan log + notifikasi dicatat server-side. Menutup tab di
+  // tengah proses tidak lagi meninggalkan run Approved dengan slip separuh
+  // jalan tanpa jalan perbaikan — pakai "Generate ulang slip".
   const handleSaveStatus = async () => {
     setSaving(true);
     setSaveError(null);
     setGenerateNote(null);
 
-    const wasApproved = run.status === 'Approved';
-    const { data, error } = await supabase
-      .from('payroll_runs')
-      .update({ status: statusDraft, updated_by: employee.id, updated_at: new Date().toISOString() })
-      .eq('id', runId)
-      .select()
-      .single();
+    try {
+      const res = await fetch(`/api/payroll/runs/${runId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: statusDraft, confirmIncomplete }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSaveError(json.error || 'Gagal menyimpan status.');
+        // 409 = status di server sudah berubah / tidak sah: sinkronkan tampilan.
+        if (res.status === 409 && json.code !== 'INCOMPLETE_NEEDS_CONFIRM') await loadData();
+        setSaving(false);
+        return;
+      }
 
-    if (error) {
-      setSaving(false);
-      setSaveError(friendlyError(error, 'Gagal menyimpan status.'));
-      return;
-    }
-    setRun(data);
-
-    logActivity({
-      aksi: 'ubah_status_payroll',
-      targetTable: 'payroll_runs',
-      targetId: runId,
-      detail: { periode: run.periode, status_sebelum: run.status, status_sesudah: statusDraft },
-    });
-
-    if (statusDraft === 'Approved' && !wasApproved) {
-      const result = await generateSlips(items, run.periode);
-      const { data: refreshedItems } = await supabase
-        .from('payroll_run_items')
-        .select('*, employees_master ( id, nama, posisi, linked_employee_id, nama_rekening, no_rekening, jkk_rate, status_ptkp )')
-        .eq('payroll_run_id', runId);
-      setItems(refreshedItems || []);
-
-      let note = `${result.generated} slip berhasil dibuat/diperbarui.`;
-      if (result.skipped > 0) note += ` ${result.skipped} employee dilewati (belum terhubung ke akun Absensi).`;
-      if (result.errors.length > 0) note += ` Error: ${result.errors.join('; ')}`;
-      setGenerateNote(note);
-
-      dispatchNotification('payroll_approved', runId);
+      setRun((prev) => ({ ...prev, ...json.run }));
+      if (json.slips) {
+        await reloadItems();
+        setGenerateNote(json.slips.note);
+      }
+    } catch (err) {
+      console.error('Simpan status payroll error:', err);
+      setSaveError('Gagal menyimpan status. Periksa koneksi lalu coba lagi.');
     }
 
     setConfirmIncomplete(false);
     setSaving(false);
+  };
+
+  const handleRegenerateSlips = async () => {
+    setRegenerating(true);
+    setSaveError(null);
+    setGenerateNote(null);
+    try {
+      const res = await fetch(`/api/payroll/runs/${runId}/slips`, { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSaveError(json.error || 'Gagal generate ulang slip.');
+      } else {
+        await reloadItems();
+        setGenerateNote(json.slips.note);
+      }
+    } catch (err) {
+      console.error('Generate ulang slip error:', err);
+      setSaveError('Gagal generate ulang slip. Periksa koneksi lalu coba lagi.');
+    }
+    setRegenerating(false);
   };
 
   if (status === 'loading' || loading) {
@@ -425,7 +377,7 @@ export default function PayrollRunDetailPage() {
             onChange={(e) => { setStatusDraft(e.target.value); setConfirmIncomplete(false); }}
             className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
           >
-            {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+            {statusOptionsFor(run.status).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </label>
         <button
@@ -451,6 +403,15 @@ export default function PayrollRunDetailPage() {
             className="border border-[#E0E0E0] text-black px-5 py-2 text-sm font-medium tracking-[0.02em] hover:border-madael-red transition-colors disabled:opacity-40"
           >
             {lemburLoading ? 'Mengambil...' : 'Isi dari lembur disetujui'}
+          </button>
+        )}
+        {run.status === 'Approved' && (
+          <button
+            onClick={handleRegenerateSlips}
+            disabled={regenerating}
+            className="border border-[#E0E0E0] text-black px-5 py-2 text-sm font-medium tracking-[0.02em] hover:border-madael-red transition-colors disabled:opacity-40"
+          >
+            {regenerating ? 'Membuat slip...' : 'Generate ulang slip'}
           </button>
         )}
         {run.status === 'Approved' && (
@@ -510,6 +471,13 @@ export default function PayrollRunDetailPage() {
             ? <AlertTriangle size={14} className="mt-0.5 shrink-0" />
             : <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-madael-red" />}
           {lemburNote.text}
+        </div>
+      )}
+
+      {run.status === 'Approved' && slipBelumAda > 0 && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mb-6">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          {slipBelumAda} employee belum punya slip gaji (proses generate slip terputus atau gagal). Klik &quot;Generate ulang slip&quot; untuk melengkapinya.
         </div>
       )}
 

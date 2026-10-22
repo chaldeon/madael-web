@@ -6,8 +6,6 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { Plus, Eye, Pencil } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { dispatchNotification } from '@/lib/notifyClient';
-import { logActivity } from '@/lib/activityLogClient';
 
 import { useModuleAccess } from '@/lib/useModuleAccess';
 
@@ -23,7 +21,7 @@ import { friendlyError } from '@/lib/errorMessage';
 
 export default function PayslipAdminPage() {
   const supabase = createClient();
-  const { status, employee } = useModuleAccess('payslip_admin');
+  const { status } = useModuleAccess('payslip_admin');
 
   const [payslips, setPayslips] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -173,47 +171,77 @@ export default function PayslipAdminPage() {
       payload.nomor_dokumen = numberData.nomor_surat;
     }
 
+    // is_published TIDAK ikut disimpan lewat update/insert langsung: terbit/tarik
+    // slip hanya lewat /api/payslips/[id]/publish (log + notifikasi server-side;
+    // trigger DB menolak perubahan is_published dari browser).
+    const wantPublished = !!payload.is_published;
+    const wasPublished = !!formBaselineRef.current?.is_published;
+    delete payload.is_published;
+
     let error;
+    let savedId = editingId;
     if (editingId) {
       ({ error } = await supabase.from('payslips').update(payload).eq('id', editingId));
     } else {
-      ({ error } = await supabase.from('payslips').insert(payload));
+      let inserted;
+      ({ data: inserted, error } = await supabase
+        .from('payslips')
+        .insert({ ...payload, is_published: false })
+        .select('id')
+        .single());
+      savedId = inserted?.id;
     }
 
-    setSaving(false);
     if (error) {
+      setSaving(false);
       setSaveError(friendlyError(error, 'Gagal menyimpan, coba lagi.'));
       return;
     }
+
+    if (savedId && wantPublished !== wasPublished) {
+      const publishError = await requestPublish(savedId, wantPublished);
+      if (publishError) {
+        // Slip sudah tersimpan; hanya status terbitnya yang gagal.
+        setSaving(false);
+        setModalOpen(false);
+        setActionError(`Slip tersimpan, tetapi status publish gagal diubah: ${publishError}`);
+        loadData();
+        return;
+      }
+    }
+
+    setSaving(false);
     setModalOpen(false);
     loadData();
+  };
+
+  // Terbit/tarik slip lewat server. Return null kalau berhasil, atau pesan error.
+  const requestPublish = async (payslipId, publish) => {
+    try {
+      const res = await fetch(`/api/payslips/${payslipId}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publish }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return json.error || 'terjadi kesalahan.';
+      return null;
+    } catch (err) {
+      console.error('Publish slip error:', err);
+      return 'koneksi bermasalah, coba lagi.';
+    }
   };
 
   const togglePublish = async (p) => {
     setActionError(null);
     const willPublish = !p.is_published;
-    const { error } = await supabase
-      .from('payslips')
-      .update({ is_published: willPublish })
-      .eq('id', p.id);
-    if (error) {
-      setActionError(`Gagal update status "${p.employees?.nama || 'slip ini'}": ${friendlyError(error, 'terjadi kesalahan.')}`);
+    const publishError = await requestPublish(p.id, willPublish);
+    if (publishError) {
+      setActionError(`Gagal update status "${p.employees?.nama || 'slip ini'}": ${publishError}`);
       return;
     }
 
     setPayslips((prev) => prev.map((x) => (x.id === p.id ? { ...x, is_published: willPublish } : x)));
-
-    // Notif hanya saat publish (bukan saat unpublish/tarik-lagi).
-    if (willPublish) {
-      dispatchNotification('payslip_published', p.id);
-
-      logActivity({
-        aksi: 'publish_payslip',
-        targetTable: 'payslips',
-        targetId: p.id,
-        detail: { employee_id: p.employee_id, periode: p.periode },
-      });
-    }
   };
 
   const selectClass =
