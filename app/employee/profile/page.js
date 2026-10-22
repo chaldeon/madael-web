@@ -5,7 +5,6 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from 'react';
 import { UserCircle, Camera, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { dispatchNotification } from '@/lib/notifyClient';
 import { PROFILE_EDITABLE_FIELDS, fieldLabel } from '@/lib/profileFields';
 import { missingFieldsForEmployee } from '@/lib/dataCompleteness';
 import { getFaceDescriptor } from '@/lib/faceVerification';
@@ -177,45 +176,39 @@ export default function ProfilePage() {
       return;
     }
 
-    // Hanya kirim field yang benar-benar berubah dibanding data master saat ini.
-    const fieldChanges = {};
+    // Hanya kirim field yang benar-benar berubah dibanding data master saat ini,
+    // dan hanya nilai barunya: `before`, baris master, dan validasi nilai
+    // ditentukan server (POST /api/profile-change-requests).
+    const changes = {};
     PROFILE_EDITABLE_FIELDS.forEach((f) => {
-      const before = master[f.key] ?? '';
+      const before = (master[f.key] ?? '').toString().trim();
       const after = (form[f.key] ?? '').toString().trim();
-      if (after !== (before ?? '').toString().trim()) {
-        fieldChanges[f.key] = { before: before || null, after: after || null };
-      }
+      if (after !== before) changes[f.key] = after || null;
     });
 
-    if (Object.keys(fieldChanges).length === 0) {
+    if (Object.keys(changes).length === 0) {
       setFormError('Tidak ada perubahan untuk diajukan.');
       return;
     }
 
     setSubmitting(true);
-    const { data, error } = await supabase
-      .from('profile_change_requests')
-      .insert([{
-        employee_id: employeeId,
-        master_id: master.id,
-        field_changes: fieldChanges,
-        catatan_karyawan: catatan.trim() || null,
-        status: 'pending',
-      }])
-      .select()
-      .single();
+    try {
+      const res = await fetch('/api/profile-change-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changes, catatan: catatan.trim() || null }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Gagal mengirim pengajuan, coba lagi.');
 
-    setSubmitting(false);
-    if (error) {
-      setFormError(friendlyError(error, 'Gagal mengirim pengajuan, coba lagi.'));
-      return;
+      setRequests((prev) => [json.request, ...prev]);
+      setCatatan('');
+      setSubmitSuccess(true);
+    } catch (err) {
+      setFormError(friendlyCaught(err, 'Gagal mengirim pengajuan, coba lagi.'));
+    } finally {
+      setSubmitting(false);
     }
-
-    setRequests((prev) => [data, ...prev]);
-    setCatatan('');
-    setSubmitSuccess(true);
-
-    dispatchNotification('profil_diajukan', data.id);
   };
 
   if (loading) {
