@@ -149,18 +149,22 @@ export default function EmployeeDetailPage() {
       // Data HR/payroll (employees_master) — hanya kalau row-nya sudah ada.
       // Kalau belum ada, arahkan ke Payroll Manager (bukan dibuat dari sini).
       if (master) {
-        const { error: masterError } = await supabase
-          .from('employees_master')
-          .update({
-            posisi: editForm.posisi.trim(),
+        // Lewat API (hak modul payroll dicek di server, perubahan gaji dicatat
+        // di activity log server-side) — bukan update langsung dari browser.
+        const masterRes = await fetch(`/api/payroll/master/${master.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            posisi: editForm.posisi,
             status: editForm.status_karyawan,
             gaji_pokok: editForm.gaji_pokok,
             tunjangan: editForm.tunjangan,
-          })
-          .eq('id', master.id);
+          }),
+        });
+        const masterData = await masterRes.json().catch(() => ({}));
 
-        if (masterError) {
-          setEditError('Data akun tersimpan, tapi gagal menyimpan data HR/payroll: ' + friendlyError(masterError, 'terjadi kesalahan.'));
+        if (!masterRes.ok) {
+          setEditError('Data akun tersimpan, tapi gagal menyimpan data HR/payroll: ' + (masterData.error || 'terjadi kesalahan.'));
           setSavingEdit(false);
           return;
         }
