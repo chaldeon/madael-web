@@ -4,7 +4,7 @@ import GlobalSearchBar from '@/components/GlobalSearchBar';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronDown, Lock, Megaphone, X } from 'lucide-react';
+import { ChevronDown, Lock, Megaphone, Pin, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { MODULE_REGISTRY, EXPLICIT_ONLY_MODULES, PENDING_QUEUE_MODULES, isModuleGranted } from '@/lib/employeeModules';
 import KontrakBerakhirWidget from '@/components/KontrakBerakhirWidget';
@@ -18,10 +18,19 @@ function isActive(row) {
   return !row.expired_at || new Date(row.expired_at) > new Date();
 }
 
-// Widget banner pengumuman company-wide, tampil di atas grid modul untuk
-// semua karyawan aktif (termasuk superadmin). Hanya menampilkan pengumuman
-// yang belum ditandai "sudah dibaca" oleh employee yang sedang login.
-function AnnouncementBanner({ supabase, employeeId }) {
+// Pengumuman tanpa target (target_company_id kosong) untuk semua karyawan;
+// yang bertarget hanya untuk karyawan di perusahaan itu. RLS sudah membatasi
+// untuk karyawan biasa, tapi pengelola/superadmin bisa membaca semuanya, jadi
+// banner tetap menyaring berdasarkan perusahaan karyawan yang sedang login.
+function isForCompany(row, clientId) {
+  if (row.target_company_id === null || row.target_company_id === undefined) return true;
+  return clientId !== null && clientId !== undefined && String(row.target_company_id) === String(clientId);
+}
+
+// Widget banner pengumuman, tampil di atas grid modul. Menampilkan pengumuman
+// yang belum ditandai "sudah dibaca" oleh employee yang sedang login, plus
+// pengumuman yang di-pin admin (tetap tampil di atas walau sudah dibaca).
+function AnnouncementBanner({ supabase, employeeId, clientId }) {
   const [announcements, setAnnouncements] = useState([]);
   const [readIds, setReadIds] = useState([]);
   const [dismissing, setDismissing] = useState(null);
@@ -32,19 +41,24 @@ function AnnouncementBanner({ supabase, employeeId }) {
     // Kedaluwarsa disaring di query (bukan cuma di client) dan jumlahnya dibatasi,
     // supaya riwayat pengumuman lama tidak ikut terunduh tiap buka dashboard.
     const nowIso = new Date().toISOString();
+    const targetFilter = clientId
+      ? `target_company_id.is.null,target_company_id.eq.${clientId}`
+      : 'target_company_id.is.null';
     const [annRes, readRes] = await Promise.all([
       supabase
         .from('announcements')
-        .select('id, judul, isi, expired_at')
+        .select('id, judul, isi, expired_at, pinned, target_company_id')
         .or(`expired_at.is.null,expired_at.gt.${nowIso}`)
+        .or(targetFilter)
+        .order('pinned', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(50),
       supabase.from('announcement_reads').select('announcement_id').eq('employee_id', employeeId),
     ]);
 
-    setAnnouncements((annRes.data || []).filter(isActive));
+    setAnnouncements((annRes.data || []).filter((a) => isActive(a) && isForCompany(a, clientId)));
     setReadIds((readRes.data || []).map((r) => r.announcement_id));
-  }, [supabase, employeeId]);
+  }, [supabase, employeeId, clientId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -63,28 +77,40 @@ function AnnouncementBanner({ supabase, employeeId }) {
     }
   };
 
-  const unread = announcements.filter((a) => !readIds.includes(a.id));
-  if (unread.length === 0) return null;
+  // Daftar sudah terurut (pin dulu, lalu terbaru). Yang sudah dibaca hanya
+  // tampil kalau di-pin.
+  const visible = announcements.filter((a) => a.pinned || !readIds.includes(a.id));
+  if (visible.length === 0) return null;
 
   return (
     <div className="mb-8 space-y-3">
-      {unread.map((a) => (
-        <div key={a.id} className="border-l-4 border-madael-red bg-white p-4 flex items-start gap-3">
-          <Megaphone size={18} className="text-madael-red shrink-0 mt-0.5" />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-black">{a.judul}</p>
-            <p className="text-xs text-[#6B6B6B] mt-1 whitespace-pre-wrap">{a.isi}</p>
-          </div>
-          <button
-            onClick={() => handleDismiss(a.id)}
-            disabled={dismissing === a.id}
-            className="text-[#9A9A9A] hover:text-black shrink-0 disabled:opacity-50"
-            title="Tandai sudah dibaca"
+      {visible.map((a) => {
+        const isRead = readIds.includes(a.id);
+        const Icon = a.pinned ? Pin : Megaphone;
+        return (
+          <div
+            key={a.id}
+            className={`border-l-4 bg-white p-4 flex items-start gap-3 ${isRead ? 'border-[#C9C9C9]' : 'border-madael-red'}`}
           >
-            <X size={16} />
-          </button>
-        </div>
-      ))}
+            <Icon size={18} className={`shrink-0 mt-0.5 ${isRead ? 'text-[#9A9A9A]' : 'text-madael-red'}`} />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-black">{a.judul}</p>
+              <p className="text-xs text-[#6B6B6B] mt-1 whitespace-pre-wrap">{a.isi}</p>
+              {isRead && <p className="text-[11px] text-[#9A9A9A] mt-2">Sudah dibaca · disematkan admin</p>}
+            </div>
+            {!isRead && (
+              <button
+                onClick={() => handleDismiss(a.id)}
+                disabled={dismissing === a.id}
+                className="text-[#9A9A9A] hover:text-black shrink-0 disabled:opacity-50"
+                title="Tandai sudah dibaca"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -258,7 +284,7 @@ export default function EmployeeDashboardPage() {
       />
 
       <div className="max-w-[1100px] mx-auto px-6 py-10">
-        <AnnouncementBanner supabase={supabase} employeeId={employee.id} />
+        <AnnouncementBanner supabase={supabase} employeeId={employee.id} clientId={employee.client_id} />
 
         {/* Layer 1 — Dashboard Saya: sama untuk semua karyawan (superadmin tetap karyawan aktif) */}
         <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
