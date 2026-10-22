@@ -26,7 +26,6 @@ import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan
 import { getAttendanceStatus } from '@/lib/attendanceStatus';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
-import { dispatchNotification } from '@/lib/notifyClient';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -258,6 +257,10 @@ export default function AbsensiPage() {
       setKoreksiError('Foto bukti wajib diupload (mis. foto absen fisik, selfie di lokasi kerja, dsb).');
       return;
     }
+    if (!['image/jpeg', 'image/png'].includes(koreksiFoto.type)) {
+      setKoreksiError('Format foto harus JPG atau PNG.');
+      return;
+    }
     if (koreksiFoto.size > UPLOAD_MAX_BYTES) {
       setKoreksiError(`Ukuran foto maksimal ${UPLOAD_MAX_LABEL}. Perkecil foto (mis. turunkan resolusi kamera atau kompres) lalu coba lagi.`);
       return;
@@ -265,56 +268,20 @@ export default function AbsensiPage() {
 
     setKoreksiSaving(true);
     try {
-      // 1. Upload foto bukti ke Google Drive (Shared Drive "Absensi")
+      // Pengajuan lewat rute server (POST /api/attendance/koreksi): foto bukti
+      // di-upload ke Drive dan baris pengajuan dibuat di sana. Nilai before_*,
+      // jam (WIB), dan tautan bukti ditentukan server, bukan dari browser.
       const fd = new FormData();
-      fd.append('file', koreksiFoto);
       fd.append('tanggal', koreksiForm.tanggal);
-      const uploadRes = await fetch('/api/attendance/koreksi-bukti', { method: 'POST', body: fd });
-      const uploadData = await readUploadJson(uploadRes, 'Gagal mengupload foto bukti.');
+      fd.append('jamMasuk', koreksiForm.jamMasuk);
+      fd.append('jamPulang', koreksiForm.jamPulang);
+      fd.append('alasan', koreksiForm.alasan.trim());
+      fd.append('foto', koreksiFoto);
+      const res = await fetch('/api/attendance/koreksi', { method: 'POST', body: fd });
+      const json = await readUploadJson(res, 'Gagal mengirim pengajuan koreksi.');
 
-      // 2. Ambil record attendance existing di tanggal itu (kalau ada) untuk jejak before_*
-      const { data: existingRow } = await supabase
-        .from('attendance')
-        .select('id, clock_in, clock_out, status_telat')
-        .eq('employee_id', employee.id)
-        .eq('tanggal', koreksiForm.tanggal)
-        .maybeSingle();
-
-      const afterClockIn = koreksiForm.jamMasuk
-        ? new Date(`${koreksiForm.tanggal}T${koreksiForm.jamMasuk}:00`).toISOString()
-        : (existingRow?.clock_in || null);
-      const afterClockOut = koreksiForm.jamPulang
-        ? new Date(`${koreksiForm.tanggal}T${koreksiForm.jamPulang}:00`).toISOString()
-        : (existingRow?.clock_out || null);
-
-      // 3. Insert pengajuan koreksi, status pending menunggu approval superadmin
-      const { data: inserted, error: insertError } = await supabase
-        .from('attendance_corrections')
-        .insert([{
-          attendance_id: existingRow?.id || null,
-          employee_id: employee.id,
-          requested_by: employee.id,
-          tanggal: koreksiForm.tanggal,
-          status: 'pending',
-          alasan: koreksiForm.alasan.trim(),
-          before_clock_in: existingRow?.clock_in || null,
-          before_clock_out: existingRow?.clock_out || null,
-          before_status_telat: existingRow?.status_telat ?? null,
-          after_clock_in: afterClockIn,
-          after_clock_out: afterClockOut,
-          foto_bukti_url: uploadData.driveUrl,
-          foto_bukti_drive_id: uploadData.driveFileId,
-        }])
-        .select()
-        .single();
-
-      if (insertError) throw insertError;
-
-      setMyCorrections((prev) => [inserted, ...prev]);
+      setMyCorrections((prev) => [json.correction, ...prev]);
       setShowKoreksiForm(false);
-
-      // Beri tahu superadmin (yang berwenang approve) ada pengajuan baru.
-      dispatchNotification('koreksi_absensi_diajukan', inserted.id);
     } catch (err) {
       setKoreksiError(friendlyCaught(err, 'Gagal mengirim pengajuan koreksi.'));
     } finally {

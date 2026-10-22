@@ -5,24 +5,17 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from 'react';
 import { Banknote, Upload } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { dispatchNotification } from '@/lib/notifyClient';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import Toast from '@/components/employee-list/Toast';
 import { formatRupiah } from '@/lib/format';
-import { friendlyError } from '@/lib/errorMessage';
-import { STATUS_REIMBURSEMENT_LABEL } from '@/lib/reimbursement';
-
-const KATEGORI_OPTIONS = [
-  { value: 'transport', label: 'Transport' },
-  { value: 'kesehatan', label: 'Kesehatan' },
-  { value: 'lainnya', label: 'Lainnya' },
-];
-
-function sanitizeFileName(name) {
-  return name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-}
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, readUploadJson } from '@/lib/uploadLimits';
+import {
+  STATUS_REIMBURSEMENT_LABEL, KATEGORI_REIMBURSEMENT, PLAFON_KLAIM_REIMBURSEMENT,
+  BUKTI_REIMBURSEMENT_MIME, validasiKlaimReimbursement,
+} from '@/lib/reimbursement';
 
 // Sama seperti formatNumberDisplay() di app/kalkulator-pph21 — state form
 // menyimpan digit mentah tanpa titik, ini cuma format tampilannya.
@@ -122,69 +115,51 @@ export default function ReimbursementPage() {
     setForm((f) => ({ ...f, jumlah: raw }));
   };
 
+  // Pengajuan lewat rute server (POST /api/reimbursement): kategori, plafon,
+  // jumlah, format & ukuran bukti, dan bukti ganda dicek ulang di sana. Cek di
+  // sini hanya supaya karyawan dapat pesan cepat tanpa mengupload file dulu.
   const handleSubmit = async (e) => {
     e.preventDefault();
     setFormError(null);
     setSubmitSuccess(false);
 
-    const jumlah = Number(form.jumlah);
-    if (!jumlah || jumlah <= 0) {
-      setFormError('Jumlah klaim wajib diisi dan lebih dari 0.');
-      return;
-    }
-    if (!form.deskripsi.trim()) {
-      setFormError('Deskripsi klaim wajib diisi.');
+    const klaim = validasiKlaimReimbursement(form);
+    if (klaim.error) {
+      setFormError(klaim.error);
       return;
     }
     if (!file) {
-  setFormError('Bukti/kuitansi wajib diupload.');
-  return;
+      setFormError('Bukti/kuitansi wajib diupload.');
+      return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-    setFormError('Ukuran bukti maksimal 10MB.');
-    return;
+    if (!BUKTI_REIMBURSEMENT_MIME[file.type]) {
+      setFormError('Format bukti harus PDF, JPG, atau PNG.');
+      return;
     }
-
-    setSubmitting(true);
-
-    let buktiPath = null;
-    if (file) {
-      buktiPath = `${employeeId}/${Date.now()}-${sanitizeFileName(file.name)}`;
-      const { error: uploadError } = await supabase.storage
-        .from('reimbursement-bukti')
-        .upload(buktiPath, file, { contentType: file.type || 'application/octet-stream' });
-      if (uploadError) {
-        setSubmitting(false);
-        setFormError(friendlyError(uploadError, 'Gagal upload bukti.'));
-        return;
-      }
-    }
-
-    const { data, error } = await supabase
-      .from('reimbursement_requests')
-      .insert([{
-        employee_id: employeeId,
-        kategori: form.kategori,
-        jumlah,
-        deskripsi: form.deskripsi.trim(),
-        bukti_path: buktiPath,
-        status: 'pending',
-      }])
-      .select()
-      .single();
-
-    setSubmitting(false);
-    if (error) {
-      setFormError(friendlyError(error, 'Gagal mengirim klaim, coba lagi.'));
+    if (file.size > UPLOAD_MAX_BYTES) {
+      setFormError(`Ukuran bukti maksimal ${UPLOAD_MAX_LABEL}. Perkecil atau kompres file lalu coba lagi.`);
       return;
     }
 
-    setRequests((prev) => [data, ...prev]);
-    setForm({ kategori: 'transport', jumlah: '', deskripsi: '' });
-    setFile(null);
-    setSubmitSuccess(true);
+    setSubmitting(true);
+    try {
+      const fd = new FormData();
+      fd.append('kategori', klaim.kategori);
+      fd.append('jumlah', String(klaim.jumlah));
+      fd.append('deskripsi', klaim.deskripsi);
+      fd.append('bukti', file);
+      const res = await fetch('/api/reimbursement', { method: 'POST', body: fd });
+      const json = await readUploadJson(res, 'Gagal mengirim klaim, coba lagi.');
 
-    dispatchNotification('reimbursement_diajukan', data.id);
+      setRequests((prev) => [json.request, ...prev]);
+      setForm({ kategori: 'transport', jumlah: '', deskripsi: '' });
+      setFile(null);
+      setSubmitSuccess(true);
+    } catch (err) {
+      setFormError(friendlyCaught(err, 'Gagal mengirim klaim, coba lagi.'));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // Pembatalan lewat rute server (hanya pemilik, hanya pending, update
@@ -246,7 +221,7 @@ export default function ReimbursementPage() {
               onChange={(e) => setForm((f) => ({ ...f, kategori: e.target.value }))}
               className={inputClass}
             >
-              {KATEGORI_OPTIONS.map((k) => (
+              {KATEGORI_REIMBURSEMENT.map((k) => (
                 <option key={k.value} value={k.value}>{k.label}</option>
               ))}
             </select>
@@ -261,6 +236,9 @@ export default function ReimbursementPage() {
               placeholder="150.000"
               className={inputClass}
             />
+            <span className="text-[11px] text-[#9A9A9A]">
+              Maks. {formatRupiah(PLAFON_KLAIM_REIMBURSEMENT[form.kategori])} per klaim
+            </span>
           </label>
         </div>
 
@@ -275,10 +253,10 @@ export default function ReimbursementPage() {
           />
         </label>
 
-        <label className="block text-xs text-[#6B6B6B] mb-1.5">Bukti / Kuitansi (wajib, maks 10MB)</label>
+        <label className="block text-xs text-[#6B6B6B] mb-1.5">Bukti / Kuitansi (wajib, maks {UPLOAD_MAX_LABEL})</label>
         <label className="flex items-center gap-2 border border-dashed border-[#E0E0E0] px-3 py-3 text-xs text-[#6B6B6B] mb-4 cursor-pointer hover:border-madael-red">
         <Upload size={14} />
-        {file ? file.name : 'Pilih atau ambil foto/kuitansi (JPG/PNG/PDF, maks 10MB)'}
+        {file ? file.name : `Pilih atau ambil foto/kuitansi (JPG/PNG/PDF, maks ${UPLOAD_MAX_LABEL})`}
           <input
             type="file"
             accept=".pdf,.jpg,.jpeg,.png"
