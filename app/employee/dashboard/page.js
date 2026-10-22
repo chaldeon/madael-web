@@ -4,7 +4,7 @@ import GlobalSearchBar from '@/components/GlobalSearchBar';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronDown, Lock, Megaphone, Pin, X } from 'lucide-react';
+import { ChevronDown, ClipboardCheck, Lock, Megaphone, Pin, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { MODULE_REGISTRY, EXPLICIT_ONLY_MODULES, PENDING_QUEUE_MODULES, isModuleGranted } from '@/lib/employeeModules';
 import KontrakBerakhirWidget from '@/components/KontrakBerakhirWidget';
@@ -213,6 +213,7 @@ export default function EmployeeDashboardPage() {
   // gagal = badge tidak tampil, dashboard tetap jalan. Dimuat ulang saat tab
   // kembali aktif supaya angka tidak basi kalau dashboard dibiarkan terbuka.
   const hasPendingQueueAccess = !!employee && PENDING_QUEUE_MODULES.some(hasAccess);
+  const pendingTotal = Object.values(pendingCounts).reduce((sum, n) => sum + (Number(n) || 0), 0);
   useEffect(() => {
     if (!hasPendingQueueAccess) return undefined;
 
@@ -285,6 +286,30 @@ export default function EmployeeDashboardPage() {
 
       <div className="max-w-[1100px] mx-auto px-6 py-10">
         <AnnouncementBanner supabase={supabase} employeeId={employee.id} clientId={employee.client_id} />
+
+        {hasPendingQueueAccess && (
+          <Link
+            href="/employee/persetujuan"
+            className="flex items-center justify-between gap-4 bg-white border border-[#E0E0E0] border-l-4 border-l-madael-red px-5 py-4 mb-8 no-underline hover:bg-[#FAFAFA] transition-colors"
+          >
+            <span className="flex items-center gap-3">
+              <ClipboardCheck size={18} className="text-madael-red" />
+              <span>
+                <span className="block text-sm font-medium text-black">Inbox Persetujuan</span>
+                <span className="block text-xs text-[#6B6B6B]">
+                  {pendingTotal > 0
+                    ? `${pendingTotal} pengajuan menunggu keputusanmu`
+                    : 'Antrean pengajuan dari semua modul yang kamu kelola'}
+                </span>
+              </span>
+            </span>
+            {pendingTotal > 0 && (
+              <span className="shrink-0 min-w-[24px] text-center bg-madael-red text-white text-xs font-medium px-2 py-1">
+                {pendingTotal}
+              </span>
+            )}
+          </Link>
+        )}
 
         {/* Layer 1 — Dashboard Saya: sama untuk semua karyawan (superadmin tetap karyawan aktif) */}
         <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
