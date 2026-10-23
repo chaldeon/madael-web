@@ -9,7 +9,6 @@ import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { logActivity } from '@/lib/activityLogClient';
-import { dispatchNotification } from '@/lib/notifyClient';
 import { isTelatEfektif, MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
 
 import LoadingState from '@/components/LoadingState';
@@ -552,39 +551,31 @@ export default function SemuaKaryawanPage() {
     setProcessingId(rejectingRow.id);
     setKoreksiError(null);
     try {
-      const { data: rejectedRows, error } = await supabase
-        .from('attendance_corrections')
-        .update({
-          status: 'rejected',
-          reviewed_by: employee.id,
-          reviewed_at: new Date().toISOString(),
-          catatan_reviewer: rejectCatatan.trim() || null,
-        })
-        .eq('id', rejectingRow.id)
-        .eq('status', 'pending') // jangan timpa pengajuan yang sudah dibatalkan karyawan
-        .select('id');
-      if (error) throw error;
-      if (!rejectedRows || rejectedRows.length === 0) {
-        setRejectingRow(null);
-        loadKoreksi();
-        setKoreksiError('Pengajuan ini sudah tidak berstatus menunggu (mungkin dibatalkan karyawan atau sudah diproses). Daftar dimuat ulang.');
+      // Seluruh proses (cek akses, update bersyarat pending -> rejected, log
+      // aktivitas, notifikasi) ada di server: lihat
+      // app/api/attendance/koreksi/[id]/reject/route.js.
+      const catatan = rejectCatatan.trim();
+      const res = await fetch(`/api/attendance/koreksi/${rejectingRow.id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ catatan }),
+      });
+      const result = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (res.status === 409) {
+          setRejectingRow(null);
+          loadKoreksi(); // loadKoreksi mengosongkan error, jadi set pesan SETELAH dipanggil
+        }
+        setKoreksiError(result.error || 'Gagal menolak pengajuan koreksi.');
         return;
       }
 
       setCorrections((prev) =>
         koreksiStatusFilter === 'all'
-          ? prev.map((r) => (r.id === rejectingRow.id ? { ...r, status: 'rejected', catatan_reviewer: rejectCatatan.trim() || null } : r))
+          ? prev.map((r) => (r.id === rejectingRow.id ? { ...r, status: 'rejected', catatan_reviewer: result.catatan_reviewer ?? null } : r))
           : prev.filter((r) => r.id !== rejectingRow.id)
       );
-
-      logActivity({
-        aksi: 'reject_koreksi_absensi',
-        targetTable: 'attendance_corrections',
-        targetId: rejectingRow.id,
-        detail: { employee_id: rejectingRow.employee_id, tanggal: rejectingRow.tanggal, catatan: rejectCatatan.trim() || null },
-      });
-
-      dispatchNotification('koreksi_absensi_ditolak', rejectingRow.id);
       setRejectingRow(null);
     } catch (err) {
       setKoreksiError(friendlyCaught(err, 'Gagal menolak pengajuan koreksi.'));
