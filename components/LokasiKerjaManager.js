@@ -11,8 +11,26 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import LokasiQrDialog from '@/components/LokasiQrDialog';
 import { friendlyError } from '@/lib/errorMessage';
+import { validateLokasiInput, LOKASI_RADIUS_MIN, LOKASI_RADIUS_MAX } from '@/lib/workLocationValidation';
 
 const EMPTY_FORM = { nama: '', latitude: '', longitude: '', radius_meter: 150, aktif: true };
+
+// Semua penulisan lokasi kerja lewat API route (divalidasi & dicek akses di
+// server); browser hanya membaca. Return { ok, data } atau { ok: false, error }.
+async function callApi(url, method, body) {
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return { ok: false, error: data?.error || 'Permintaan gagal. Silakan coba lagi.' };
+    return { ok: true, data };
+  } catch {
+    return { ok: false, error: 'Koneksi bermasalah. Periksa internet kamu lalu coba lagi.' };
+  }
+}
 
 const inputClass =
   'border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors w-full';
@@ -29,6 +47,7 @@ export default function LokasiKerjaManager({ supabase }) {
   const [saving, setSaving] = useState(false);
   const [locatingMe, setLocatingMe] = useState(false);
   const [qrLoc, setQrLoc] = useState(null); // lokasi yang dialog QR-nya sedang dibuka
+  const [actionError, setActionError] = useState(null); // gagal ubah status / hapus dari tabel
 
   // Assignment lokasi -> karyawan. Karyawan yang belum di-assign ke lokasi
   // manapun tetap bisa absen (dicek ke semua lokasi aktif) — assignment cuma
@@ -97,27 +116,16 @@ export default function LokasiKerjaManager({ supabase }) {
     setAssignSaving(true);
     setAssignError(null);
 
-    // Ganti seluruh assignment untuk lokasi ini: hapus semua baris lama punya
-    // lokasi ini, lalu insert ulang sesuai centang saat ini. Lebih sederhana
-    // & aman daripada diff manual, dan datanya kecil (per lokasi per karyawan).
-    const del = await supabase.from('employee_work_locations').delete().eq('work_location_id', assigningLoc.id);
-    if (del.error) {
-      setAssignError(friendlyError(del.error, 'Gagal menyimpan assignment.'));
+    // Server menghitung selisih & memvalidasi karyawan (harus aktif).
+    const res = await callApi(
+      `/api/attendance/lokasi/${encodeURIComponent(assigningLoc.id)}/karyawan`,
+      'PUT',
+      { employeeIds: Array.from(assignedIds) }
+    );
+    if (!res.ok) {
+      setAssignError(res.error);
       setAssignSaving(false);
       return;
-    }
-
-    const rows = Array.from(assignedIds).map((employeeId) => ({
-      employee_id: employeeId,
-      work_location_id: assigningLoc.id,
-    }));
-    if (rows.length > 0) {
-      const ins = await supabase.from('employee_work_locations').insert(rows);
-      if (ins.error) {
-        setAssignError(friendlyError(ins.error, 'Gagal menyimpan assignment.'));
-        setAssignSaving(false);
-        return;
-      }
     }
 
     setAssignSaving(false);
@@ -166,39 +174,20 @@ export default function LokasiKerjaManager({ supabase }) {
 
   const handleSave = async () => {
     setFormError(null);
-    const lat = parseFloat(form.latitude);
-    const lng = parseFloat(form.longitude);
-    const radius = parseInt(form.radius_meter, 10);
-
-    if (!form.nama.trim()) {
-      setFormError('Nama lokasi wajib diisi.');
-      return;
-    }
-    if (Number.isNaN(lat) || Number.isNaN(lng)) {
-      setFormError('Koordinat latitude/longitude tidak valid.');
-      return;
-    }
-    if (Number.isNaN(radius) || radius <= 0) {
-      setFormError('Radius harus angka positif (meter).');
+    // Cek cepat di browser; aturan yang sama dijalankan ulang di server.
+    const parsed = validateLokasiInput(form);
+    if (!parsed.ok) {
+      setFormError(parsed.error);
       return;
     }
 
     setSaving(true);
-    const payload = {
-      nama: form.nama.trim(),
-      latitude: lat,
-      longitude: lng,
-      radius_meter: radius,
-      aktif: form.aktif,
-    };
-
-    const { error } = editingId
-      ? await supabase.from('work_locations').update(payload).eq('id', editingId)
-      : await supabase.from('work_locations').insert([payload]);
-
+    const res = editingId
+      ? await callApi(`/api/attendance/lokasi/${encodeURIComponent(editingId)}`, 'PATCH', parsed.value)
+      : await callApi('/api/attendance/lokasi', 'POST', parsed.value);
     setSaving(false);
-    if (error) {
-      setFormError(friendlyError(error, 'Gagal menyimpan lokasi.'));
+    if (!res.ok) {
+      setFormError(res.error);
       return;
     }
 
@@ -207,7 +196,12 @@ export default function LokasiKerjaManager({ supabase }) {
   };
 
   const handleToggleAktif = async (loc) => {
-    await supabase.from('work_locations').update({ aktif: !loc.aktif }).eq('id', loc.id);
+    setActionError(null);
+    const res = await callApi(`/api/attendance/lokasi/${encodeURIComponent(loc.id)}`, 'PATCH', { aktif: !loc.aktif });
+    if (!res.ok) {
+      setActionError(res.error);
+      return;
+    }
     loadLocations();
   };
 
@@ -215,7 +209,12 @@ export default function LokasiKerjaManager({ supabase }) {
     if (!window.confirm(`Hapus lokasi "${loc.nama}"? Data absensi lama tidak berubah, cuma lokasi ini tidak dipakai lagi untuk cek radius ke depannya.`)) {
       return;
     }
-    await supabase.from('work_locations').delete().eq('id', loc.id);
+    setActionError(null);
+    const res = await callApi(`/api/attendance/lokasi/${encodeURIComponent(loc.id)}`, 'DELETE');
+    if (!res.ok) {
+      setActionError(res.error);
+      return;
+    }
     loadLocations();
   };
 
@@ -239,6 +238,8 @@ export default function LokasiKerjaManager({ supabase }) {
           <Plus size={14} /> Tambah Lokasi
         </button>
       </div>
+
+      {actionError && <p className="text-xs text-red-600 mb-3">{actionError}</p>}
 
       {locations.length === 0 ? (
         <div className="bg-white border border-[#E0E0E0]">
@@ -364,10 +365,12 @@ export default function LokasiKerjaManager({ supabase }) {
             </button>
 
             <label className="flex flex-col gap-1 mb-4">
-              <span className="text-xs text-[#6B6B6B]">Radius Toleransi (meter)</span>
+              <span className="text-xs text-[#6B6B6B]">Radius Toleransi (meter, {LOKASI_RADIUS_MIN}–{LOKASI_RADIUS_MAX})</span>
               <input
                 type="number"
-                min="1"
+                min={LOKASI_RADIUS_MIN}
+                max={LOKASI_RADIUS_MAX}
+                step="1"
                 value={form.radius_meter}
                 onChange={(e) => setForm((f) => ({ ...f, radius_meter: e.target.value }))}
                 className={inputClass}
