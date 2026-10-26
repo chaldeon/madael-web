@@ -8,6 +8,8 @@ import { ChevronDown, ClipboardCheck, Lock, Megaphone, Pin, X } from 'lucide-rea
 import { createClient } from '@/lib/supabase-browser';
 import { MODULE_REGISTRY, EXPLICIT_ONLY_MODULES, PENDING_QUEUE_MODULES, isModuleGranted } from '@/lib/employeeModules';
 import KontrakBerakhirWidget from '@/components/KontrakBerakhirWidget';
+import KehadiranHariIniWidget from '@/components/KehadiranHariIniWidget';
+import { KEHADIRAN_MODULES } from '@/lib/kehadiranHariIni';
 import EmployeeHeader from '@/components/EmployeeHeader';
 import QuickClockInCard from '@/components/QuickClockInCard';
 import { missingFieldsForEmployee, EMPLOYEE_COMPLETENESS_COLUMNS } from '@/lib/dataCompleteness';
@@ -207,6 +209,8 @@ export default function EmployeeDashboardPage() {
   const hasAnyAccess = (mod) => hasAccess(mod.key) || (mod.altKeys || []).some(hasAccess);
   // Widget kontrak berakhir: untuk HR yang mengelola data karyawan/payroll.
   const canSeeKontrakWidget = hasAccess('employee_list') || hasAccess('payroll');
+  // Widget kehadiran hari ini: sama dengan gate route /api/dashboard/kehadiran-hari-ini.
+  const canSeeKehadiranWidget = KEHADIRAN_MODULES.some(hasAccess);
   // Pencarian global: tiap sumber hanya untuk pemegang modul sumbernya. Invoice
   // khusus superadmin karena halaman invoice menolak non-superadmin.
   const canSearchEmployees = hasAccess('employee_list');
@@ -346,6 +350,7 @@ export default function EmployeeDashboardPage() {
             </h2>
             <p className="text-sm text-[#6B6B6B] mb-8">Semua modul kerja — akses penuh sebagai superadmin.</p>
 
+            {canSeeKehadiranWidget && <KehadiranHariIniWidget />}
             {canSeeKontrakWidget && <KontrakBerakhirWidget />}
 
             {(() => {
@@ -394,6 +399,7 @@ export default function EmployeeDashboardPage() {
             </h2>
             <p className="text-sm text-[#6B6B6B] mb-8">Modul kerjaan sesuai akses kamu.</p>
 
+            {canSeeKehadiranWidget && <KehadiranHariIniWidget />}
             {canSeeKontrakWidget && <KontrakBerakhirWidget />}
 
             {(() => {
