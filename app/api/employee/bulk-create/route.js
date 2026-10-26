@@ -6,6 +6,7 @@ import { DEFAULT_MODULE_ACCESS } from '@/lib/employeeModules';
 import { highestEmployeeNumber, formatEmployeeId } from '@/lib/employeeId';
 import { logActivities } from '@/lib/activityLog';
 import { friendlyError, friendlyAuthError } from '@/lib/errorMessage';
+import { ambilKebijakanCuti } from '@/lib/leaveServer';
 
 const VALID_STATUS = ['Aktif', 'Nonaktif'];
 
@@ -75,6 +76,9 @@ export async function POST(request) {
     }
 
     const admin = createAdminClient();
+
+    // Jatah cuti awal karyawan baru mengikuti kebijakan kuota cuti (gagal baca -> default 12).
+    const kebijakanCuti = await ambilKebijakanCuti(admin);
 
     // Load sekali di awal: daftar perusahaan (buat resolve nama -> client_id,
     // sekaligus bikin baru kalau belum ada) dan employee_id tertinggi yang
@@ -213,7 +217,7 @@ export async function POST(request) {
           tunjangan: 0,
           komponen_lain: {},
           linked_employee_id: empRow.id,
-          jatah_cuti_tahunan: 12,
+          jatah_cuti_tahunan: kebijakanCuti.kebijakan.jatah_default,
         },
       ]);
       if (masterError) {

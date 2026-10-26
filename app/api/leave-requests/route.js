@@ -136,7 +136,7 @@ export async function POST(request) {
     // mendapat peringatan saat menyetujui. Jenis yang tidak memotong kuota
     // (sakit/izin) tidak dicek.
     if (ctx.master && potongKuota(jenis)) {
-      const { sisa } = hitungSisaCuti(ctx.master, tahun);
+      const { sisa, belumBerhak, berhakMulai } = hitungSisaCuti(ctx.master, tahun, ctx.kebijakan);
 
       const { data: pendingRows, error: pendingError } = await admin
         .from('leave_requests')
@@ -157,6 +157,12 @@ export async function POST(request) {
       const tersedia = Math.max(0, sisa - hariPending);
 
       if (jumlahHari > tersedia) {
+        if (belumBerhak) {
+          return NextResponse.json(
+            { error: `Hak cuti tahunan kamu baru terbuka mulai ${formatTanggal(berhakMulai)} (setelah masa kerja minimum terpenuhi).` },
+            { status: 400 }
+          );
+        }
         const catatan = hariPending > 0 ? ` (${hariPending} hari sudah dipakai pengajuan lain yang menunggu persetujuan)` : '';
         return NextResponse.json(
           { error: `Pengajuan ${jumlahHari} hari kerja melebihi sisa kuota cuti: tersedia ${tersedia} hari${catatan}.` },

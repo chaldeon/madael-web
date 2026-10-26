@@ -46,7 +46,7 @@ export default function LeaveRequestPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
-  const [balance, setBalance] = useState(null); // { linked, jatah, terpakai, sisa, tahun }
+  const [balance, setBalance] = useState(null); // { linked, jatah, carryOver, terpakai, sisa, tahun, belumBerhak, berhakMulai }
   const [balanceLoading, setBalanceLoading] = useState(true);
 
   const [form, setForm] = useState({ jenis: JENIS_CUTI_DEFAULT, tanggalMulai: '', tanggalSelesai: '', alasan: '' });
@@ -263,6 +263,14 @@ export default function LeaveRequestPage() {
             </div>
             <p className="text-xs text-[#9A9A9A]">{balance.terpakai} hari terpakai</p>
           </div>
+        )}
+        {balance?.linked && balance.carryOver > 0 && (
+          <p className="text-xs text-[#6B6B6B] mt-2">Termasuk {balance.carryOver} hari carry-over dari tahun lalu.</p>
+        )}
+        {balance?.linked && balance.belumBerhak && balance.berhakMulai && (
+          <p className="text-xs text-amber-700 mt-2">
+            Hak cuti tahunan kamu baru terbuka mulai {new Date(balance.berhakMulai + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })} (setelah masa kerja minimum terpenuhi).
+          </p>
         )}
       </div>
 

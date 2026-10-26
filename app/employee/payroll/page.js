@@ -20,6 +20,7 @@ import HitungModal from '@/components/payroll/HitungModal';
 import { currentMonthValue, EMPTY_FORM, totalTunjangan, SORT_COLUMNS, objToPairs, pairsToObj } from '@/lib/payrollConfig';
 import { formatRupiah } from '@/lib/format';
 import { validateKepegawaian } from '@/lib/kepegawaian';
+import { tahunSekarang } from '@/lib/leave';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 
@@ -78,7 +79,7 @@ export default function PayrollManagerPage() {
       supabase.from('companies').select('id, nama_perusahaan').order('nama_perusahaan', { ascending: true }),
       supabase
         .from('employees_master')
-        .select('id, nama, client_id, posisi, status, tanggal_bergabung, jenis_hubungan_kerja, kontrak_berakhir, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan, nama_rekening, no_rekening, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, created_at, drive_file_id, drive_file_name, drive_file_link, employees:linked_employee_id ( nama )')
+        .select('id, nama, client_id, posisi, status, tanggal_bergabung, jenis_hubungan_kerja, kontrak_berakhir, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan, nama_rekening, no_rekening, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, cuti_carry_over, cuti_carry_over_tahun, created_at, drive_file_id, drive_file_name, drive_file_link, employees:linked_employee_id ( nama )')
         .order('created_at', { ascending: false }),
       supabase.from('employees').select('id, nama, client_id').eq('status', 'Aktif').order('nama'),
       // Fase 1.5 — dipakai hanya untuk badge "Jadwal belum diisi" di tabel
@@ -173,6 +174,8 @@ export default function PayrollManagerPage() {
       nama_rekening: row.nama_rekening || '',
       no_rekening: row.no_rekening || '',
       jatah_cuti_tahunan: row.jatah_cuti_tahunan ?? 12,
+      // Hanya carry-over yang tercatat untuk tahun ini; selain itu 0 (otomatis).
+      cuti_carry_over: row.cuti_carry_over_tahun === tahunSekarang() ? (row.cuti_carry_over || 0) : 0,
     };
     formBaselineRef.current = initial;
     setForm(initial);
@@ -211,6 +214,10 @@ export default function PayrollManagerPage() {
       nama_rekening: form.nama_rekening.trim() || null,
       no_rekening: form.no_rekening.trim() || null,
       jatah_cuti_tahunan: Number(form.jatah_cuti_tahunan) || 12,
+      // Carry-over ditulis hanya kalau HR mengubahnya, supaya hitungan otomatis tidak terkunci.
+      ...(Number(form.cuti_carry_over) !== Number(formBaselineRef.current.cuti_carry_over)
+        ? { cuti_carry_over: Number(form.cuti_carry_over) || 0, cuti_carry_over_tahun: tahunSekarang() }
+        : {}),
     };
 
     const isEdit = !!form.id;
