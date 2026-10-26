@@ -283,6 +283,9 @@ export default function EmployeeDashboardPage() {
     <section className="min-h-screen bg-[#F4F4F4]">
       <EmployeeHeader
         onLogout={handleLogout}
+        actions={
+          hasPendingQueueAccess ? <InboxButton count={pendingTotal} /> : null
+        }
         left={
           <div>
             <p className="text-sm font-semibold text-black">{employee.nama}</p>
@@ -304,30 +307,6 @@ export default function EmployeeDashboardPage() {
 
       <div className="max-w-[1100px] mx-auto px-6 py-10">
         <AnnouncementBanner supabase={supabase} employeeId={employee.id} clientId={employee.client_id} />
-
-        {hasPendingQueueAccess && (
-          <Link
-            href="/employee/persetujuan"
-            className="flex items-center justify-between gap-4 bg-white border border-[#E0E0E0] border-l-4 border-l-madael-red px-5 py-4 mb-8 no-underline hover:bg-[#FAFAFA] transition-colors"
-          >
-            <span className="flex items-center gap-3">
-              <ClipboardCheck size={18} className="text-madael-red" />
-              <span>
-                <span className="block text-sm font-medium text-black">Inbox Persetujuan</span>
-                <span className="block text-xs text-[#6B6B6B]">
-                  {pendingTotal > 0
-                    ? `${pendingTotal} pengajuan menunggu keputusanmu`
-                    : 'Antrean pengajuan dari semua modul yang kamu kelola'}
-                </span>
-              </span>
-            </span>
-            {pendingTotal > 0 && (
-              <span className="shrink-0 min-w-[24px] text-center bg-madael-red text-white text-xs font-medium px-2 py-1">
-                {pendingTotal}
-              </span>
-            )}
-          </Link>
-        )}
 
         {/* Layer 1 — Dashboard Saya: sama untuk semua karyawan (superadmin tetap karyawan aktif) */}
         <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em] mb-1">
@@ -428,6 +407,31 @@ export default function EmployeeDashboardPage() {
         )}
       </div>
     </section>
+  );
+}
+
+// Tombol Inbox Persetujuan di header (sebelah lonceng notifikasi). Angka memakai
+// pendingTotal yang sudah dihitung dashboard, jadi tanpa request baru. Teks
+// "Inbox" tampil di layar >= sm; di mobile hanya ikon dengan angka menempel di
+// pojok, seperti badge lonceng. Selalu tampil bagi approver, juga saat antrean
+// kosong, supaya posisinya tetap konsisten.
+function InboxButton({ count }) {
+  const label = count > 0 ? `Inbox Persetujuan, ${count} menunggu` : 'Inbox Persetujuan';
+  return (
+    <Link
+      href="/employee/persetujuan"
+      title={label}
+      aria-label={label}
+      className="relative flex items-center gap-1.5 p-2 sm:px-3 text-[#6B6B6B] hover:text-black transition-colors no-underline"
+    >
+      <ClipboardCheck size={18} className="text-madael-red" />
+      <span className="hidden sm:inline text-[13px] font-medium">Inbox</span>
+      {count > 0 && (
+        <span className="absolute top-0.5 right-0.5 sm:static min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-madael-red text-white text-[10px] font-medium leading-none rounded-full">
+          {count > 99 ? '99+' : count}
+        </span>
+      )}
+    </Link>
   );
 }
 

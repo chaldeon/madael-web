@@ -124,14 +124,14 @@ export default function PersetujuanPage() {
   }
 
   const filterButtonClass = (active) =>
-    `px-4 py-2 text-xs font-medium tracking-[0.02em] border transition-colors cursor-pointer ${
+    `px-3 py-1 text-[11px] font-medium tracking-[0.02em] border transition-colors cursor-pointer ${
       active
         ? 'bg-madael-red text-white border-madael-red'
         : 'bg-white text-[#6B6B6B] border-[#E0E0E0] hover:text-black'
     }`;
 
   const selectClass =
-    'border border-[#E0E0E0] px-3 py-2 text-xs text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
+    'border border-[#E0E0E0] px-2 py-1 text-[11px] text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
 
   const emptyMessage =
     items.length === 0
@@ -139,33 +139,34 @@ export default function PersetujuanPage() {
       : 'Tidak ada pengajuan yang cocok dengan filter ini.';
 
   return (
-    <div className="max-w-[860px] mx-auto px-6 py-10">
-      <div className="flex items-start justify-between gap-4 mb-6">
-        <div>
-          <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Inbox Persetujuan</h1>
-          <p className="text-sm text-[#6B6B6B] mt-1">
-            Pengajuan yang menunggu keputusanmu dari semua modul yang kamu kelola.
-            {totalPending > 0 ? ` ${totalPending} menunggu.` : ''}
-          </p>
-        </div>
+    <div className="max-w-[860px] mx-auto px-6 py-6">
+      <div className="flex items-baseline justify-between gap-4 mb-3">
+        <h1 className="font-serif text-[22px] font-normal text-black tracking-[-0.02em] min-w-0">
+          Inbox Persetujuan
+          {totalPending > 0 && (
+            <span className="font-sans text-xs text-[#6B6B6B] tracking-normal ml-2">
+              {totalPending} menunggu
+            </span>
+          )}
+        </h1>
         <button
           type="button"
           onClick={refresh}
           disabled={refreshing}
-          className="shrink-0 flex items-center gap-2 text-xs font-medium text-madael-red hover:text-madael-dark disabled:opacity-50 cursor-pointer"
+          className="shrink-0 flex items-center gap-1.5 text-xs font-medium text-madael-red hover:text-madael-dark disabled:opacity-50 cursor-pointer"
         >
-          <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
           {refreshing ? 'Memuat...' : 'Muat ulang'}
         </button>
       </div>
 
       {failed.length > 0 && (
-        <p className="text-xs text-red-600 mb-4">
+        <p className="text-xs text-red-600 mb-3">
           Antrean {failed.join(', ')} gagal dimuat, jadi belum tampil di sini. Coba muat ulang atau buka halaman modulnya langsung.
         </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-3 mb-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3">
         <div className="flex flex-wrap">
           <button
             type="button"
@@ -202,28 +203,45 @@ export default function PersetujuanPage() {
           <EmptyState message={emptyMessage} icon={ClipboardCheck} />
         ) : (
           visible.map((item) => (
+            // Baris compact (± 44px di desktop). Di mobile ringkasan turun ke
+            // baris kedua. Slot kiri (pilih) dan slot kanan (aksi) disiapkan
+            // untuk item #4 (approve/tolak langsung + bulk): #4 cukup mengisi
+            // keduanya tanpa mengubah tata letak lagi.
             <div
               key={item.id}
-              className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 border-b border-[#F4F4F4] last:border-0"
+              className="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 px-4 py-2 sm:min-h-[44px] border-b border-[#F4F4F4] last:border-0"
             >
-              <div className="min-w-0 flex-1 basis-[260px]">
-                <p className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-[#F4F4F4] text-[#6B6B6B] uppercase">
-                    {item.jenis}
-                  </span>
-                  <span className="text-sm font-medium text-black">{item.pemohon}</span>
-                </p>
-                <p className="text-sm text-black mt-1 break-words">{item.ringkasan}</p>
-                <p className="text-xs text-[#9A9A9A] mt-1">
-                  Diajukan {formatWaktu(item.diajukan)} · {lamaMenunggu(item.diajukan)}
-                </p>
-              </div>
-              <Link
-                href={item.href}
-                className="shrink-0 bg-madael-red text-white px-5 py-2 text-xs font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors no-underline"
+              <div className="shrink-0 empty:hidden">{/* slot kiri: checkbox pilih (#4) */}</div>
+              <span className="shrink-0 text-[10px] font-medium tracking-[0.04em] px-1.5 py-0.5 bg-[#F4F4F4] text-[#6B6B6B] uppercase">
+                {item.jenis}
+              </span>
+              <span
+                className="min-w-0 flex-1 sm:flex-none sm:max-w-[180px] truncate text-[13px] font-medium text-black"
+                title={item.pemohon}
               >
-                Tinjau
-              </Link>
+                {item.pemohon}
+              </span>
+              <span
+                className="order-last basis-full sm:order-none sm:basis-0 min-w-0 sm:flex-1 text-[13px] text-[#4A4A4A] break-words line-clamp-2 sm:truncate"
+                title={item.ringkasan}
+              >
+                {item.ringkasan}
+              </span>
+              <span
+                className="shrink-0 text-xs text-[#9A9A9A] whitespace-nowrap"
+                title={`Diajukan ${formatWaktu(item.diajukan)}`}
+              >
+                {lamaMenunggu(item.diajukan)}
+              </span>
+              <div className="shrink-0 flex items-center gap-2">
+                {/* slot kanan: tombol aksi Setujui/Tolak (#4) ditambahkan sebelum Tinjau */}
+                <Link
+                  href={item.href}
+                  className="bg-madael-red text-white px-3 py-1.5 text-xs font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors no-underline"
+                >
+                  Tinjau
+                </Link>
+              </div>
             </div>
           ))
         )}

@@ -16,11 +16,14 @@ import NotificationBell from '@/components/NotificationBell';
 //               Karyawan, dsb). Dirender di baris terpisah di bawah header
 //               utama, bukan dijejalkan sebelah logo — sebelumnya numpuk
 //               jadi 2 baris sempit dan kelihatan berantakan.
+// `actions`   : tombol kecil opsional di baris kanan, tepat sebelum lonceng
+//               notifikasi (mis. tombol Inbox Persetujuan di Dashboard).
+//               Halaman lain yang tidak mengirim prop ini tidak berubah.
 // `onLogout`  : handler tombol logout, tetap di-pass dari tiap layout karena
 //               tiap layout sudah punya instance `supabase`/`router` sendiri
 // `printHidden`: true untuk halaman yang punya mode print (documents, list,
 //               crm, statistics, payslip) — ikut pola print:hidden yang sudah ada
-export default function EmployeeHeader({ left, subnav, search, onLogout, printHidden = false }) {
+export default function EmployeeHeader({ left, subnav, search, actions, onLogout, printHidden = false }) {
   return (
     <div className={`${printHidden ? 'print:hidden ' : ''}sticky top-0 z-[999] bg-white`}>
       {/* Baris utama: logo (jalan balik ke website publik) + info ringkas + notif/logout */}
@@ -54,6 +57,7 @@ export default function EmployeeHeader({ left, subnav, search, onLogout, printHi
         {search && <div className="flex-1 flex justify-center px-6">{search}</div>}
 
         <div className="flex items-center gap-1 shrink-0">
+          {actions}
           <NotificationBell />
           <button
             type="button"
