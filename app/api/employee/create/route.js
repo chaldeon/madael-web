@@ -6,6 +6,7 @@ import { DEFAULT_MODULE_ACCESS } from '@/lib/employeeModules';
 import { nextEmployeeId } from '@/lib/employeeId';
 import { logActivity } from '@/lib/activityLog';
 import { friendlyError, friendlyAuthError } from '@/lib/errorMessage';
+import { ambilKebijakanCuti } from '@/lib/leaveServer';
 
 export async function POST(request) {
   try {
@@ -133,6 +134,8 @@ export async function POST(request) {
     // di TODO alur data karyawan. Kegagalan di sini tidak fatal — employee
     // tetap berhasil dibuat, superadmin tinggal tambah manual lewat Payroll
     // Manager kalau baris draft ini gagal dibuat.
+    // Jatah awal mengikuti kebijakan kuota cuti (gagal baca -> default 12).
+    const kebijakanCuti = await ambilKebijakanCuti(admin);
     const { error: masterError } = await admin.from('employees_master').insert([
       {
         nama: empRow.nama,
@@ -143,7 +146,7 @@ export async function POST(request) {
         tunjangan: 0,
         komponen_lain: {},
         linked_employee_id: empRow.id,
-        jatah_cuti_tahunan: 12,
+        jatah_cuti_tahunan: kebijakanCuti.kebijakan.jatah_default,
       },
     ]);
     if (masterError) {

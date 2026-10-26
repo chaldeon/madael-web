@@ -119,7 +119,7 @@ export async function POST(request, { params }) {
         .maybeSingle();
 
     const kembalikanKuota = (delta) =>
-      ctx.master ? ubahKuotaTerpakai(admin, ctx.master.id, tahun, delta) : Promise.resolve(null);
+      ctx.master ? ubahKuotaTerpakai(admin, ctx.master.id, tahun, delta, { kebijakan: ctx.kebijakan }) : Promise.resolve(null);
 
     let hasil; // { data, error } dari update status
     let jumlahHari = hariDariJadwal;
@@ -160,20 +160,20 @@ export async function POST(request, { params }) {
       if (!potong) {
         // sakit/izin: tidak ada potongan kuota
       } else if (ctx.master) {
-        const q = await ubahKuotaTerpakai(admin, ctx.master.id, tahun, jumlahHari, { batasiJatah: true });
+        const q = await ubahKuotaTerpakai(admin, ctx.master.id, tahun, jumlahHari, { batasiJatah: true, kebijakan: ctx.kebijakan });
         if (!q.ok) {
           if (q.reason === 'kuota') {
-            return NextResponse.json(
-              { error: `Sisa kuota tidak cukup: butuh ${jumlahHari} hari, sisa ${q.sisa} dari ${q.jatah} hari. Naikkan jatah di Payroll Manager atau tolak pengajuan ini.` },
-              { status: 409 }
-            );
+            const pesanKuota = q.belumBerhak
+              ? `Karyawan ini belum berhak cuti tahunan (hak cuti terbuka mulai ${formatTanggal(q.berhakMulai)} sesuai kebijakan masa kerja). Tolak pengajuan ini.`
+              : `Sisa kuota tidak cukup: butuh ${jumlahHari} hari, sisa ${q.sisa} dari ${q.jatah} hari. Naikkan jatah di Payroll Manager atau tolak pengajuan ini.`;
+            return NextResponse.json({ error: pesanKuota }, { status: 409 });
           }
           if (q.reason === 'konflik') {
             return NextResponse.json({ error: 'Kuota sedang diubah proses lain. Coba lagi.' }, { status: 409 });
           }
           return NextResponse.json({ error: `Gagal memperbarui kuota: ${friendlyError(q.error ?? q.message, 'terjadi kesalahan pada server.', { context: 'Ubah kuota cuti' })}` }, { status: 500 });
         }
-        kuota = { master_id: ctx.master.id, cuti_terpakai: q.terpakai, cuti_terpakai_tahun: q.tahun };
+        kuota = { master_id: ctx.master.id, cuti_terpakai: q.terpakai, cuti_terpakai_tahun: q.tahun, ...q.carry };
       } else {
         warning = 'Cuti disetujui. Karyawan ini belum terhubung ke data master (Payroll), sisa kuota tidak diperbarui.';
       }
@@ -195,12 +195,12 @@ export async function POST(request, { params }) {
 
       let sudahKembali = false;
       if (potong && ctx.master && tahunSama && jumlahHari > 0) {
-        const q = await ubahKuotaTerpakai(admin, ctx.master.id, tahun, -jumlahHari);
+        const q = await ubahKuotaTerpakai(admin, ctx.master.id, tahun, -jumlahHari, { kebijakan: ctx.kebijakan });
         if (!q.ok) {
           const pesan = q.reason === 'konflik' ? 'Kuota sedang diubah proses lain. Coba lagi.' : `Gagal mengembalikan kuota: ${friendlyError(q.error ?? q.message, 'terjadi kesalahan pada server.', { context: 'Kembalikan kuota cuti' })}`;
           return NextResponse.json({ error: pesan }, { status: q.reason === 'konflik' ? 409 : 500 });
         }
-        kuota = { master_id: ctx.master.id, cuti_terpakai: q.terpakai, cuti_terpakai_tahun: q.tahun };
+        kuota = { master_id: ctx.master.id, cuti_terpakai: q.terpakai, cuti_terpakai_tahun: q.tahun, ...q.carry };
         sudahKembali = true;
       } else if (potong && !ctx.master) {
         warning = 'Cuti dibatalkan. Karyawan ini belum terhubung ke data master (Payroll), kuota tidak diubah.';

@@ -105,6 +105,12 @@ export default function EmployeeModal({ clients, linkableEmployees, form, setFor
           <TextField label="Nama Rekening" value={form.nama_rekening} onChange={set('nama_rekening')} />
           <TextField label="No Rekening" value={form.no_rekening} onChange={set('no_rekening')} />
           <NumberField label="Jatah Cuti Tahunan (hari)" value={form.jatah_cuti_tahunan} onChange={set('jatah_cuti_tahunan')} />
+          <NumberField
+            label="Carry-over Cuti Tahun Ini (hari)"
+            value={form.cuti_carry_over}
+            onChange={set('cuti_carry_over')}
+            hint="Isi hanya untuk menimpa hitungan otomatis dari sisa tahun lalu (mis. saat kebijakan carry-over baru dimulai)."
+          />
         </div>
 
         <p className="text-xs text-[#9A9A9A] -mt-2 mb-4">

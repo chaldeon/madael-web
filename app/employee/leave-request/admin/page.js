@@ -7,10 +7,12 @@ import Link from 'next/link';
 import { Check, X as XIcon, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
+import { DEFAULT_KEBIJAKAN_CUTI } from '@/lib/leavePolicy';
 import { hitungHariKerja, hitungSisaCuti, labelJenisCuti, potongKuota, MAKS_CATATAN_TOLAK_CUTI } from '@/lib/leave';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import LeavePolicyCard from '@/components/LeavePolicyCard';
 
 function formatTanggal(value) {
   if (!value) return '—';
@@ -43,7 +45,7 @@ const SORT_COLUMNS = {
   hari_kerja: { get: (r, ctx) => hitungHariKerja(r.tanggal_mulai, r.tanggal_selesai, ctx.hariKerjaByEmpId[r.employee_id]) },
   sisa_kuota: {
     get: (r, ctx) => {
-      const sisa = hitungSisaCuti(ctx.masterByEmpId[r.employee_id]);
+      const sisa = hitungSisaCuti(ctx.masterByEmpId[r.employee_id], undefined, ctx.kebijakan);
       return sisa ? sisa.sisa : -1;
     },
   },
@@ -125,6 +127,9 @@ export default function LeaveRequestAdminPage() {
   const [requests, setRequests] = useState([]);
   const [schedules, setSchedules] = useState([]); // work_schedule rows
   const [masterList, setMasterList] = useState([]); // employees_master rows (kolom kuota saja)
+  const [kebijakan, setKebijakan] = useState(DEFAULT_KEBIJAKAN_CUTI); // kebijakan kuota cuti (leave_policies)
+  const [kebijakanVersi, setKebijakanVersi] = useState(null);
+  const [bisaUbahKebijakan, setBisaUbahKebijakan] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [actingId, setActingId] = useState(null);
@@ -150,6 +155,9 @@ export default function LeaveRequestAdminPage() {
       setRequests(json.requests || []);
       setSchedules(json.schedules || []);
       setMasterList(json.master || []);
+      setKebijakan(json.kebijakan || DEFAULT_KEBIJAKAN_CUTI);
+      setKebijakanVersi(json.kebijakanVersi || null);
+      setBisaUbahKebijakan(!!json.bisaUbahKebijakan);
     } catch {
       setLoadError('Gagal memuat data pengajuan cuti. Periksa koneksi internet kamu.');
     } finally {
@@ -185,7 +193,7 @@ export default function LeaveRequestAdminPage() {
   const rows = useMemo(() => {
     const filtered = statusFilter === 'all' ? requests : requests.filter((r) => r.status === statusFilter);
 
-    const ctx = { empById, hariKerjaByEmpId, masterByEmpId };
+    const ctx = { empById, hariKerjaByEmpId, masterByEmpId, kebijakan };
     const getValue = SORT_COLUMNS[sortField]?.get;
     if (!getValue) return filtered;
 
@@ -197,7 +205,7 @@ export default function LeaveRequestAdminPage() {
       return 0;
     });
     return sortDir === 'desc' ? sorted.reverse() : sorted;
-  }, [requests, statusFilter, sortField, sortDir, empById, hariKerjaByEmpId, masterByEmpId]);
+  }, [requests, statusFilter, sortField, sortDir, empById, hariKerjaByEmpId, masterByEmpId, kebijakan]);
 
   const handleSort = (colKey) => {
     if (sortField === colKey) {
@@ -246,7 +254,13 @@ export default function LeaveRequestAdminPage() {
       if (json.kuota) {
         setMasterList((prev) => prev.map((m) => (
           m.id === json.kuota.master_id
-            ? { ...m, cuti_terpakai: json.kuota.cuti_terpakai, cuti_terpakai_tahun: json.kuota.cuti_terpakai_tahun }
+            ? {
+                ...m,
+                cuti_terpakai: json.kuota.cuti_terpakai,
+                cuti_terpakai_tahun: json.kuota.cuti_terpakai_tahun,
+                cuti_carry_over: json.kuota.cuti_carry_over,
+                cuti_carry_over_tahun: json.kuota.cuti_carry_over_tahun,
+              }
             : m
         )));
       }
@@ -320,6 +334,14 @@ export default function LeaveRequestAdminPage() {
         </select>
       </div>
 
+      <LeavePolicyCard
+        kebijakan={kebijakan}
+        versi={kebijakanVersi}
+        bisaUbah={bisaUbahKebijakan}
+        onSaved={(json) => { setKebijakan(json.kebijakan); setKebijakanVersi(json.versi); }}
+        onConflict={loadData}
+      />
+
       {actionError && <p className="text-xs text-red-600 mb-4">{actionError}</p>}
       {actionWarning && <p className="text-xs text-amber-700 mb-4">{actionWarning}</p>}
 
@@ -350,7 +372,7 @@ export default function LeaveRequestAdminPage() {
               ) : (
                 rows.map((row) => {
                   const master = masterByEmpId[row.employee_id];
-                  const sisa = hitungSisaCuti(master);
+                  const sisa = hitungSisaCuti(master, undefined, kebijakan);
                   return (
                     <tr key={row.id} className="border-b border-[#E0E0E0] last:border-0">
                       <td className="px-4 py-3 text-black whitespace-nowrap">{empById[row.employee_id]?.nama || '—'}</td>

@@ -2,7 +2,7 @@
 
 import { formatNumberDisplay } from '@/lib/payrollConfig';
 
-export default function NumberField({ label, value, onChange }) {
+export default function NumberField({ label, value, onChange, hint }) {
   const handleChange = (e) => {
     const raw = e.target.value.replace(/[^\d]/g, '');
     onChange(raw === '' ? 0 : Number(raw));
@@ -18,6 +18,7 @@ export default function NumberField({ label, value, onChange }) {
         placeholder="0"
         className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
       />
+      {hint && <span className="text-[11px] text-[#9A9A9A]">{hint}</span>}
     </label>
   );
 }
