@@ -207,6 +207,12 @@ export default function EmployeeDashboardPage() {
   const hasAnyAccess = (mod) => hasAccess(mod.key) || (mod.altKeys || []).some(hasAccess);
   // Widget kontrak berakhir: untuk HR yang mengelola data karyawan/payroll.
   const canSeeKontrakWidget = hasAccess('employee_list') || hasAccess('payroll');
+  // Pencarian global: tiap sumber hanya untuk pemegang modul sumbernya. Invoice
+  // khusus superadmin karena halaman invoice menolak non-superadmin.
+  const canSearchEmployees = hasAccess('employee_list');
+  const canSearchDocuments = hasAccess('document_generator');
+  const canSearchInvoices = !!employee?.is_superadmin;
+  const canUseGlobalSearch = canSearchEmployees || canSearchDocuments || canSearchInvoices;
 
   // Badge antrean persetujuan: hanya diminta kalau user punya minimal satu modul
   // approval, supaya karyawan biasa tidak memicu request sia-sia. Best-effort —
@@ -281,7 +287,15 @@ export default function EmployeeDashboardPage() {
             </p>
           </div>
         }
-        search={employee.is_superadmin ? <GlobalSearchBar /> : null}
+        search={
+          canUseGlobalSearch ? (
+            <GlobalSearchBar
+              canSearchEmployees={canSearchEmployees}
+              canSearchDocuments={canSearchDocuments}
+              canSearchInvoices={canSearchInvoices}
+            />
+          ) : null
+        }
       />
 
       <div className="max-w-[1100px] mx-auto px-6 py-10">

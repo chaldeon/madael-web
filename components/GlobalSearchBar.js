@@ -9,12 +9,21 @@ import { sanitizeSearchTerm } from '@/lib/searchTerm';
 const MIN_QUERY_LENGTH = 2;
 const DEBOUNCE_MS = 300;
 
-// Search bar global untuk dashboard superadmin — cari lintas employee,
-// invoice (Task 16, tabel opsional), dan dokumen (Document Generator).
+// Search bar global di dashboard — cari lintas employee, invoice (Task 16,
+// tabel opsional), dan dokumen (Document Generator). Sumber yang dicari dibatasi
+// sesuai akses modul pemanggil lewat prop canSearch*: employees -> employee_list,
+// documents -> document_generator, invoices -> khusus superadmin (halaman
+// invoice memang menolak non-superadmin). Default semua false (least privilege);
+// sumber yang tidak diizinkan tidak di-query sama sekali. Ini pembatas di UI;
+// batas data sebenarnya tetap RLS di database.
 // Employee sudah deep-link ke halaman detailnya (app/employee/list/[id]).
 // Invoice belum punya halaman detail sendiri di codebase ini, jadi hasilnya
 // masih diarahkan ke halaman list invoice. Dokumen sudah punya detail route asli.
-export default function GlobalSearchBar() {
+export default function GlobalSearchBar({
+  canSearchEmployees = false,
+  canSearchDocuments = false,
+  canSearchInvoices = false,
+}) {
   // PENTING: createClient() bikin instance Supabase baru tiap dipanggil.
   // Kalau dipanggil langsung di body komponen (seperti sebelumnya), setiap
   // render dapat object baru -> runSearch (useCallback) juga selalu dapat
@@ -61,24 +70,33 @@ export default function GlobalSearchBar() {
       setLoading(true);
       setSearchError(null);
 
+      // Sumber yang tidak diizinkan tidak di-query: langsung hasil kosong tanpa error.
+      const skipped = Promise.resolve({ data: [], error: null });
+
       const [empRes, invRes, docRes] = await Promise.all([
-        supabase
-          .from('employees')
-          .select('id, nama, employee_id, companies:client_id ( nama_perusahaan )')
-          .or(`nama.ilike.%${q}%,employee_id.ilike.%${q}%`)
-          .limit(5),
+        canSearchEmployees
+          ? supabase
+              .from('employees')
+              .select('id, nama, employee_id, companies:client_id ( nama_perusahaan )')
+              .or(`nama.ilike.%${q}%,employee_id.ilike.%${q}%`)
+              .limit(5)
+          : skipped,
         // invoices — tabel opsional (Task 16). Kalau belum ada di environment
         // ini, empRes/docRes tetap jalan normal, cuma hasil invoice kosong.
-        supabase
-          .from('invoices')
-          .select('id, nomor_surat, nominal')
-          .ilike('nomor_surat', `%${q}%`)
-          .limit(5),
-        supabase
-          .from('documents')
-          .select('id, nomor_surat, judul')
-          .ilike('nomor_surat', `%${q}%`)
-          .limit(5),
+        canSearchInvoices
+          ? supabase
+              .from('invoices')
+              .select('id, nomor_surat, nominal')
+              .ilike('nomor_surat', `%${q}%`)
+              .limit(5)
+          : skipped,
+        canSearchDocuments
+          ? supabase
+              .from('documents')
+              .select('id, nomor_surat, judul')
+              .ilike('nomor_surat', `%${q}%`)
+              .limit(5)
+          : skipped,
       ]);
 
       // Kalau ada query lebih baru yang sudah menyusul (user ngetik lagi
@@ -109,7 +127,7 @@ export default function GlobalSearchBar() {
       setSearchError(message);
       setLoading(false);
     },
-    [supabase]
+    [supabase, canSearchEmployees, canSearchDocuments, canSearchInvoices]
   );
 
   useEffect(() => {
@@ -133,6 +151,14 @@ export default function GlobalSearchBar() {
     return () => clearTimeout(timer);
   }, [query, runSearch]);
 
+  // Placeholder mengikuti sumber yang boleh dicari user ini.
+  const placeholderLabels = [
+    canSearchEmployees && 'employee',
+    canSearchInvoices && 'invoice',
+    canSearchDocuments && 'dokumen',
+  ].filter(Boolean);
+  const placeholder = `Cari ${placeholderLabels.join(', ')}...`;
+
   const totalResults = results.employees.length + results.invoices.length + results.documents.length;
   const showDropdown = open && sanitizeSearchTerm(query).length >= MIN_QUERY_LENGTH;
 
@@ -145,7 +171,7 @@ export default function GlobalSearchBar() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setOpen(true)}
-          placeholder="Cari employee, invoice, dokumen..."
+          placeholder={placeholder}
           className="w-full border border-[#E0E0E0] pl-8 pr-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
         />
       </div>
