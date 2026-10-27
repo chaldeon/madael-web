@@ -12,6 +12,8 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import Toast from '@/components/employee-list/Toast';
+import PaginationBar from '@/components/PaginationBar';
+import { ADMIN_PAGE_SIZE_DEFAULT, totalPagesOf } from '@/lib/pagination';
 import {
   JENIS_HARI_LEMBUR, JENIS_HARI_LABEL, STATUS_LEMBUR_LABEL, MAKS_ALASAN_LEMBUR,
 } from '@/lib/overtimeRules';
@@ -167,6 +169,10 @@ export default function OvertimeAdminPage() {
   const [statusFilter, setStatusFilter] = useState('pending');
   const [periode, setPeriode] = useState('');
   const [requests, setRequests] = useState([]);
+  // Paginasi server-side (dulu dibatasi 500 baris tanpa halaman berikutnya).
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(ADMIN_PAGE_SIZE_DEFAULT);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -179,7 +185,7 @@ export default function OvertimeAdminPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const qs = new URLSearchParams({ status: statusFilter });
+      const qs = new URLSearchParams({ status: statusFilter, page: String(page), pageSize: String(pageSize) });
       if (periode) qs.set('periode', periode);
       const res = await fetch(`/api/overtime-requests/admin?${qs.toString()}`);
       const json = await res.json().catch(() => ({}));
@@ -188,13 +194,25 @@ export default function OvertimeAdminPage() {
         setLoading(false);
         return;
       }
+      // Halaman melewati akhir data (mis. sisa baris habis diproses): kembali ke
+      // halaman 1 — perubahan page memicu muat ulang otomatis.
+      if (json.outOfRange && page > 1) {
+        setPage(1);
+        return;
+      }
+      const total = Number(json.total) || 0;
+      if ((json.requests || []).length === 0 && total > 0 && page > 1) {
+        setPage(totalPagesOf(total, pageSize));
+        return;
+      }
       setRequests(json.requests || []);
+      setTotalCount(total);
     } catch (err) {
       console.error('Muat data kelola lembur error:', err);
       setLoadError('Gagal memuat pengajuan lembur. Periksa koneksi lalu coba lagi.');
     }
     setLoading(false);
-  }, [statusFilter, periode]);
+  }, [statusFilter, periode, page, pageSize]);
 
   useEffect(() => {
     if (status === 'allowed') loadData();
@@ -277,7 +295,11 @@ export default function OvertimeAdminPage() {
       <div className="flex flex-wrap items-end gap-3 mb-6">
         <label className="flex flex-col gap-1">
           <span className="text-xs text-[#6B6B6B]">Status</span>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectClass}>
+          <select
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            className={selectClass}
+          >
             <option value="pending">Menunggu</option>
             <option value="approved">Disetujui</option>
             <option value="rejected">Ditolak</option>
@@ -287,10 +309,15 @@ export default function OvertimeAdminPage() {
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs text-[#6B6B6B]">Periode (bulan lembur)</span>
-          <input type="month" value={periode} onChange={(e) => setPeriode(e.target.value)} className={selectClass} />
+          <input
+            type="month"
+            value={periode}
+            onChange={(e) => { setPeriode(e.target.value); setPage(1); }}
+            className={selectClass}
+          />
         </label>
         {periode && (
-          <button onClick={() => setPeriode('')} className="text-xs text-madael-red hover:text-madael-dark font-medium pb-2.5">
+          <button onClick={() => { setPeriode(''); setPage(1); }} className="text-xs text-madael-red hover:text-madael-dark font-medium pb-2.5">
             Semua periode
           </button>
         )}
@@ -377,6 +404,17 @@ export default function OvertimeAdminPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {!loadError && !loading && (
+        <PaginationBar
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          onPageChange={setPage}
+          onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
+          satuan="pengajuan"
+        />
       )}
 
       {dialog?.type === 'approve' && (

@@ -13,6 +13,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { friendlyError } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 function currentMonthValue() {
   const d = new Date();
@@ -70,10 +71,12 @@ export default function PayrollRunListPage() {
     setLoadError(null);
     setCreateError(null);
 
+    // companies & employees_master dimuat lewat fetchAllRows: tanpa itu respons
+    // terpotong di 1.000 baris dan jumlah employee per klien mengecil diam-diam.
     const [clRes, runRes, empRes] = await Promise.all([
-      supabase.from('companies').select('id, nama_perusahaan').order('nama_perusahaan'),
+      fetchAllRows(() => supabase.from('companies').select('id, nama_perusahaan').order('nama_perusahaan')),
       supabase.from('payroll_runs').select('*').eq('periode', periode),
-      supabase.from('employees_master').select('id, client_id'),
+      fetchAllRows(() => supabase.from('employees_master').select('id, client_id')),
     ]);
 
     const firstError = clRes.error || runRes.error || empRes.error;

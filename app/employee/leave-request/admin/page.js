@@ -13,6 +13,8 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import LeavePolicyCard from '@/components/LeavePolicyCard';
+import PaginationBar from '@/components/PaginationBar';
+import { ADMIN_PAGE_SIZE_DEFAULT, totalPagesOf } from '@/lib/pagination';
 
 function formatTanggal(value) {
   if (!value) return '—';
@@ -130,6 +132,10 @@ export default function LeaveRequestAdminPage() {
   const [kebijakan, setKebijakan] = useState(DEFAULT_KEBIJAKAN_CUTI); // kebijakan kuota cuti (leave_policies)
   const [kebijakanVersi, setKebijakanVersi] = useState(null);
   const [bisaUbahKebijakan, setBisaUbahKebijakan] = useState(false);
+  // Paginasi server-side: filter status dan halaman diproses di route.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(ADMIN_PAGE_SIZE_DEFAULT);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [actingId, setActingId] = useState(null);
@@ -139,15 +145,29 @@ export default function LeaveRequestAdminPage() {
 
   // Data dimuat lewat route server (bukan query browser) karena employees_master
   // dibatasi RLS superadmin — lihat catatan di app/api/leave-requests/admin.
+  // Daftar pengajuan dimuat per halaman; filter status ikut dikirim ke server.
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
 
     try {
-      const res = await fetch('/api/leave-requests/admin');
+      const qs = new URLSearchParams({ status: statusFilter, page: String(page), pageSize: String(pageSize) });
+      const res = await fetch(`/api/leave-requests/admin?${qs.toString()}`);
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         setLoadError(json.error || 'Gagal memuat data pengajuan cuti.');
+        return;
+      }
+
+      // Halaman melewati akhir data (mis. sisa baris habis diproses): kembali ke
+      // halaman 1 — perubahan page memicu muat ulang otomatis.
+      if (json.outOfRange && page > 1) {
+        setPage(1);
+        return;
+      }
+      const total = Number(json.total) || 0;
+      if ((json.requests || []).length === 0 && total > 0 && page > 1) {
+        setPage(totalPagesOf(total, pageSize));
         return;
       }
 
@@ -155,6 +175,7 @@ export default function LeaveRequestAdminPage() {
       setRequests(json.requests || []);
       setSchedules(json.schedules || []);
       setMasterList(json.master || []);
+      setTotalCount(total);
       setKebijakan(json.kebijakan || DEFAULT_KEBIJAKAN_CUTI);
       setKebijakanVersi(json.kebijakanVersi || null);
       setBisaUbahKebijakan(!!json.bisaUbahKebijakan);
@@ -163,7 +184,7 @@ export default function LeaveRequestAdminPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [statusFilter, page, pageSize]);
 
   useEffect(() => {
     if (status === 'allowed') loadData();
@@ -191,7 +212,9 @@ export default function LeaveRequestAdminPage() {
   }, [masterList]);
 
   const rows = useMemo(() => {
-    const filtered = statusFilter === 'all' ? requests : requests.filter((r) => r.status === statusFilter);
+    // Filter status sudah diterapkan di server; urutan kolom hanya berlaku pada
+    // baris di halaman yang sedang dibuka.
+    const filtered = requests;
 
     const ctx = { empById, hariKerjaByEmpId, masterByEmpId, kebijakan };
     const getValue = SORT_COLUMNS[sortField]?.get;
@@ -205,7 +228,7 @@ export default function LeaveRequestAdminPage() {
       return 0;
     });
     return sortDir === 'desc' ? sorted.reverse() : sorted;
-  }, [requests, statusFilter, sortField, sortDir, empById, hariKerjaByEmpId, masterByEmpId, kebijakan]);
+  }, [requests, sortField, sortDir, empById, hariKerjaByEmpId, masterByEmpId, kebijakan]);
 
   const handleSort = (colKey) => {
     if (sortField === colKey) {
@@ -325,7 +348,11 @@ export default function LeaveRequestAdminPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectClass}>
+        <select
+          value={statusFilter}
+          onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+          className={selectClass}
+        >
           <option value="pending">Menunggu</option>
           <option value="approved">Disetujui</option>
           <option value="rejected">Ditolak</option>
@@ -444,6 +471,18 @@ export default function LeaveRequestAdminPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {!loading && (
+        <PaginationBar
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          onPageChange={setPage}
+          onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
+          catatanUrutan
+          satuan="pengajuan"
+        />
       )}
 
       {rejectingRow && (

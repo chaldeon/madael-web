@@ -18,6 +18,9 @@ import PayslipFormModal from '@/components/payslip-admin/PayslipFormModal';
 import { buildPeriodeLabel, previewNomorDokumen, NUMERIC_KEYS, EMPTY_FORM, calcTHP, SORT_COLUMNS } from '@/lib/payslipAdminConfig';
 import { formatRupiah } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
+import PaginationBar from '@/components/PaginationBar';
+import { fetchAllRows } from '@/lib/fetchAllRows';
+import { ADMIN_PAGE_SIZE_DEFAULT, totalPagesOf, isRangeNotSatisfiable } from '@/lib/pagination';
 
 export default function PayslipAdminPage() {
   const supabase = createClient();
@@ -25,6 +28,12 @@ export default function PayslipAdminPage() {
 
   const [payslips, setPayslips] = useState([]);
   const [employees, setEmployees] = useState([]);
+  // Paginasi server-side: filter karyawan/periode dan halaman diproses di query.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(ADMIN_PAGE_SIZE_DEFAULT);
+  const [totalCount, setTotalCount] = useState(0);
+  // Daftar karyawan cukup dimuat sekali (tidak ikut berubah saat ganti halaman/filter).
+  const employeesLoadedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [actionError, setActionError] = useState(null);
@@ -42,42 +51,73 @@ export default function PayslipAdminPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
+  // Slip dimuat per halaman (range + count) dengan filter di server — dulu seluruh
+  // riwayat ditarik sekaligus dan terpotong di batas 1.000 baris. Urutan dari
+  // server: periode terbaru dulu; urutan kolom di tabel hanya berlaku pada baris
+  // di halaman yang sedang dibuka.
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const [slipsRes, empsRes] = await Promise.all([
-      supabase
-        .from('payslips')
-        .select('*, employees ( id, nama )')
-        .order('periode', { ascending: false }),
-      supabase
-        .from('employees')
-        .select('id, nama')
-        .eq('status', 'Aktif')
-        .order('nama'),
-    ]);
 
-    if (slipsRes.error || empsRes.error) {
-      setLoadError(friendlyError((slipsRes.error || empsRes.error), 'Gagal memuat data slip gaji.'));
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    let query = supabase
+      .from('payslips')
+      .select('*, employees ( id, nama )', { count: 'exact' });
+    if (filterEmployee) query = query.eq('employee_id', filterEmployee);
+    if (filterPeriode) query = query.eq('periode', filterPeriode);
+    // `id` sebagai pemutus seri supaya urutan antar halaman deterministik.
+    query = query
+      .order('periode', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to);
+
+    // Daftar karyawan aktif untuk filter & form — semuanya (bukan per halaman),
+    // lewat fetchAllRows supaya tidak terpotong di 1.000 baris.
+    const [slipsRes, empsRes] = await Promise.all([
+      query,
+      employeesLoadedRef.current
+        ? Promise.resolve(null)
+        : fetchAllRows(() =>
+            supabase.from('employees').select('id, nama').eq('status', 'Aktif').order('nama')
+          ),
+    ]);
+    const { data, error, count } = slipsRes;
+
+    // Halaman melewati akhir data: kembali ke halaman 1 — perubahan page
+    // memicu muat ulang otomatis.
+    if (isRangeNotSatisfiable(error) && page > 1) {
+      setPage(1);
+      return;
+    }
+    if (error || empsRes?.error) {
+      setLoadError(friendlyError(error || empsRes.error, 'Gagal memuat data slip gaji.'));
       setLoading(false);
       return;
     }
 
-    setPayslips(slipsRes.data || []);
-    setEmployees(empsRes.data || []);
+    const total = count || 0;
+    if ((data || []).length === 0 && total > 0 && page > 1) {
+      setPage(totalPagesOf(total, pageSize));
+      return;
+    }
+
+    if (empsRes) {
+      setEmployees(empsRes.data || []);
+      employeesLoadedRef.current = true;
+    }
+    setPayslips(data || []);
+    setTotalCount(total);
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, page, pageSize, filterEmployee, filterPeriode]);
 
   useEffect(() => {
     if (status === 'allowed') loadData();
   }, [status, loadData]);
 
+  // Filter sudah diterapkan di server; di sini hanya urutan kolom pada halaman aktif.
   const filtered = useMemo(() => {
-    const base = payslips.filter((p) => {
-      const matchEmp = !filterEmployee || p.employee_id === filterEmployee;
-      const matchPeriode = !filterPeriode || p.periode === filterPeriode;
-      return matchEmp && matchPeriode;
-    });
+    const base = payslips;
 
     const getValue = SORT_COLUMNS[sortField]?.get;
     if (!getValue) return base;
@@ -90,7 +130,7 @@ export default function PayslipAdminPage() {
       return 0;
     });
     return sortDir === 'desc' ? sorted.reverse() : sorted;
-  }, [payslips, filterEmployee, filterPeriode, sortField, sortDir]);
+  }, [payslips, sortField, sortDir]);
 
   const handleSort = (colKey) => {
     if (sortField === colKey) {
@@ -100,10 +140,6 @@ export default function PayslipAdminPage() {
       setSortDir('asc');
     }
   };
-
-  const periodeOptions = useMemo(() => {
-    return Array.from(new Set(payslips.map((p) => p.periode))).sort().reverse();
-  }, [payslips]);
 
   const openCreate = async () => {
     const tahunSekarang = String(new Date().getFullYear());
@@ -286,7 +322,9 @@ export default function PayslipAdminPage() {
       <div className="flex items-end justify-between mb-8 flex-wrap gap-4">
         <div>
           <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Kelola Slip Gaji</h1>
-          <p className="text-sm text-[#6B6B6B] mt-1">{payslips.length} total slip gaji</p>
+          <p className="text-sm text-[#6B6B6B] mt-1">
+            {totalCount} {filterEmployee || filterPeriode ? 'slip gaji sesuai filter' : 'total slip gaji'}
+          </p>
         </div>
         <button
           onClick={openCreate}
@@ -305,18 +343,32 @@ export default function PayslipAdminPage() {
       )}
 
       <div className="flex flex-wrap gap-3 mb-6">
-        <select value={filterEmployee} onChange={(e) => setFilterEmployee(e.target.value)} className={selectClass}>
+        <select
+          value={filterEmployee}
+          onChange={(e) => { setFilterEmployee(e.target.value); setPage(1); }}
+          className={selectClass}
+        >
           <option value="">Semua Karyawan</option>
           {employees.map((e) => (
             <option key={e.id} value={e.id}>{e.nama}</option>
           ))}
         </select>
-        <select value={filterPeriode} onChange={(e) => setFilterPeriode(e.target.value)} className={selectClass}>
-          <option value="">Semua Periode</option>
-          {periodeOptions.map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
+        <input
+          type="month"
+          value={filterPeriode}
+          onChange={(e) => { setFilterPeriode(e.target.value); setPage(1); }}
+          aria-label="Filter periode"
+          className={selectClass}
+        />
+        {filterPeriode && (
+          <button
+            type="button"
+            onClick={() => { setFilterPeriode(''); setPage(1); }}
+            className="text-xs text-madael-red hover:text-madael-dark font-medium"
+          >
+            Semua periode
+          </button>
+        )}
       </div>
 
       <div className="bg-white border border-[#E0E0E0] overflow-x-auto">
@@ -375,6 +427,18 @@ export default function PayslipAdminPage() {
           </table>
         )}
       </div>
+
+      {!loading && (
+        <PaginationBar
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          onPageChange={setPage}
+          onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
+          catatanUrutan
+          satuan="slip gaji"
+        />
+      )}
 
       {modalOpen && (
         <PayslipFormModal

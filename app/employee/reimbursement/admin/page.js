@@ -15,10 +15,24 @@ import { friendlyError } from '@/lib/errorMessage';
 import { STATUS_REIMBURSEMENT_LABEL } from '@/lib/reimbursement';
 import Toast from '@/components/employee-list/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import PaginationBar from '@/components/PaginationBar';
+import { fetchAllRows } from '@/lib/fetchAllRows';
+import { ADMIN_PAGE_SIZE_DEFAULT, totalPagesOf, isRangeNotSatisfiable } from '@/lib/pagination';
 
 function formatTanggal(value) {
   if (!value) return '—';
   return new Date(value).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// Total klaim berstatus 'approved' (belum dibayar) dari SELURUH data, bukan hanya
+// halaman yang sedang tampil — dijumlah lewat fetchAllRows supaya tidak terpotong
+// di batas 1.000 baris. Mengembalikan { total, error }.
+async function hitungTotalSiapDibayar(supabase) {
+  const { data, error } = await fetchAllRows(() =>
+    supabase.from('reimbursement_requests').select('jumlah').eq('status', 'approved')
+  );
+  if (error) return { total: 0, error };
+  return { total: (data || []).reduce((sum, r) => sum + (Number(r.jumlah) || 0), 0), error: null };
 }
 
 function StatusBadge({ status }) {
@@ -43,6 +57,11 @@ export default function ReimbursementAdminPage() {
   const [statusFilter, setStatusFilter] = useState('pending');
   const [employees, setEmployees] = useState([]);
   const [requests, setRequests] = useState([]);
+  // Paginasi server-side: filter status dan halaman diproses di query.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(ADMIN_PAGE_SIZE_DEFAULT);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalSiapDibayar, setTotalSiapDibayar] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [actingId, setActingId] = useState(null);
@@ -59,22 +78,58 @@ export default function ReimbursementAdminPage() {
     setLoading(true);
     setLoadError(null);
 
-    const [empRes, reqRes] = await Promise.all([
-      supabase.from('employees').select('id, nama').order('nama'),
-      supabase.from('reimbursement_requests').select('*').order('created_at', { ascending: false }),
-    ]);
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    let reqQuery = supabase.from('reimbursement_requests').select('*', { count: 'exact' });
+    if (statusFilter !== 'all') reqQuery = reqQuery.eq('status', statusFilter);
+    // `id` sebagai pemutus seri supaya urutan antar halaman deterministik.
+    reqQuery = reqQuery
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to);
 
-    const firstError = empRes.error || reqRes.error;
+    const [reqRes, siapRes] = await Promise.all([reqQuery, hitungTotalSiapDibayar(supabase)]);
+
+    // Halaman melewati akhir data (mis. sisa baris habis diproses): kembali ke
+    // halaman 1 — perubahan page memicu muat ulang otomatis.
+    if (isRangeNotSatisfiable(reqRes.error) && page > 1) {
+      setPage(1);
+      return;
+    }
+
+    const firstError = reqRes.error || siapRes.error;
     if (firstError) {
       setLoadError(friendlyError(firstError, 'Gagal memuat data reimbursement.'));
       setLoading(false);
       return;
     }
 
-    setEmployees(empRes.data || []);
-    setRequests(reqRes.data || []);
+    const rows = reqRes.data || [];
+    const total = reqRes.count || 0;
+    if (rows.length === 0 && total > 0 && page > 1) {
+      setPage(totalPagesOf(total, pageSize));
+      return;
+    }
+
+    // Nama karyawan hanya untuk baris di halaman ini.
+    const empIds = Array.from(new Set(rows.map((r) => r.employee_id).filter(Boolean)));
+    let emps = [];
+    if (empIds.length > 0) {
+      const empRes = await supabase.from('employees').select('id, nama').in('id', empIds);
+      if (empRes.error) {
+        setLoadError(friendlyError(empRes.error, 'Gagal memuat data reimbursement.'));
+        setLoading(false);
+        return;
+      }
+      emps = empRes.data || [];
+    }
+
+    setEmployees(emps);
+    setRequests(rows);
+    setTotalCount(total);
+    setTotalSiapDibayar(siapRes.total);
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, statusFilter, page, pageSize]);
 
   useEffect(() => {
     if (status === 'allowed') loadData();
@@ -86,21 +141,21 @@ export default function ReimbursementAdminPage() {
     return map;
   }, [employees]);
 
-  const rows = useMemo(
-    () => (statusFilter === 'all' ? requests : requests.filter((r) => r.status === statusFilter)),
-    [requests, statusFilter]
-  );
+  // Filter status sudah diterapkan di query (server), jadi baris tabel = halaman aktif.
+  const rows = requests;
 
-  // Total klaim approved yang belum ditandai 'paid' — jumlah ini yang perlu
-  // dimasukkan admin secara manual ke field Kompensasi saat generate/edit
-  // payroll run karyawan terkait (lihat catatan di bawah tabel). Kita
-  // sengaja TIDAK menyuntikkan angka ini otomatis ke logic payroll
-  // (lib/payroll/runSnapshot.js) supaya perhitungan gaji tetap sepenuhnya
-  // under kontrol & review admin sebelum payroll run diproses.
-  const totalSiapDibayar = useMemo(
-    () => requests.filter((r) => r.status === 'approved').reduce((sum, r) => sum + (Number(r.jumlah) || 0), 0),
-    [requests]
-  );
+  // totalSiapDibayar: total klaim approved yang belum ditandai 'paid' dari
+  // SELURUH data (bukan hanya halaman ini) — jumlah ini yang perlu dimasukkan
+  // admin secara manual ke field Kompensasi saat generate/edit payroll run
+  // karyawan terkait (lihat catatan di bawah tabel). Kita sengaja TIDAK
+  // menyuntikkan angka ini otomatis ke logic payroll (lib/payroll/runSnapshot.js)
+  // supaya perhitungan gaji tetap sepenuhnya under kontrol & review admin
+  // sebelum payroll run diproses. Dimuat bersama daftar (hitungTotalSiapDibayar)
+  // dan disegarkan setelah tiap perubahan status.
+  const refreshTotalSiapDibayar = useCallback(async () => {
+    const { total, error } = await hitungTotalSiapDibayar(supabase);
+    if (!error) setTotalSiapDibayar(total);
+  }, [supabase]);
 
   // Menyetujui langsung jalan; menolak lebih dulu membuka dialog alasan
   // (opsional) yang kemudian memanggil submitDecision.
@@ -132,6 +187,7 @@ export default function ReimbursementAdminPage() {
         return;
       }
       setRequests((prev) => prev.map((r) => (r.id === json.request.id ? json.request : r)));
+      refreshTotalSiapDibayar();
     } catch (err) {
       setActionError(friendlyError(err, fallbackMessage, { context: 'Ubah status reimbursement' }));
     } finally {
@@ -241,7 +297,11 @@ export default function ReimbursementAdminPage() {
       )}
 
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectClass}>
+        <select
+          value={statusFilter}
+          onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+          className={selectClass}
+        >
           <option value="pending">Menunggu</option>
           <option value="approved">Disetujui (belum dibayar)</option>
           <option value="rejected">Ditolak</option>
@@ -345,6 +405,17 @@ export default function ReimbursementAdminPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {!loading && (
+        <PaginationBar
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          onPageChange={setPage}
+          onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
+          satuan="klaim"
+        />
       )}
 
       {/* Alasan penolakan / catatan "dibayar" — sebelumnya window.prompt().
