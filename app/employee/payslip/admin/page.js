@@ -19,8 +19,13 @@ import { buildPeriodeLabel, previewNomorDokumen, NUMERIC_KEYS, EMPTY_FORM, calcT
 import { formatRupiah } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
 import PaginationBar from '@/components/PaginationBar';
+import ExportCsvButton from '@/components/ExportCsvButton';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { ADMIN_PAGE_SIZE_DEFAULT, totalPagesOf, isRangeNotSatisfiable } from '@/lib/pagination';
+import { logActivity } from '@/lib/activityLogClient';
+import {
+  SLIP_CSV_HEADERS, SLIP_EXPORT_COLUMNS, buildSlipCsvRows, tanggalUntukNamaFile,
+} from '@/lib/adminCsvExport';
 
 export default function PayslipAdminPage() {
   const supabase = createClient();
@@ -140,6 +145,31 @@ export default function PayslipAdminPage() {
       setSortDir('asc');
     }
   };
+
+  // Ekspor CSV: SELURUH slip sesuai filter karyawan + periode yang aktif (bukan
+  // hanya halaman yang tampil), lewat fetchAllRows supaya tidak terpotong di
+  // 1.000 baris. Hanya kolom nominal yang dibaca — rekening, NPWP, dan nomor
+  // BPJS tidak ikut diekspor.
+  const loadExportRows = useCallback(async () => {
+    const { data, error } = await fetchAllRows(() => {
+      let query = supabase
+        .from('payslips')
+        .select(`${SLIP_EXPORT_COLUMNS}, employees ( id, nama )`);
+      if (filterEmployee) query = query.eq('employee_id', filterEmployee);
+      if (filterPeriode) query = query.eq('periode', filterPeriode);
+      return query.order('periode', { ascending: false });
+    });
+    if (error) {
+      return { rows: null, error: friendlyError(error, 'Gagal mengekspor data slip gaji.') };
+    }
+    const rows = buildSlipCsvRows(data);
+    logActivity({
+      aksi: 'ekspor_slip_gaji',
+      targetTable: 'payslips',
+      detail: { employee_id: filterEmployee || null, periode: filterPeriode || null, jumlah_baris: rows.length },
+    });
+    return { rows, error: null };
+  }, [supabase, filterEmployee, filterPeriode]);
 
   const openCreate = async () => {
     const tahunSekarang = String(new Date().getFullYear());
@@ -342,7 +372,7 @@ export default function PayslipAdminPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-6">
         <select
           value={filterEmployee}
           onChange={(e) => { setFilterEmployee(e.target.value); setPage(1); }}
@@ -369,6 +399,14 @@ export default function PayslipAdminPage() {
             Semua periode
           </button>
         )}
+        <ExportCsvButton
+          filename={`slip-gaji-${filterPeriode || 'semua-periode'}-${tanggalUntukNamaFile()}`}
+          headers={SLIP_CSV_HEADERS}
+          loadRows={loadExportRows}
+          disabled={loading || totalCount === 0}
+          neutralizeFormulas
+          label="Ekspor CSV"
+        />
       </div>
 
       <div className="bg-white border border-[#E0E0E0] overflow-x-auto">

@@ -13,7 +13,9 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import Toast from '@/components/employee-list/Toast';
 import PaginationBar from '@/components/PaginationBar';
+import ExportCsvButton from '@/components/ExportCsvButton';
 import { ADMIN_PAGE_SIZE_DEFAULT, totalPagesOf } from '@/lib/pagination';
+import { LEMBUR_CSV_HEADERS, ambilBarisEkspor, tanggalUntukNamaFile } from '@/lib/adminCsvExport';
 import {
   JENIS_HARI_LEMBUR, JENIS_HARI_LABEL, STATUS_LEMBUR_LABEL, MAKS_ALASAN_LEMBUR,
 } from '@/lib/overtimeRules';
@@ -218,6 +220,17 @@ export default function OvertimeAdminPage() {
     if (status === 'allowed') loadData();
   }, [status, loadData]);
 
+  // Ekspor CSV: seluruh pengajuan sesuai filter status + periode yang aktif
+  // (bukan hanya halaman yang tampil), diambil lewat route server.
+  const loadExportRows = useCallback(() => {
+    const qs = new URLSearchParams({ status: statusFilter });
+    if (periode) qs.set('periode', periode);
+    return ambilBarisEkspor(
+      `/api/overtime-requests/admin/export?${qs.toString()}`,
+      'Gagal mengekspor pengajuan lembur.'
+    );
+  }, [statusFilter, periode]);
+
   const closeDialog = useCallback(() => {
     setDialog(null);
     setDialogError(null);
@@ -321,6 +334,16 @@ export default function OvertimeAdminPage() {
             Semua periode
           </button>
         )}
+        <div className="pb-2.5">
+          <ExportCsvButton
+            filename={`lembur-${periode || 'semua-periode'}-${statusFilter}-${tanggalUntukNamaFile()}`}
+            headers={LEMBUR_CSV_HEADERS}
+            loadRows={loadExportRows}
+            disabled={loading || Boolean(loadError) || totalCount === 0}
+            neutralizeFormulas
+            label="Ekspor CSV"
+          />
+        </div>
       </div>
 
       {loadError ? (

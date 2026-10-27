@@ -16,8 +16,11 @@ import { STATUS_REIMBURSEMENT_LABEL } from '@/lib/reimbursement';
 import Toast from '@/components/employee-list/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import PaginationBar from '@/components/PaginationBar';
+import ExportCsvButton from '@/components/ExportCsvButton';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { ADMIN_PAGE_SIZE_DEFAULT, totalPagesOf, isRangeNotSatisfiable } from '@/lib/pagination';
+import { logActivity } from '@/lib/activityLogClient';
+import { REIMBURSEMENT_CSV_HEADERS, buildReimbursementCsvRows, tanggalUntukNamaFile } from '@/lib/adminCsvExport';
 
 function formatTanggal(value) {
   if (!value) return '—';
@@ -140,6 +143,34 @@ export default function ReimbursementAdminPage() {
     employees.forEach((e) => { map[e.id] = e; });
     return map;
   }, [employees]);
+
+  // Ekspor CSV: SELURUH klaim sesuai filter status aktif (bukan hanya halaman
+  // yang tampil), lewat fetchAllRows supaya tidak terpotong di 1.000 baris.
+  // Dibaca dari browser seperti daftar di halaman ini (RLS yang sama).
+  const loadExportRows = useCallback(async () => {
+    const [reqRes, empRes] = await Promise.all([
+      fetchAllRows(() => {
+        let query = supabase
+          .from('reimbursement_requests')
+          .select('id, employee_id, created_at, kategori, jumlah, deskripsi, status, rejection_reason, bukti_path');
+        if (statusFilter !== 'all') query = query.eq('status', statusFilter);
+        return query.order('created_at', { ascending: false });
+      }),
+      fetchAllRows(() => supabase.from('employees').select('id, nama')),
+    ]);
+    const firstError = reqRes.error || empRes.error;
+    if (firstError) {
+      return { rows: null, error: friendlyError(firstError, 'Gagal mengekspor data reimbursement.') };
+    }
+    const namaById = Object.fromEntries((empRes.data || []).map((e) => [e.id, e.nama]));
+    const rows = buildReimbursementCsvRows(reqRes.data, namaById);
+    logActivity({
+      aksi: 'ekspor_reimbursement',
+      targetTable: 'reimbursement_requests',
+      detail: { status: statusFilter, jumlah_baris: rows.length },
+    });
+    return { rows, error: null };
+  }, [supabase, statusFilter]);
 
   // Filter status sudah diterapkan di query (server), jadi baris tabel = halaman aktif.
   const rows = requests;
@@ -309,6 +340,14 @@ export default function ReimbursementAdminPage() {
           <option value="cancelled">Dibatalkan</option>
           <option value="all">Semua</option>
         </select>
+        <ExportCsvButton
+          filename={`reimbursement-${statusFilter}-${tanggalUntukNamaFile()}`}
+          headers={REIMBURSEMENT_CSV_HEADERS}
+          loadRows={loadExportRows}
+          disabled={loading || totalCount === 0}
+          neutralizeFormulas
+          label="Ekspor CSV"
+        />
       </div>
 
       {actionError && <p className="text-xs text-red-600 mb-4">{actionError}</p>}
