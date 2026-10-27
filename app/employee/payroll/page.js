@@ -21,6 +21,7 @@ import { currentMonthValue, EMPTY_FORM, totalTunjangan, SORT_COLUMNS, objToPairs
 import { formatRupiah } from '@/lib/format';
 import { validateKepegawaian } from '@/lib/kepegawaian';
 import { tahunSekarang } from '@/lib/leave';
+import { parseJatahCutiKaryawan } from '@/lib/leavePolicy';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 
@@ -191,6 +192,11 @@ export default function PayrollManagerPage() {
       setSaveError(kepegawaianError);
       return;
     }
+    const jatahCuti = parseJatahCutiKaryawan(form.jatah_cuti_tahunan);
+    if (jatahCuti.error) {
+      setSaveError(jatahCuti.error);
+      return;
+    }
     setSaving(true);
 
     const payload = {
@@ -213,7 +219,7 @@ export default function PayrollManagerPage() {
       no_bpjs_ketenagakerjaan: form.no_bpjs_ketenagakerjaan.trim() || null,
       nama_rekening: form.nama_rekening.trim() || null,
       no_rekening: form.no_rekening.trim() || null,
-      jatah_cuti_tahunan: Number(form.jatah_cuti_tahunan) || 12,
+      jatah_cuti_tahunan: jatahCuti.value,
       // Carry-over ditulis hanya kalau HR mengubahnya, supaya hitungan otomatis tidak terkunci.
       ...(Number(form.cuti_carry_over) !== Number(formBaselineRef.current.cuti_carry_over)
         ? { cuti_carry_over: Number(form.cuti_carry_over) || 0, cuti_carry_over_tahun: tahunSekarang() }
