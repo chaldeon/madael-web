@@ -17,7 +17,7 @@ export async function POST(request) {
   try {
     const { path, descriptor } = await request.json();
 
-    if (!path || !Array.isArray(descriptor) || descriptor.length !== 128) {
+    if (!path || !Array.isArray(descriptor) || descriptor.length !== 128 || !descriptor.every((v) => typeof v === 'number' && Number.isFinite(v))) {
       return NextResponse.json({ error: 'Data foto referensi tidak valid.' }, { status: 400 });
     }
 
