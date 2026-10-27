@@ -6,18 +6,21 @@
 // Template hanyalah preset: saat di-assign ke karyawan, nilainya disalin ke
 // work_schedule (lihat lib/shifts.js). Edit template menyebar ke semua karyawan
 // yang tertaut; absensi yang sudah tercatat tidak berubah (forward-only).
+//
+// Tambah/ubah/hapus template lewat /api/attendance/schedule/templates (validasi,
+// penyebaran ke jadwal karyawan, cek pemakaian, dan activity log dikerjakan di
+// server); komponen ini hanya menampilkan dan memvalidasi awal di sisi klien.
 
 import { useState } from 'react';
 import { Plus, Pencil, Trash2, X, AlertTriangle } from 'lucide-react';
-import { logActivity } from '@/lib/activityLogClient';
+import { callScheduleApi } from '@/lib/scheduleClient';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
 import {
   HARI_OPTIONS, MAX_NAMA_SHIFT, durasiMenit, formatDurasi, formatJam,
-  validateShiftForm, scheduleFieldsFromTemplate,
+  validateShiftForm,
 } from '@/lib/shifts';
 import EmptyState from '@/components/EmptyState';
-import { friendlyError } from '@/lib/errorMessage';
 
 const EMPTY_FORM = {
   nama: '',
@@ -42,7 +45,7 @@ function formFromTemplate(tpl) {
   };
 }
 
-export default function ShiftTemplateManager({ supabase, templates, linkedCounts, unavailable, onChanged }) {
+export default function ShiftTemplateManager({ templates, linkedCounts, unavailable, onChanged }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null); // template yang diedit, null = tambah baru
   const [form, setForm] = useState(EMPTY_FORM);
@@ -108,57 +111,29 @@ export default function ShiftTemplateManager({ supabase, templates, linkedCounts
     setFormError(null);
 
     if (!editing) {
-      const { data, error } = await supabase.from('shift_templates').insert([value]).select().single();
+      const res = await callScheduleApi('/templates', 'POST', value);
       setSaving(false);
-      if (error) {
-        setFormError(error.code === '23505' ? 'Nama shift itu sudah dipakai.' : friendlyError(error, 'Gagal menyimpan shift.'));
+      if (!res.ok) {
+        setFormError(res.error);
         return;
       }
-      logActivity({
-        aksi: 'tambah_template_shift', targetTable: 'shift_templates', targetId: data.id,
-        detail: { nama: value.nama, jam_masuk: value.jam_masuk, jam_pulang: value.jam_pulang },
-      });
       setShowForm(false);
       setListMsg({ type: 'ok', text: `Shift "${value.nama}" ditambahkan.` });
       await onChanged();
       return;
     }
 
-    const { data: updated, error } = await supabase
-      .from('shift_templates').update(value).eq('id', editing.id).select().single();
-    if (error) {
-      setSaving(false);
-      setFormError(error.code === '23505' ? 'Nama shift itu sudah dipakai.' : friendlyError(error, 'Gagal menyimpan shift.'));
+    // Server mengubah template lalu menyebarkannya ke jadwal karyawan yang tertaut;
+    // kalau penyebaran gagal, perubahan template dibatalkan di server.
+    const res = await callScheduleApi(`/templates/${encodeURIComponent(editing.id)}`, 'PATCH', value);
+    setSaving(false);
+    if (!res.ok) {
+      setFormError(res.error);
+      await onChanged();
       return;
     }
 
-    // Sebarkan ke jadwal karyawan yang tertaut. Idempoten: kalau gagal, menyimpan ulang
-    // template yang sama akan mengulang penyebaran.
-    let synced = 0;
-    if (linked > 0) {
-      const sync = await supabase
-        .from('work_schedule')
-        .update(scheduleFieldsFromTemplate(updated))
-        .eq('shift_template_id', editing.id)
-        .select('employee_id');
-      if (sync.error) {
-        setSaving(false);
-        setFormError(`Template tersimpan, tapi gagal menyebar ke karyawan: ${friendlyError(sync.error, 'terjadi kesalahan.')} Klik Simpan lagi untuk mengulang.`);
-        await onChanged();
-        return;
-      }
-      synced = (sync.data || []).length;
-    }
-
-    setSaving(false);
-    logActivity({
-      aksi: 'ubah_template_shift', targetTable: 'shift_templates', targetId: editing.id,
-      detail: {
-        before: { nama: editing.nama, jam_masuk: editing.jam_masuk, jam_pulang: editing.jam_pulang, toleransi_menit: editing.toleransi_menit, aktif: editing.aktif },
-        after: value,
-        karyawan_terdampak: synced,
-      },
-    });
+    const synced = res.data?.synced || 0;
     setShowForm(false);
     setListMsg({
       type: 'ok',
@@ -169,15 +144,13 @@ export default function ShiftTemplateManager({ supabase, templates, linkedCounts
 
   const handleDelete = async (tpl) => {
     if (!window.confirm(`Hapus shift "${tpl.nama}"? Tindakan ini tidak bisa dibatalkan.`)) return;
-    const { error } = await supabase.from('shift_templates').delete().eq('id', tpl.id);
-    if (error) {
-      setListMsg({ type: 'error', text: friendlyError(error, 'Gagal menghapus shift.') });
+    const res = await callScheduleApi(`/templates/${encodeURIComponent(tpl.id)}`, 'DELETE');
+    if (!res.ok) {
+      setListMsg({ type: 'error', text: res.error });
+      // Kalau ditolak karena masih dipakai, jumlah pemakaian di tabel sudah usang.
+      if (res.status === 409) await onChanged();
       return;
     }
-    logActivity({
-      aksi: 'hapus_template_shift', targetTable: 'shift_templates', targetId: tpl.id,
-      detail: { nama: tpl.nama },
-    });
     setListMsg({ type: 'ok', text: `Shift "${tpl.nama}" dihapus.` });
     await onChanged();
   };

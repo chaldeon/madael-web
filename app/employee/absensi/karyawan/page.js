@@ -8,7 +8,7 @@ import { Pencil, X, AlertTriangle, ExternalLink, Check, XCircle } from 'lucide-r
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
-import { logActivity } from '@/lib/activityLogClient';
+import { callScheduleApi } from '@/lib/scheduleClient';
 import { isTelatEfektif, MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
 
 import LoadingState from '@/components/LoadingState';
@@ -20,7 +20,7 @@ import AbsensiSettingsPanel from '@/components/AbsensiSettingsPanel';
 import ShiftTemplateManager from '@/components/ShiftTemplateManager';
 import SortableHeader from '@/components/SortableHeader';
 import { parseToleransi, currentMonthValue, formatJam, formatTanggal, formatWaktu, countScheduledWorkdays, downloadRekapCsv, HARI_OPTIONS, DEFAULT_HARI, EMPTY_JADWAL_FORM, JADWAL_SORT_COLUMNS, REKAP_SORT_COLUMNS, TABS } from '@/lib/absensiKaryawanConfig';
-import { durasiMenit, formatDurasi, scheduleFieldsFromTemplate, shiftLabel } from '@/lib/shifts';
+import { durasiMenit, formatDurasi, shiftLabel } from '@/lib/shifts';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 
@@ -342,30 +342,23 @@ export default function SemuaKaryawanPage() {
     }
     setJadwalSaving(true);
     setJadwalSaveError(null);
-    const { data, error } = await supabase
-      .from('work_schedule')
-      .upsert(
-        [{
-          employee_id: editingEmp.id,
-          jam_masuk: jadwalForm.jam_masuk,
-          jam_pulang: jadwalForm.jam_pulang,
-          hari_kerja: jadwalForm.hari_kerja,
-          toleransi_menit: toleransi,
-          // Kolom baru: hanya dikirim kalau migrasi shift sudah jalan, supaya simpan jadwal
-          // biasa tidak rusak sebelum migrasi.
-          ...(shiftUnavailable ? {} : { shift_template_id: jadwalForm.shift_template_id || null }),
-        }],
-        { onConflict: 'employee_id' }
-      )
-      .select()
-      .single();
+    // Server memvalidasi jadwal; kalau template dipilih, nilainya disalin dari template
+    // di server (jam/hari/toleransi dari form diabaikan).
+    const res = await callScheduleApi('', 'POST', {
+      employee_id: editingEmp.id,
+      jam_masuk: jadwalForm.jam_masuk,
+      jam_pulang: jadwalForm.jam_pulang,
+      hari_kerja: jadwalForm.hari_kerja,
+      toleransi_menit: toleransi,
+      shift_template_id: jadwalForm.shift_template_id || null,
+    });
 
     setJadwalSaving(false);
-    if (error) {
-      setJadwalSaveError(friendlyError(error, 'Gagal menyimpan jadwal, coba lagi.'));
+    if (!res.ok) {
+      setJadwalSaveError(res.error);
       return;
     }
-    setSchedules((s) => ({ ...s, [editingEmp.id]: data }));
+    setSchedules((s) => ({ ...s, [editingEmp.id]: res.data.schedule }));
     setEditingEmp(null);
   };
 
@@ -392,30 +385,27 @@ export default function SemuaKaryawanPage() {
     if (!window.confirm(`Set toleransi ${toleransi} menit untuk ${targetIds.length} karyawan ${namaPerusahaan}?\n\nHanya berlaku untuk absensi baru ke depan.`)) return;
 
     setBulkSaving(true);
-    const { data, error } = await supabase
-      .from('work_schedule')
-      .update({ toleransi_menit: toleransi })
-      .in('employee_id', targetIds)
-      .select();
+    const res = await callScheduleApi('/bulk', 'POST', {
+      mode: 'toleransi',
+      employee_ids: targetIds,
+      toleransi_menit: toleransi,
+      client_id: jadwalFilterClientId || null,
+    });
     setBulkSaving(false);
 
-    if (error) {
-      setBulkMsg({ type: 'error', text: friendlyError(error, 'Gagal menerapkan toleransi, coba lagi.') });
+    if (!res.ok) {
+      setBulkMsg({ type: 'error', text: res.error });
       return;
     }
+    const data = res.data.schedules || [];
     setSchedules((prev) => {
       const next = { ...prev };
-      (data || []).forEach((row) => { next[row.employee_id] = row; });
+      data.forEach((row) => { next[row.employee_id] = row; });
       return next;
-    });
-    logActivity({
-      aksi: 'set_toleransi_telat_massal',
-      targetTable: 'work_schedule',
-      detail: { client_id: jadwalFilterClientId, toleransi_menit: toleransi, jumlah: (data || []).length },
     });
     setBulkMsg({
       type: 'ok',
-      text: `Toleransi ${toleransi} menit diterapkan ke ${(data || []).length} karyawan.${tanpaJadwal > 0 ? ` ${tanpaJadwal} karyawan dilewati karena belum punya jadwal.` : ''}${pakaiTemplate > 0 ? ` ${pakaiTemplate} karyawan dilewati karena memakai template shift (atur toleransinya di tab Template Shift).` : ''}`,
+      text: `Toleransi ${toleransi} menit diterapkan ke ${data.length} karyawan.${tanpaJadwal > 0 ? ` ${tanpaJadwal} karyawan dilewati karena belum punya jadwal.` : ''}${pakaiTemplate > 0 ? ` ${pakaiTemplate} karyawan dilewati karena memakai template shift (atur toleransinya di tab Template Shift).` : ''}`,
     });
   };
 
@@ -443,34 +433,30 @@ export default function SemuaKaryawanPage() {
     )) return;
 
     setBulkShiftSaving(true);
-    const fields = scheduleFieldsFromTemplate(tpl);
-    const { data, error } = await supabase
-      .from('work_schedule')
-      .upsert(targets.map((r) => ({ employee_id: r.emp.id, ...fields })), { onConflict: 'employee_id' })
-      .select();
+    const res = await callScheduleApi('/bulk', 'POST', {
+      mode: 'shift',
+      employee_ids: targets.map((r) => r.emp.id),
+      template_id: tpl.id,
+      client_id: jadwalFilterClientId || null,
+      work_location_id: jadwalFilterLocationId || null,
+    });
     setBulkShiftSaving(false);
 
-    if (error) {
-      setBulkShiftMsg({ type: 'error', text: friendlyError(error, 'Gagal memasang shift, coba lagi.') });
+    if (!res.ok) {
+      setBulkShiftMsg({ type: 'error', text: res.error });
       return;
     }
+    const data = res.data.schedules || [];
     setSchedules((prev) => {
       const next = { ...prev };
-      (data || []).forEach((row) => { next[row.employee_id] = row; });
+      data.forEach((row) => { next[row.employee_id] = row; });
       return next;
     });
-    logActivity({
-      aksi: 'assign_shift_massal',
-      targetTable: 'work_schedule',
-      targetId: tpl.id,
-      detail: {
-        shift: tpl.nama,
-        client_id: jadwalFilterClientId || null,
-        work_location_id: jadwalFilterLocationId || null,
-        jumlah: (data || []).length,
-      },
+    const dilewati = res.data.skipped || 0;
+    setBulkShiftMsg({
+      type: 'ok',
+      text: `Shift "${tpl.nama}" dipasang ke ${data.length} karyawan.${dilewati > 0 ? ` ${dilewati} dilewati karena tidak berstatus Aktif.` : ''}`,
     });
-    setBulkShiftMsg({ type: 'ok', text: `Shift "${tpl.nama}" dipasang ke ${(data || []).length} karyawan.` });
   };
 
   // ---- Rekap computed rows ----
@@ -1008,7 +994,6 @@ export default function SemuaKaryawanPage() {
 
           {activeTab === 'shift' && (
             <ShiftTemplateManager
-              supabase={supabase}
               templates={shiftTemplates}
               linkedCounts={linkedCounts}
               unavailable={shiftUnavailable}
