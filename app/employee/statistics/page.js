@@ -16,6 +16,10 @@ import ExportCsvButton from '@/components/ExportCsvButton';
 import { formatRupiah } from '@/lib/format';
 import { isJobOpen } from '@/lib/jobStatus';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
+
+// Jumlah id payroll run per query `.in(...)` saat menjumlah biaya payroll.
+const RUN_ID_CHUNK = 50;
 
 const PERIODS = [
   { value: 'weekly', label: 'Mingguan' },
@@ -131,16 +135,28 @@ function HrAnalyticsSection({ supabase }) {
       const periodeByRunId = {};
       runs.forEach((r) => { periodeByRunId[r.id] = r.periode; });
 
-      const { data: items, error: itemsError } = await supabase
-        .from('payroll_run_items')
-        .select('payroll_run_id, take_home_pay')
-        .in('payroll_run_id', runIds);
+      // Item dimuat lewat fetchAllRows (6 bulan x banyak klien x karyawan mudah
+      // melewati 1.000 baris; tanpa ini total biaya mengecil diam-diam). Id run
+      // dipecah per RUN_ID_CHUNK supaya `.in(...)` tidak membuat URL terlalu panjang.
+      const items = [];
+      let itemsError = null;
+      for (let i = 0; i < runIds.length && !itemsError; i += RUN_ID_CHUNK) {
+        const chunk = runIds.slice(i, i + RUN_ID_CHUNK);
+        const res = await fetchAllRows(() =>
+          supabase
+            .from('payroll_run_items')
+            .select('payroll_run_id, take_home_pay')
+            .in('payroll_run_id', chunk)
+        );
+        if (res.error) itemsError = res.error;
+        else res.data.forEach((row) => items.push(row));
+      }
 
       if (itemsError) {
         setLoadError(friendlyError(itemsError, 'Gagal memuat biaya payroll.'));
       } else {
         const totals = {};
-        (items || []).forEach((item) => {
+        items.forEach((item) => {
           const periode = periodeByRunId[item.payroll_run_id];
           if (!periode) return;
           totals[periode] = (totals[periode] || 0) + (Number(item.take_home_pay) || 0);

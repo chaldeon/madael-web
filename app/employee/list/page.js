@@ -13,8 +13,9 @@ import CompanySelect from '@/components/employee-list/CompanySelect';
 import SkeletonRows from '@/components/employee-list/SkeletonRows';
 import CompletenessBadge from '@/components/employee-list/CompletenessBadge';
 import SortableHeader from '@/components/SortableHeader';
-import { emptyForm, TEMPLATE_URL, MODULE_GROUPS, PAGE_SIZE_OPTIONS, SORT_COLUMNS } from '@/lib/employeeListConfig';
+import { emptyForm, TEMPLATE_URL, MODULE_GROUPS, PAGE_SIZE_OPTIONS, SORT_COLUMNS, MAKS_ID_FILTER_KONTRAK } from '@/lib/employeeListConfig';
 import KontrakBadge from '@/components/KontrakBadge';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import { KONTRAK_FILTER_OPTIONS, isKontrakFilterValid, applyKontrakFilter, formatTanggalKepegawaian } from '@/lib/kepegawaian';
 import { EXPLICIT_ONLY_MODULES } from '@/lib/employeeModules';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
@@ -141,12 +142,27 @@ export default function EmployeeListPage() {
     // cari dulu id akun yang cocok, lalu batasi query employees ke id itu.
     let kontrakIds = null;
     if (filterKontrak) {
-      const { data: kontrakRows, error: kontrakError } = await applyKontrakFilter(
-        supabase.from('employees_master').select('linked_employee_id').not('linked_employee_id', 'is', null),
-        filterKontrak
+      // fetchAllRows: tanpa itu daftar id terpotong diam-diam di 1.000 baris dan
+      // karyawan yang cocok tidak muncul.
+      const { data: kontrakRows, error: kontrakError } = await fetchAllRows(() =>
+        applyKontrakFilter(
+          supabase.from('employees_master').select('linked_employee_id').not('linked_employee_id', 'is', null),
+          filterKontrak
+        )
       );
       if (kontrakError) {
         setError(friendlyError(kontrakError, 'Gagal memuat data karyawan.'));
+        setEmployees([]);
+        setTotalCount(0);
+        setMasterByEmployeeId({});
+        setScheduledIds(new Set());
+        setLoading(false);
+        return;
+      }
+      // Id dipakai di `.in(...)` pada query employees (masuk ke URL), jadi dibatasi.
+      // Lewat batas -> beri tahu admin untuk mempersempit, bukan memotong diam-diam.
+      if ((kontrakRows || []).length > MAKS_ID_FILTER_KONTRAK) {
+        setError(`Filter kontrak ini cocok dengan ${kontrakRows.length} karyawan — terlalu banyak untuk ditampilkan sekaligus. Pilih filter kontrak yang lebih sempit (mis. "Berakhir ≤ 60 hari").`);
         setEmployees([]);
         setTotalCount(0);
         setMasterByEmployeeId({});

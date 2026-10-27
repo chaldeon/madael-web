@@ -2,12 +2,15 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { requireModuleAccess } from '@/lib/moduleAccessServer';
 import { batasPeriode } from '@/lib/overtimeRules';
+import { parsePageParams, isRangeNotSatisfiable } from '@/lib/pagination';
 
 const STATUS_VALID = ['pending', 'approved', 'rejected', 'cancelled'];
 
-// GET /api/overtime-requests/admin?status=&periode=YYYY-MM
-// Semua pengajuan lembur untuk halaman Kelola Lembur. status kosong/'all' =
-// semua status; periode kosong = semua periode (berdasarkan tanggal lembur).
+// GET /api/overtime-requests/admin?status=&periode=YYYY-MM&page=1&pageSize=50
+// Pengajuan lembur (berhalaman) untuk halaman Kelola Lembur. status kosong/'all'
+// = semua status; periode kosong = semua periode (berdasarkan tanggal lembur).
+// Dulu dibatasi 500 baris tanpa halaman berikutnya, sehingga riwayat lama tidak
+// bisa dibuka; sekarang dimuat per halaman (range + count).
 // Hak modul overtime_admin dicek manual karena memakai service role.
 export async function GET(request) {
   try {
@@ -28,19 +31,26 @@ export async function GET(request) {
       return NextResponse.json({ error: 'Format periode harus YYYY-MM.' }, { status: 400 });
     }
 
-    let query = admin
-      .from('overtime_requests')
-      .select('*')
-      .order('tanggal', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(500);
+    const { page, pageSize, from, to } = parsePageParams(searchParams);
+
+    let query = admin.from('overtime_requests').select('*', { count: 'exact' });
     if (status !== 'all') query = query.eq('status', status);
     if (periode) {
       const { awal, awalBulanDepan } = batasPeriode(periode);
       query = query.gte('tanggal', awal).lt('tanggal', awalBulanDepan);
     }
+    // `id` sebagai pemutus seri supaya urutan antar halaman deterministik.
+    query = query
+      .order('tanggal', { ascending: false })
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to);
 
-    const { data: rows, error } = await query;
+    const { data: rows, error, count } = await query;
+    // Halaman melewati akhir data: bukan error — klien kembali ke halaman 1.
+    if (isRangeNotSatisfiable(error)) {
+      return NextResponse.json({ outOfRange: true, requests: [], total: 0, page, pageSize });
+    }
     if (error) {
       console.error('Muat data kelola lembur error:', error);
       return NextResponse.json({ error: 'Gagal memuat data pengajuan lembur.' }, { status: 500 });
@@ -65,6 +75,9 @@ export async function GET(request) {
         employee_nama: namaById[r.employee_id] || '—',
         approved_by_nama: r.approved_by ? (namaById[r.approved_by] || '—') : null,
       })),
+      total: count ?? 0,
+      page,
+      pageSize,
     });
   } catch (err) {
     console.error('Muat data kelola lembur error:', err);
