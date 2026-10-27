@@ -14,7 +14,9 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import LeavePolicyCard from '@/components/LeavePolicyCard';
 import PaginationBar from '@/components/PaginationBar';
+import ExportCsvButton from '@/components/ExportCsvButton';
 import { ADMIN_PAGE_SIZE_DEFAULT, totalPagesOf } from '@/lib/pagination';
+import { CUTI_CSV_HEADERS, ambilBarisEkspor, tanggalUntukNamaFile } from '@/lib/adminCsvExport';
 
 function formatTanggal(value) {
   if (!value) return '—';
@@ -190,6 +192,16 @@ export default function LeaveRequestAdminPage() {
     if (status === 'allowed') loadData();
   }, [status, loadData]);
 
+  // Ekspor CSV: seluruh pengajuan sesuai filter status aktif (bukan hanya
+  // halaman yang tampil), diambil lewat route server.
+  const loadExportRows = useCallback(
+    () => ambilBarisEkspor(
+      `/api/leave-requests/admin/export?${new URLSearchParams({ status: statusFilter }).toString()}`,
+      'Gagal mengekspor pengajuan cuti.'
+    ),
+    [statusFilter]
+  );
+
   const empById = useMemo(() => {
     const map = {};
     employees.forEach((e) => { map[e.id] = e; });
@@ -359,6 +371,14 @@ export default function LeaveRequestAdminPage() {
           <option value="cancelled">Dibatalkan</option>
           <option value="all">Semua</option>
         </select>
+        <ExportCsvButton
+          filename={`pengajuan-cuti-${statusFilter}-${tanggalUntukNamaFile()}`}
+          headers={CUTI_CSV_HEADERS}
+          loadRows={loadExportRows}
+          disabled={loading || totalCount === 0}
+          neutralizeFormulas
+          label="Ekspor CSV"
+        />
       </div>
 
       <LeavePolicyCard
