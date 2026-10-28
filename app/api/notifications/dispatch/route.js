@@ -11,7 +11,6 @@ import {
 import {
   NOTIFICATION_EVENTS,
   MAKS_PESAN,
-  JENDELA_DUPLIKAT_MS,
 } from '@/lib/notificationEvents';
 
 // POST /api/notifications/dispatch
@@ -54,33 +53,55 @@ export async function POST(request) {
 
     const pesan = String(result.pesan).slice(0, MAKS_PESAN);
 
-    // Anti-duplikat: event yang sama persis dalam 10 menit terakhir diabaikan.
-    const since = new Date(Date.now() - JENDELA_DUPLIKAT_MS).toISOString();
-    const { data: dupe } = await admin
-      .from('notifications')
-      .select('id')
-      .eq('tipe', result.tipe)
-      .eq('pesan', pesan)
-      .gte('created_at', since)
-      .limit(1);
-    if (dupe && dupe.length > 0) {
+    // Anti-duplikat: tiap penerima hanya dapat satu notifikasi per (tipe + id
+    // sumber). Dijaga unique index (user_id, dedupe_key), jadi dua kejadian
+    // berbeda dengan teks sama tidak saling menelan, dan request paralel pun aman.
+    const dedupeKey = `${result.tipe}:${String(id)}`;
+
+    // Event broadcast (mis. pengumuman_baru) hanya boleh disiarkan sekali.
+    let claimed = false;
+    if (typeof def.claim === 'function') {
+      claimed = await def.claim({ admin, id });
+      if (!claimed) {
+        return NextResponse.json({ error: 'Event ini sudah pernah disiarkan.' }, { status: 409 });
+      }
+    }
+
+    const payload = { tipe: result.tipe, pesan, link: result.link, dedupeKey };
+    const to = result.to;
+    let outcome = null;
+    try {
+      if (to === 'superadmins') {
+        outcome = await notifySuperadmins(admin, payload);
+      } else if (to === 'all_active') {
+        outcome = await notifyAllActive(admin, payload);
+      } else if (typeof to?.module === 'string') {
+        outcome = await notifyByModule(admin, { moduleKey: to.module, ...payload });
+      } else if (to?.userId) {
+        outcome = await notifyEmployee(admin, { userId: to.userId, ...payload });
+      } else if (Array.isArray(to?.userIds)) {
+        outcome = await notifyEmployees(admin, { userIds: to.userIds, ...payload });
+      }
+    } catch (err) {
+      console.error('Dispatch notifikasi gagal mengirim:', err);
+    }
+
+    // Pengiriman gagal: lepas tanda "sudah disiarkan" supaya bisa dicoba lagi.
+    // Mengulang aman — penerima yang sudah menerima dilewati oleh kunci dedupe.
+    if (!outcome || outcome.ok === false) {
+      if (claimed && typeof def.release === 'function') {
+        try {
+          await def.release({ admin, id });
+        } catch (err) {
+          console.error('Dispatch notifikasi gagal melepas tanda siaran:', err);
+        }
+      }
+      return NextResponse.json({ error: 'Gagal mengirim notifikasi.' }, { status: 500 });
+    }
+
+    if (outcome.inserted === 0) {
       return NextResponse.json({ success: true, duplicate: true });
     }
-
-    const payload = { tipe: result.tipe, pesan, link: result.link };
-    const to = result.to;
-    if (to === 'superadmins') {
-      await notifySuperadmins(admin, payload);
-    } else if (to === 'all_active') {
-      await notifyAllActive(admin, payload);
-    } else if (typeof to?.module === 'string') {
-      await notifyByModule(admin, { moduleKey: to.module, ...payload });
-    } else if (to?.userId) {
-      await notifyEmployee(admin, { userId: to.userId, ...payload });
-    } else if (Array.isArray(to?.userIds)) {
-      await notifyEmployees(admin, { userIds: to.userIds, ...payload });
-    }
-
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Dispatch notifikasi error:', err);
