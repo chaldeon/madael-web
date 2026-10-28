@@ -7,7 +7,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { computeSnapshot } from '@/lib/payroll/runSnapshot';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -104,108 +103,48 @@ export default function PayrollRunListPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const [pendingDraft, setPendingDraft] = useState(null); // { client, emps, skippedNames, skippedIds }
+  const [pendingDraft, setPendingDraft] = useState(null); // { client, skippedNames }
   const handlePendingDraftBackdrop = useModalDismiss(!!pendingDraft, () => setPendingDraft(null), false);
 
-  // Melakukan pembuatan run + snapshot yang sebenarnya. excludeIds adalah
-  // id employees_master yang di-skip karena akun absensinya Nonaktif
-  // (hasil konfirmasi admin di modal ringkasan, Fase 1.4).
-  const createDraft = async (client, emps, excludeIds = []) => {
-    const empsToRun = excludeIds.length
-      ? emps.filter((e) => !excludeIds.includes(e.id))
-      : emps;
-
-    if (empsToRun.length === 0) {
-      setCreatingClientId(null);
-      setCreateError(`Semua employee klien "${client.nama_perusahaan}" dilewati (akun Nonaktif) — tidak ada yang bisa dimasukkan ke draft.`);
-      return;
-    }
-
-    const { data: run, error: runError } = await supabase
-      .from('payroll_runs')
-      .insert([{ client_id: client.id, periode, status: 'Draft' }])
-      .select()
-      .single();
-
-    if (runError) {
-      setCreatingClientId(null);
-      setCreateError(`Gagal membuat payroll run: ${friendlyError(runError, 'terjadi kesalahan.')}`);
-      return;
-    }
-
-    const snapshots = await Promise.all(empsToRun.map((e) => computeSnapshot(supabase, e, periode)));
-    const itemsPayload = snapshots.map((s) => ({ ...s, payroll_run_id: run.id }));
-
-    const { error: itemsError } = await supabase.from('payroll_run_items').insert(itemsPayload);
-    setCreatingClientId(null);
-
-    if (itemsError) {
-      setCreateError(`Run dibuat tapi gagal hitung item: ${friendlyError(itemsError, 'terjadi kesalahan.')} Buka Detail untuk cek manual.`);
-    }
-
-    router.push(`/employee/payroll/run/${run.id}`);
-  };
-
-  const handleBuatDraft = async (client) => {
+  // Pembuatan run + snapshot dikerjakan server (POST /api/payroll/runs): server
+  // yang menghitung angka, menolak run ganda (klien + periode), dan membatalkan
+  // run kalau item gagal tersimpan. Employee dengan akun absensi Nonaktif
+  // dilewati hanya setelah admin mengonfirmasi di modal ringkasan: server
+  // membalas 409 NONAKTIF_PERLU_KONFIRMASI, lalu permintaan dikirim ulang dengan
+  // lewati_nonaktif = true.
+  const requestDraft = async (client, lewatiNonaktif) => {
     setCreatingClientId(client.id);
     setCreateError(null);
 
-    const { data: emps, error: empError } = await supabase
-      .from('employees_master')
-      .select('id, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, jkk_rate')
-      .eq('client_id', client.id);
+    try {
+      const res = await fetch('/api/payroll/runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: client.id, periode, lewati_nonaktif: lewatiNonaktif }),
+      });
+      const json = await res.json().catch(() => ({}));
 
-    if (empError) {
-      setCreatingClientId(null);
-      setCreateError(`Gagal memuat employee klien "${client.nama_perusahaan}": ${friendlyError(empError, 'terjadi kesalahan.')}`);
-      return;
-    }
-
-    if (!emps || emps.length === 0) {
-      setCreatingClientId(null);
-      setCreateError(`Klien "${client.nama_perusahaan}" belum punya employee di Payroll Manager.`);
-      return;
-    }
-
-    // Fase 1.4 — cek status akun absensi (employees.status) dari tiap
-    // linked_employee_id sebelum draft dibuat. Employee yang akunnya
-    // Nonaktif (resign/dinonaktifkan) di-exclude dari snapshot secara
-    // default, dan admin diberi ringkasan eksplisit dulu sebelum
-    // lanjut — bukan diam-diam di-skip tanpa pemberitahuan.
-    const linkedIds = emps.map((e) => e.linked_employee_id).filter(Boolean);
-    let nonaktifById = {};
-    if (linkedIds.length > 0) {
-      const { data: linkedAccounts, error: linkedError } = await supabase
-        .from('employees')
-        .select('id, nama, status')
-        .in('id', linkedIds);
-
-      if (linkedError) {
-        setCreatingClientId(null);
-        setCreateError(`Gagal cek status akun absensi: ${friendlyError(linkedError, 'terjadi kesalahan.')}`);
+      if (res.ok && json.run?.id) {
+        router.push(`/employee/payroll/run/${json.run.id}`);
         return;
       }
 
-      (linkedAccounts || []).forEach((acc) => {
-        if (acc.status === 'Nonaktif') nonaktifById[acc.id] = acc.nama;
-      });
-    }
-
-    const skipped = emps.filter((e) => e.linked_employee_id && nonaktifById[e.linked_employee_id]);
-
-    if (skipped.length > 0) {
       setCreatingClientId(null);
-      setPendingDraft({
-        client,
-        emps,
-        skippedIds: skipped.map((e) => e.id),
-        skippedNames: skipped.map((e) => nonaktifById[e.linked_employee_id]),
-      });
-      return;
+      if (res.status === 409 && json.code === 'NONAKTIF_PERLU_KONFIRMASI') {
+        setPendingDraft({ client, skippedNames: json.dilewati || [] });
+        return;
+      }
+      setCreateError(json.error || 'Gagal membuat payroll run.');
+      // Run sudah dibuat admin lain: muat ulang supaya tombol Detail muncul.
+      if (json.code === 'RUN_SUDAH_ADA') await loadData();
+    } catch (err) {
+      console.error('Buat draft payroll run error:', err);
+      setCreatingClientId(null);
+      setCreateError('Gagal membuat payroll run. Periksa koneksi lalu coba lagi.');
     }
-
-    await createDraft(client, emps);
   };
+
+  const handleBuatDraft = (client) => requestDraft(client, false);
 
   const sortedClients = useMemo(() => {
     const ctx = { runs, employeeCounts };
@@ -356,10 +295,9 @@ export default function PayrollRunListPage() {
               </button>
               <button
                 onClick={() => {
-                  const { client, emps, skippedIds } = pendingDraft;
+                  const { client } = pendingDraft;
                   setPendingDraft(null);
-                  setCreatingClientId(client.id);
-                  createDraft(client, emps, skippedIds);
+                  requestDraft(client, true);
                 }}
                 className="bg-madael-red text-white px-4 py-2 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors"
               >

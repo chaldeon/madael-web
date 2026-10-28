@@ -7,12 +7,10 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { hitungBPJS, hitungBrutoPPh21, hitungPPh21TER } from '@/lib/payroll/calculations';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
-import { computeSnapshot } from '@/lib/payroll/runSnapshot';
 import RunItemsTable from '@/components/payroll-run/RunItemsTable';
 import { STATUS_STYLE, SORT_COLUMNS, periodeLabel, downloadTransferCsv } from '@/lib/payrollRunConfig';
 import { statusOptionsFor } from '@/lib/payrollRun';
@@ -84,48 +82,30 @@ export default function PayrollRunDetailPage() {
 
   // Employee baru yang ditambahkan di Payroll Manager SETELAH run ini dibuat
   // tidak otomatis masuk sini — payroll_run_items itu snapshot sekali jalan
-  // waktu "Buat Draft" ditekan. Fungsi ini bandingkan employees_master klien
-  // dengan item yang sudah ada di run, lalu insert item baru (pakai
-  // computeSnapshot yang sama dengan waktu run dibuat) buat yang belum ada.
-  // Cuma untuk run yang belum Approved — run yang sudah final tidak diubah.
+  // waktu "Buat Draft" ditekan. Server (POST /api/payroll/runs/[runId]/sync)
+  // membandingkan employees_master klien dengan item yang sudah ada, lalu
+  // menambahkan item baru dengan perhitungan yang sama seperti saat run dibuat.
+  // Hanya untuk run yang belum Approved.
   const handleSyncEmployeeBaru = async () => {
     setSyncing(true);
     setSyncNote(null);
     setLoadError(null);
 
-    const { data: emps, error: empError } = await supabase
-      .from('employees_master')
-      .select('id, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, jkk_rate')
-      .eq('client_id', run.client_id);
-
-    if (empError) {
+    try {
+      const res = await fetch(`/api/payroll/runs/${run.id}/sync`, { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLoadError(`Gagal tambah employee baru ke run: ${json.error || 'terjadi kesalahan.'}`);
+        return;
+      }
+      setSyncNote(json.note || null);
+      if (json.added > 0) await loadData();
+    } catch (err) {
+      console.error('Sync employee baru error:', err);
+      setLoadError('Gagal tambah employee baru ke run. Periksa koneksi lalu coba lagi.');
+    } finally {
       setSyncing(false);
-      setLoadError(`Gagal cek employee baru: ${friendlyError(empError, 'terjadi kesalahan.')}`);
-      return;
     }
-
-    const existingIds = new Set(items.map((i) => i.employee_master_id));
-    const newEmps = (emps || []).filter((e) => !existingIds.has(e.id));
-
-    if (newEmps.length === 0) {
-      setSyncing(false);
-      setSyncNote('Tidak ada employee baru — semua employee klien ini sudah ada di run ini.');
-      return;
-    }
-
-    const snapshots = await Promise.all(newEmps.map((e) => computeSnapshot(supabase, e, run.periode)));
-    const itemsPayload = snapshots.map((s) => ({ ...s, payroll_run_id: run.id }));
-
-    const { error: insertError } = await supabase.from('payroll_run_items').insert(itemsPayload);
-    setSyncing(false);
-
-    if (insertError) {
-      setLoadError(`Gagal tambah employee baru ke run: ${friendlyError(insertError, 'terjadi kesalahan.')}`);
-      return;
-    }
-
-    setSyncNote(`${newEmps.length} employee baru berhasil ditambahkan ke run ini.`);
-    await loadData();
   };
 
   // Draft input Overtime/Insentif/Kompensasi per item, sebelum di-"Hitung Ulang"
@@ -184,41 +164,34 @@ export default function PayrollRunDetailPage() {
     setLemburLoading(false);
   };
 
-  // Hitung ulang PPh21/THP persis rumus yang sama dengan Payslip:
-  // Bruto PPh21 = Gaji Pokok + Allowance + Overtime + Insentif + Kompensasi
-  //             + JKK + JKM + BPJS Kesehatan (perusahaan) − Penalty
+  // Simpan Overtime/Insentif/Kompensasi satu item. PPh21 dan THP dihitung ulang
+  // di server (PATCH /api/payroll/runs/[runId]/items/[itemId]) dengan rumus yang
+  // sama dengan Payslip; hasilnya dikembalikan dan dipakai untuk memperbarui baris.
   const recalcAndSaveItem = async (item) => {
-    const overtime = Number(getEditValue(item, 'overtime')) || 0;
-    const insentif = Number(getEditValue(item, 'insentif')) || 0;
-    const kompensasi = Number(getEditValue(item, 'kompensasi')) || 0;
-    const master = item.employees_master;
-
     setRecalcSaving(item.id);
 
-    const gajiPokok = Number(item.gaji_pokok) || 0;
-    const totalForBruto = (Number(item.allowance) || 0) + overtime + insentif + kompensasi;
-    const bpjs = master?.jkk_rate != null ? hitungBPJS(gajiPokok, master.jkk_rate) : null;
-    const brutoPPh21 = bpjs ? hitungBrutoPPh21(gajiPokok, totalForBruto, bpjs, item.penalty) : null;
-    const pph21Result = (bpjs && master?.status_ptkp) ? hitungPPh21TER(brutoPPh21, master.status_ptkp) : null;
-    const pph21 = pph21Result ? Math.floor(pph21Result.pph) : 0;
-    const bpjsEmployee = bpjs ? bpjs.totalEmployee : 0;
-    const takeHomePay = gajiPokok + totalForBruto - (Number(item.penalty) || 0) - bpjsEmployee - pph21;
-
-    const payload = {
-      overtime,
-      insentif,
-      kompensasi,
-      pph21,
-      take_home_pay: Math.round(takeHomePay),
-    };
-
-    const { error } = await supabase.from('payroll_run_items').update(payload).eq('id', item.id);
-    setRecalcSaving(null);
-    if (error) {
-      setLoadError(`Gagal simpan Overtime/Insentif/Kompensasi: ${friendlyError(error, 'terjadi kesalahan.')}`);
-      return;
+    try {
+      const res = await fetch(`/api/payroll/runs/${run.id}/items/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          overtime: getEditValue(item, 'overtime'),
+          insentif: getEditValue(item, 'insentif'),
+          kompensasi: getEditValue(item, 'kompensasi'),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLoadError(`Gagal simpan Overtime/Insentif/Kompensasi: ${json.error || 'terjadi kesalahan.'}`);
+        return;
+      }
+      setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...json.item } : i)));
+    } catch (err) {
+      console.error('Simpan item payroll run error:', err);
+      setLoadError('Gagal simpan Overtime/Insentif/Kompensasi. Periksa koneksi lalu coba lagi.');
+    } finally {
+      setRecalcSaving(null);
     }
-    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...payload } : i)));
   };
 
   const totalThp = useMemo(() => items.reduce((sum, i) => sum + (Number(i.take_home_pay) || 0), 0), [items]);
