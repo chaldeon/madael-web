@@ -106,11 +106,15 @@ function HrAnalyticsSection({ supabase }) {
     const months = last6Months();
 
     const [empRes, masterRes, attendanceRes, runsRes] = await Promise.all([
-      supabase.from('employees').select('id, status, created_at'),
-      supabase.from('employees_master').select('status, linked_employee_id'),
+      // fetchAllRows: tanpa ini PostgREST memotong diam-diam di 1.000 baris dan
+      // jumlah aktif/nonaktif serta karyawan yang belum terhubung jadi salah.
+      fetchAllRows(() => supabase.from('employees').select('id, status, created_at')),
+      fetchAllRows(() => supabase.from('employees_master').select('status, linked_employee_id')),
       // Agregasi 6 bulan absensi dihitung di database (RPC), bukan ditarik per baris.
       supabase.rpc('attendance_monthly_summary', { p_months: 6 }),
-      supabase.from('payroll_runs').select('id, periode').eq('status', 'Approved').gte('periode', months[0]),
+      fetchAllRows(() =>
+        supabase.from('payroll_runs').select('id, periode').eq('status', 'Approved').gte('periode', months[0])
+      ),
     ]);
 
     const criticalError = empRes.error || masterRes.error || attendanceRes.error || runsRes.error;
