@@ -30,6 +30,46 @@ function validNominal(value) {
   return num;
 }
 
+// GET /api/payroll/master/[id]
+//
+// Detail satu baris employees_master untuk halaman detail Payroll
+// (app/employee/payroll/[id]). Dulu dibaca langsung dari browser (select *,
+// termasuk gaji, NPWP, rekening); sekarang hak modul payroll dicek di server.
+// Respons: { data } — baris master + companies:client_id ( nama_perusahaan ).
+export async function GET(_request, { params }) {
+  try {
+    const { id } = await params;
+
+    const admin = createAdminClient();
+    const access = await requireModuleAccess(admin, ['payroll']);
+    if (access.error) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
+    }
+
+    const { data, error } = await admin
+      .from('employees_master')
+      .select('*, companies:client_id ( nama_perusahaan )')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) {
+      if (error.code === '22P02') {
+        return NextResponse.json({ error: 'Data employee tidak ditemukan.' }, { status: 404 });
+      }
+      return NextResponse.json(
+        { error: `Gagal memuat data employee: ${friendlyError(error, 'terjadi kesalahan pada server.', { context: 'Muat employees_master' })}` },
+        { status: 500 }
+      );
+    }
+    if (!data) {
+      return NextResponse.json({ error: 'Data employee tidak ditemukan.' }, { status: 404 });
+    }
+
+    return NextResponse.json({ data }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err) {
+    return NextResponse.json({ error: 'Terjadi kesalahan server.' }, { status: 500 });
+  }
+}
+
 export async function PATCH(request, { params }) {
   try {
     const { id } = await params;

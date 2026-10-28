@@ -457,7 +457,7 @@ export default function KarirListClient({ initialJobs = null }) {
           <p className="text-center text-xs text-[#6B6B6B] mt-4">
             {t.genOrContact}{' '}
             <a
-              href="https://wa.me/6285121548247?text=Halo%20Madael%20Consult%2C%20saya%20ingin%20menanyakan%20lowongan%20kerja."
+              href="https://wa.me/62895403232173?text=Halo%20Madael%20Consult%2C%20saya%20ingin%20menanyakan%20lowongan%20kerja."
               target="_blank"
               rel="noopener noreferrer"
               className="text-madael-red hover:text-madael-dark font-medium no-underline"

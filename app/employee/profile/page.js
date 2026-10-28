@@ -90,12 +90,16 @@ export default function ProfilePage() {
       setPhotoUrl(signed?.signedUrl || null);
     }
 
+    // Data HR (rekening, NPWP, BPJS, dll.) diambil lewat API route yang memilih
+    // baris dari sesi dan membatasi kolomnya — bukan select langsung dari browser.
     const [masterRes, reqRes] = await Promise.all([
-      supabase
-        .from('employees_master')
-        .select('id, posisi, status, gaji_pokok, tunjangan, alamat, kontak_darurat_nama, kontak_darurat_hubungan, kontak_darurat_telepon, nama_rekening, no_rekening, npwp_status, npwp, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan')
-        .eq('linked_employee_id', emp.id)
-        .maybeSingle(),
+      fetch('/api/profile/me')
+        .then(async (res) => {
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) return { master: null, error: body.error || 'Gagal memuat data HR.' };
+          return { master: body.master || null, error: null };
+        })
+        .catch((err) => ({ master: null, error: friendlyCaught(err, 'Gagal memuat data HR.') })),
       supabase
         .from('profile_change_requests')
         .select('*')
@@ -103,13 +107,18 @@ export default function ProfilePage() {
         .order('created_at', { ascending: false }),
     ]);
 
+    if (masterRes.error) {
+      setLoadError(masterRes.error);
+      setLoading(false);
+      return;
+    }
     if (reqRes.error) {
       setLoadError(friendlyError(reqRes.error, 'Gagal memuat riwayat pengajuan.'));
       setLoading(false);
       return;
     }
 
-    const masterData = masterRes.data || null;
+    const masterData = masterRes.master;
     setMaster(masterData);
     setRequests(reqRes.data || []);
 
