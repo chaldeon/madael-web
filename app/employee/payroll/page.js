@@ -78,10 +78,15 @@ export default function PayrollManagerPage() {
     setLoadError(null);
     const [clRes, empRes, linkableRes, scheduleRes] = await Promise.all([
       supabase.from('companies').select('id, nama_perusahaan').order('nama_perusahaan', { ascending: true }),
-      supabase
-        .from('employees_master')
-        .select('id, nama, client_id, posisi, status, tanggal_bergabung, jenis_hubungan_kerja, kontrak_berakhir, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan, nama_rekening, no_rekening, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, cuti_carry_over, cuti_carry_over_tahun, created_at, drive_file_id, drive_file_name, drive_file_link, employees:linked_employee_id ( nama )')
-        .order('created_at', { ascending: false }),
+      // Daftar master (gaji, NPWP, rekening, BPJS semua karyawan) diambil lewat
+      // API route yang mengecek modul payroll di server, bukan select dari browser.
+      fetch('/api/payroll/master')
+        .then(async (res) => {
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) return { data: null, error: true, message: body.error || 'Gagal memuat data payroll.' };
+          return { data: body.data || [], error: null };
+        })
+        .catch((err) => ({ data: null, error: true, message: friendlyCaught(err, 'Gagal memuat data payroll.') })),
       supabase.from('employees').select('id, nama, client_id').eq('status', 'Aktif').order('nama'),
       // Fase 1.5 — dipakai hanya untuk badge "Jadwal belum diisi" di tabel
       // utama; tidak butuh detail jam, cukup tahu employee_id mana saja
@@ -89,8 +94,13 @@ export default function PayrollManagerPage() {
       supabase.from('work_schedule').select('employee_id'),
     ]);
 
-    if (clRes.error || empRes.error || linkableRes.error || scheduleRes.error) {
-      setLoadError(friendlyError((clRes.error || empRes.error || linkableRes.error || scheduleRes.error), 'Gagal memuat data payroll.'));
+    if (empRes.error) {
+      setLoadError(empRes.message);
+      setLoading(false);
+      return;
+    }
+    if (clRes.error || linkableRes.error || scheduleRes.error) {
+      setLoadError(friendlyError((clRes.error || linkableRes.error || scheduleRes.error), 'Gagal memuat data payroll.'));
       setLoading(false);
       return;
     }

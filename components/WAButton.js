@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useLanguage } from '@/context/LanguageContext';
 
-const WA_NUMBER = '6285121548247';
+const WA_NUMBER = '62895403232173';
 const WA_MESSAGE =
   'Halo Madael Consult, saya ingin konsultasi mengenai layanan HR Anda.';
 const WA_HREF = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(WA_MESSAGE)}`;

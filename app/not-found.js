@@ -23,7 +23,7 @@ export default function NotFound() {
             Kembali ke Beranda
           </Link>
           <a
-            href="https://wa.me/6285121548247?text=Halo%20Madael%20Consult%2C%20saya%20mencari%20halaman%20yang%20tidak%20ditemukan%20di%20website."
+            href="https://wa.me/62895403232173?text=Halo%20Madael%20Consult%2C%20saya%20mencari%20halaman%20yang%20tidak%20ditemukan%20di%20website."
             target="_blank"
             rel="noopener noreferrer"
             className="inline-block border border-white text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-white hover:text-black transition-colors"

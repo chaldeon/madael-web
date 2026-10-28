@@ -12,7 +12,6 @@ import KehadiranHariIniWidget from '@/components/KehadiranHariIniWidget';
 import { KEHADIRAN_MODULES } from '@/lib/kehadiranHariIni';
 import EmployeeHeader from '@/components/EmployeeHeader';
 import QuickClockInCard from '@/components/QuickClockInCard';
-import { missingFieldsForEmployee, EMPLOYEE_COMPLETENESS_COLUMNS } from '@/lib/dataCompleteness';
 
 // Pengumuman aktif = belum ada expired_at, atau expired_at masih di masa
 // depan. Dicek ulang di RLS/insert admin, ini cuma filter tampilan.
@@ -180,17 +179,17 @@ export default function EmployeeDashboardPage() {
     // Data master untuk titik pengingat di kartu Profil Saya — juga best-effort
     // dan paralel: kalau gagal atau akun belum terhubung ke master, titiknya
     // sekadar tidak muncul (halaman Profil Saya yang menjelaskan kasus itu).
-    const masterQuery = supabase
-      .from('employees_master')
-      .select(EMPLOYEE_COMPLETENESS_COLUMNS)
-      .eq('linked_employee_id', emp.id)
-      .maybeSingle();
+    // Kelengkapan dihitung di server (/api/profile/kelengkapan) dan hanya
+    // jumlahnya yang dikirim, jadi rekening/NPWP/BPJS tidak ikut ke browser.
+    const kelengkapanQuery = fetch('/api/profile/kelengkapan')
+      .then((res) => (res.ok ? res.json() : null))
+      .catch(() => null);
 
-    const [{ data: company }, { data: mods }, { data: master }] = await Promise.all([companyQuery, modsQuery, masterQuery]);
+    const [{ data: company }, { data: mods }, kelengkapan] = await Promise.all([companyQuery, modsQuery, kelengkapanQuery]);
 
     setEmployee({ ...emp, companyName: company?.nama_perusahaan || null });
     setModuleKeys((mods || []).map((m) => m.module_name));
-    setProfileIncomplete(missingFieldsForEmployee(master).length > 0);
+    setProfileIncomplete((kelengkapan?.kurang || 0) > 0);
 
     setLoading(false);
   }, [supabase, router]);

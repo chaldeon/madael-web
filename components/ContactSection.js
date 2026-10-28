@@ -30,7 +30,7 @@ export default function ContactSection() {
             </div>
             <div className="text-sm">
               <a
-                href="https://wa.me/6285121548247?text=Halo%20Madael%20Consult%2C%20saya%20ingin%20konsultasi%20mengenai%20layanan%20HR%20Anda."
+                href="https://wa.me/62895403232173?text=Halo%20Madael%20Consult%2C%20saya%20ingin%20konsultasi%20mengenai%20layanan%20HR%20Anda."
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-black no-underline hover:text-madael-red transition-colors"

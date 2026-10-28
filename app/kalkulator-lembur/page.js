@@ -288,7 +288,7 @@ export default function KalkulatorLembur() {
         <p className="text-sm text-[#6B6B6B] mb-6 max-w-[480px] mx-auto">
           {lang === 'id' ? 'Madael Consult membantu perusahaan mengelola payroll secara profesional.' : 'Madael Consult helps companies manage payroll professionally.'}
         </p>
-        <a href="https://wa.me/6285121548247?text=Halo%20Madael%20Consult%2C%20saya%20ingin%20konsultasi%20mengenai%20layanan%20payroll%20Anda." target="_blank" rel="noopener noreferrer" className="inline-block bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors">
+        <a href="https://wa.me/62895403232173?text=Halo%20Madael%20Consult%2C%20saya%20ingin%20konsultasi%20mengenai%20layanan%20payroll%20Anda." target="_blank" rel="noopener noreferrer" className="inline-block bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors">
           {lang === 'id' ? 'Hubungi Madael Consult' : 'Contact Madael Consult'}
         </a>
       </section>

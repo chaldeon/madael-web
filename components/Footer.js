@@ -18,7 +18,7 @@ export default function Footer() {
 
       <div className="flex items-center gap-6 flex-wrap">
         <a
-          href="https://wa.me/6285121548247?text=Halo%20Madael%20Consult%2C%20saya%20ingin%20konsultasi%20mengenai%20layanan%20HR%20Anda."
+          href="https://wa.me/62895403232173?text=Halo%20Madael%20Consult%2C%20saya%20ingin%20konsultasi%20mengenai%20layanan%20HR%20Anda."
           target="_blank"
           rel="noopener noreferrer"
           className="text-xs text-[#555] tracking-[0.06em] no-underline hover:text-[#999] transition-colors"

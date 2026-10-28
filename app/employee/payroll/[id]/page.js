@@ -74,14 +74,24 @@ export default function EmployeeDetailPage() {
     setLoadError(null);
     setNotFound(false);
 
-    const { data, error } = await supabase
-      .from('employees_master')
-      .select('*, companies:client_id ( nama_perusahaan )')
-      .eq('id', params.id)
-      .maybeSingle();
-
-    if (error) {
-      setLoadError(friendlyError(error, 'Gagal memuat data employee.'));
+    // Lewat API route (cek modul payroll di server), bukan select * dari browser.
+    let data = null;
+    try {
+      const res = await fetch(`/api/payroll/master/${encodeURIComponent(params.id)}`);
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 404) {
+        setNotFound(true);
+        setLoading(false);
+        return;
+      }
+      if (!res.ok) {
+        setLoadError(body.error || 'Gagal memuat data employee.');
+        setLoading(false);
+        return;
+      }
+      data = body.data;
+    } catch (err) {
+      setLoadError(friendlyCaught(err, 'Gagal memuat data employee.'));
       setLoading(false);
       return;
     }

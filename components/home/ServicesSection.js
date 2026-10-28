@@ -55,7 +55,7 @@ const SERVICES = [
 
 function waHref(serviceName) {
   const msg = `Halo Madael Consult, saya ingin konsultasi gratis mengenai layanan ${serviceName}.`;
-  return `https://wa.me/6285121548247?text=${encodeURIComponent(msg)}`;
+  return `https://wa.me/62895403232173?text=${encodeURIComponent(msg)}`;
 }
 
 export default function ServicesSection() {
