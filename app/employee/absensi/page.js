@@ -23,27 +23,20 @@ import BreakControl from '@/components/BreakControl';
 import ExportCsvButton from '@/components/ExportCsvButton';
 import { getBreakState, durasiIstirahatMenit, durasiKerjaMenit, formatDurasi } from '@/lib/attendanceBreak';
 import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
+import { todayWib, yesterdayWib, dayIndexWib } from '@/lib/wibTime';
 import { getAttendanceStatus } from '@/lib/attendanceStatus';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 
 const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
+// "Hari ini"/"kemarin" mengikuti WIB, sama dengan server, bukan jam perangkat.
 function todayStr() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return todayWib();
 }
 
 function yesterdayStr() {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return yesterdayWib();
 }
 
 function timeStr(date) {
@@ -353,7 +346,7 @@ export default function AbsensiPage() {
     );
   }
 
-  const isWorkday = schedule?.hari_kerja?.includes(HARI_LABEL[new Date().getDay()]);
+  const isWorkday = schedule?.hari_kerja?.includes(HARI_LABEL[dayIndexWib()]);
 
   return (
     <div className="max-w-[700px] mx-auto px-6 py-10">

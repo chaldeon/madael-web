@@ -14,6 +14,7 @@ import EmptyState from '@/components/EmptyState';
 import AttendanceStatusBadge from '@/components/AttendanceStatusBadge';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
+import { isoToWibTime, wibToIso } from '@/lib/wibTime';
 
 function currentMonthValue() {
   const d = new Date();
@@ -27,26 +28,13 @@ function formatTanggal(value) {
   });
 }
 
+// Jam ditampilkan dalam WIB (sama dengan zona yang dipakai server), bukan jam
+// perangkat admin.
 function formatWaktu(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-}
-
-// Ambil jam HH:MM dari timestamptz untuk ditampilkan di <input type="time">.
-// Dipakai jam lokal browser, konsisten dengan cara halaman absensi karyawan
-// menyimpan clock_in/clock_out (new Date().toISOString()).
-function isoToTimeInput(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-// Gabungkan tanggal record (YYYY-MM-DD) dengan jam hasil input manual admin,
-// jadi timestamptz utuh. Kalau time kosong, hasilnya null (dianggap belum ada).
-function timeInputToIso(tanggal, timeValue) {
-  if (!timeValue) return null;
-  const d = new Date(`${tanggal}T${timeValue}:00`);
-  return d.toISOString();
+  return new Date(iso).toLocaleTimeString('id-ID', {
+    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta',
+  });
 }
 
 export default function KoreksiAbsensiPage() {
@@ -136,8 +124,8 @@ export default function KoreksiAbsensiPage() {
   const openEdit = (row) => {
     setSaveError(null);
     const initial = {
-      clockIn: isoToTimeInput(row.clock_in),
-      clockOut: isoToTimeInput(row.clock_out),
+      clockIn: isoToWibTime(row.clock_in),
+      clockOut: isoToWibTime(row.clock_out),
       statusTelat: !!row.status_telat,
       alasan: '',
     };
@@ -226,8 +214,8 @@ export default function KoreksiAbsensiPage() {
           attendanceId: editingRow.id,
           employeeId: editingRow.employee_id,
           tanggal: editingRow.tanggal,
-          clockIn: timeInputToIso(editingRow.tanggal, form.clockIn),
-          clockOut: timeInputToIso(editingRow.tanggal, form.clockOut),
+          clockIn: wibToIso(editingRow.tanggal, form.clockIn),
+          clockOut: wibToIso(editingRow.tanggal, form.clockOut),
           statusTelat: form.statusTelat,
           alasan: form.alasan.trim(),
         }),
