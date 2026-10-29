@@ -14,6 +14,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { friendlyError } from '@/lib/errorMessage';
+import { todayWib } from '@/lib/wibTime';
 
 function formatTanggal(value) {
   if (!value) return '—';
@@ -57,6 +58,9 @@ export default function LeaveRequestPage() {
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [cancellingId, setCancellingId] = useState(null);
   const [cancelError, setCancelError] = useState(null);
+  const [requestingId, setRequestingId] = useState(null);
+  const [requestedIds, setRequestedIds] = useState([]); // permintaan batal terkirim di sesi ini
+  const [requestInfo, setRequestInfo] = useState(null);
 
   const loadBalance = useCallback(async () => {
     setBalanceLoading(true);
@@ -216,6 +220,44 @@ export default function LeaveRequestPage() {
     }
   };
 
+  // Minta HR membatalkan cuti yang SUDAH disetujui. Status tidak berubah di
+  // sini: server hanya mengirim notifikasi ke pemegang modul leave_request_admin,
+  // dan HR yang memutuskan lewat aksi Batalkan di halaman admin.
+  const handleRequestCancel = async (row) => {
+    const konfirmasi = window.confirm(
+      `Minta HR membatalkan cuti ${formatTanggal(row.tanggal_mulai)} — ${formatTanggal(row.tanggal_selesai)}?\n\nCutimu tetap berlaku sampai HR membatalkannya.`
+    );
+    if (!konfirmasi) return;
+
+    setCancelError(null);
+    setRequestInfo(null);
+    setRequestingId(row.id);
+    try {
+      const res = await fetch(`/api/leave-requests/${row.id}/request-cancel`, { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (res.status === 409 && json.status) {
+          setRequests((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: json.status } : r)));
+          loadBalance();
+        }
+        setCancelError(json.error || 'Gagal mengirim permintaan pembatalan, coba lagi.');
+        return;
+      }
+
+      setRequestedIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
+      setRequestInfo(
+        json.alreadySent
+          ? 'Permintaan pembatalan hari ini sudah dikirim ke HR. Mohon tunggu tindak lanjut HR.'
+          : 'Permintaan pembatalan sudah dikirim ke HR. Cutimu tetap berlaku sampai HR membatalkannya.'
+      );
+    } catch {
+      setCancelError('Gagal mengirim permintaan pembatalan. Periksa koneksi internet kamu.');
+    } finally {
+      setRequestingId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="max-w-[700px] mx-auto px-6 py-10">
@@ -358,6 +400,7 @@ export default function LeaveRequestPage() {
 
       <h2 className="text-sm font-medium text-black mb-3">Riwayat Pengajuan</h2>
       {cancelError && <p className="text-xs text-red-600 mb-3">{cancelError}</p>}
+      {requestInfo && <p className="text-xs text-green-700 mb-3">{requestInfo}</p>}
       {requests.length === 0 ? (
         <div className="bg-white border border-[#E0E0E0]">
           <EmptyState message="Belum ada pengajuan cuti." icon={CalendarDays} />
@@ -412,6 +455,19 @@ export default function LeaveRequestPage() {
                       >
                         {cancellingId === r.id ? 'Membatalkan...' : 'Batalkan'}
                       </button>
+                    ) : r.status === 'approved' && r.tanggal_mulai >= todayWib() ? (
+                      requestedIds.includes(r.id) ? (
+                        <span className="text-xs text-[#9A9A9A]">Menunggu HR</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleRequestCancel(r)}
+                          disabled={requestingId === r.id}
+                          className="text-xs font-medium text-madael-red hover:text-madael-dark disabled:opacity-50"
+                        >
+                          {requestingId === r.id ? 'Mengirim...' : 'Minta batalkan'}
+                        </button>
+                      )
                     ) : (
                       <span className="text-xs text-[#9A9A9A]">—</span>
                     )}
