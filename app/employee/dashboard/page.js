@@ -12,21 +12,7 @@ import KehadiranHariIniWidget from '@/components/KehadiranHariIniWidget';
 import { KEHADIRAN_MODULES } from '@/lib/kehadiranHariIni';
 import EmployeeHeader from '@/components/EmployeeHeader';
 import QuickClockInCard from '@/components/QuickClockInCard';
-
-// Pengumuman aktif = belum ada expired_at, atau expired_at masih di masa
-// depan. Dicek ulang di RLS/insert admin, ini cuma filter tampilan.
-function isActive(row) {
-  return !row.expired_at || new Date(row.expired_at) > new Date();
-}
-
-// Pengumuman tanpa target (target_company_id kosong) untuk semua karyawan;
-// yang bertarget hanya untuk karyawan di perusahaan itu. RLS sudah membatasi
-// untuk karyawan biasa, tapi pengelola/superadmin bisa membaca semuanya, jadi
-// banner tetap menyaring berdasarkan perusahaan karyawan yang sedang login.
-function isForCompany(row, clientId) {
-  if (row.target_company_id === null || row.target_company_id === undefined) return true;
-  return clientId !== null && clientId !== undefined && String(row.target_company_id) === String(clientId);
-}
+import { activeAnnouncementsQuery, isActive, isForCompany } from '@/lib/announcements';
 
 // Widget banner pengumuman, tampil di atas grid modul. Menampilkan pengumuman
 // yang belum ditandai "sudah dibaca" oleh employee yang sedang login, plus
@@ -41,19 +27,8 @@ function AnnouncementBanner({ supabase, employeeId, clientId }) {
 
     // Kedaluwarsa disaring di query (bukan cuma di client) dan jumlahnya dibatasi,
     // supaya riwayat pengumuman lama tidak ikut terunduh tiap buka dashboard.
-    const nowIso = new Date().toISOString();
-    const targetFilter = clientId
-      ? `target_company_id.is.null,target_company_id.eq.${clientId}`
-      : 'target_company_id.is.null';
     const [annRes, readRes] = await Promise.all([
-      supabase
-        .from('announcements')
-        .select('id, judul, isi, expired_at, pinned, target_company_id')
-        .or(`expired_at.is.null,expired_at.gt.${nowIso}`)
-        .or(targetFilter)
-        .order('pinned', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(50),
+      activeAnnouncementsQuery(supabase, clientId).limit(50),
       supabase.from('announcement_reads').select('announcement_id').eq('employee_id', employeeId),
     ]);
 
@@ -81,7 +56,9 @@ function AnnouncementBanner({ supabase, employeeId, clientId }) {
   // Daftar sudah terurut (pin dulu, lalu terbaru). Yang sudah dibaca hanya
   // tampil kalau di-pin.
   const visible = announcements.filter((a) => a.pinned || !readIds.includes(a.id));
-  if (visible.length === 0) return null;
+  // Pengumuman yang sudah dibaca hilang dari banner, tapi tetap bisa dibuka di
+  // halaman arsip — tautannya tetap tampil selama ada pengumuman yang berlaku.
+  if (announcements.length === 0) return null;
 
   return (
     <div className="mb-8 space-y-3">
@@ -112,6 +89,12 @@ function AnnouncementBanner({ supabase, employeeId, clientId }) {
           </div>
         );
       })}
+      <Link
+        href="/employee/pengumuman"
+        className="inline-block text-xs font-medium text-madael-red hover:text-madael-dark"
+      >
+        Lihat semua pengumuman →
+      </Link>
     </div>
   );
 }
