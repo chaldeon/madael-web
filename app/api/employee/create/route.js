@@ -111,7 +111,7 @@ export async function POST(request) {
       );
     }
 
-    // Grant akses default (Kalkulator, Absensi, Payslip, Leave Request) untuk
+    // Grant akses default (DEFAULT_MODULE_ACCESS: modul Dashboard Saya + Kalkulator) untuk
     // employee non-superadmin. Superadmin sudah otomatis punya akses ke semua
     // modul jadi tidak perlu row di employee_modules.
     // Kegagalan di sini tidak fatal — employee tetap berhasil dibuat, superadmin
