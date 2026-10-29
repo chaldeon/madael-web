@@ -23,6 +23,7 @@ const AKSI_LABEL = {
   approve_cuti: 'Approve Cuti',
   reject_cuti: 'Reject Cuti',
   cancel_cuti: 'Batalkan Cuti (Karyawan)',
+  request_cancel_cuti: 'Minta Batal Cuti Disetujui (Karyawan)',
   revoke_cuti: 'Batalkan Cuti Disetujui (Admin)',
   ajukan_lembur: 'Ajukan Lembur',
   cancel_lembur: 'Batalkan Lembur (Karyawan)',
