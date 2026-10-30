@@ -8,6 +8,7 @@ import { X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { friendlyError } from '@/lib/errorMessage';
+import LoadingState from '@/components/LoadingState';
 import Toast from '@/components/employee-list/Toast';
 
 // Sengaja pakai vocabulary stage yang sama dengan Kanban Perusahaan yang
@@ -254,7 +255,7 @@ export default function CrmDealsPage() {
         <span className="text-xs text-[#6B6B6B] ml-auto">{filtered.length} deal</span>
       </div>
 
-      {loading && <p className="text-sm text-[#6B6B6B]">Memuat data deal...</p>}
+      {loading && <LoadingState label="Memuat data deal..." />}
       {error && <p className="text-sm text-red-600">Error: {error}</p>}
 
       {!loading && !error && (

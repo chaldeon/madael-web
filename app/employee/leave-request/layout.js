@@ -1,80 +1,28 @@
 'use client';
 
-import { usePathname, useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { createClient } from '@/lib/supabase-browser';
-import { useModuleAccess } from '@/lib/useModuleAccess';
-import LoadingState from '@/components/LoadingState';
-import EmployeeHeader from '@/components/EmployeeHeader';
+import ModuleLayout from '@/components/ModuleLayout';
+
+const ADMIN_PATH = '/employee/leave-request/admin';
+const MODULE_KEYS = ['leave_request', 'leave_request_admin'];
+const TABS = [
+  {
+    href: '/employee/leave-request',
+    label: 'Ajukan Cuti',
+    moduleKey: 'leave_request',
+    isActive: (pathname) => !pathname.startsWith(ADMIN_PATH),
+  },
+  {
+    href: ADMIN_PATH,
+    label: 'Kelola Pengajuan',
+    moduleKey: 'leave_request_admin',
+    isActive: (pathname) => pathname.startsWith(ADMIN_PATH),
+  },
+];
 
 export default function LeaveRequestLayout({ children }) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const supabase = createClient();
-  const { status, hasModule } = useModuleAccess(['leave_request', 'leave_request_admin']);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push('/employee/login');
-    router.refresh();
-  };
-
-  if (status === 'loading') {
-    return (
-      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
-        <LoadingState label="Memuat..." />
-      </section>
-    );
-  }
-
-  if (status === 'denied') {
-    return (
-      <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4] px-6">
-        <div className="w-full max-w-[420px] border-t-4 border-madael-red bg-white p-8 text-center">
-          <p className="text-sm text-black mb-6">Kamu tidak punya akses ke modul Leave Request.</p>
-          <Link
-            href="/employee/dashboard"
-            className="inline-block bg-madael-red text-white px-6 py-2.5 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
-          >
-            Kembali ke Dashboard
-          </Link>
-        </div>
-      </section>
-    );
-  }
-
-  const isAdmin = pathname.startsWith('/employee/leave-request/admin');
-  const tabClass = (active) =>
-    `text-sm tracking-[0.02em] transition-colors ${
-      active ? 'text-black font-medium' : 'text-[#6B6B6B] hover:text-black'
-    }`;
-
   return (
-    <section className="min-h-screen bg-[#F4F4F4]">
-      <EmployeeHeader
-        onLogout={handleLogout}
-        subnav={
-          <>
-            <Link href="/employee/dashboard" className="text-sm text-[#6B6B6B] hover:text-black">
-              ← Dashboard
-            </Link>
-            <div className="flex items-center gap-6">
-              {hasModule('leave_request') && (
-                <Link href="/employee/leave-request" className={tabClass(!isAdmin)}>
-                  Ajukan Cuti
-                </Link>
-              )}
-              {hasModule('leave_request_admin') && (
-                <Link href="/employee/leave-request/admin" className={tabClass(isAdmin)}>
-                  Kelola Pengajuan
-                </Link>
-              )}
-            </div>
-          </>
-        }
-      />
-
+    <ModuleLayout moduleKeys={MODULE_KEYS} deniedLabel="modul Leave Request" tabs={TABS}>
       {children}
-    </section>
+    </ModuleLayout>
   );
 }

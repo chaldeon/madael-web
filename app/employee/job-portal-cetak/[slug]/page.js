@@ -9,6 +9,7 @@ import { ArrowLeft, Printer } from 'lucide-react';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { createClient } from '@/lib/supabase-browser';
 import { friendlyError } from '@/lib/errorMessage';
+import LoadingState from '@/components/LoadingState';
 
 function toBullets(text) {
   return (text || '')
@@ -81,7 +82,7 @@ export default function CetakLowonganPage() {
   if (status === 'loading' || (status === 'allowed' && loading)) {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat..." />
       </section>
     );
   }
