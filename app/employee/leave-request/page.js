@@ -13,6 +13,7 @@ import {
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import { friendlyError } from '@/lib/errorMessage';
 import { todayWib } from '@/lib/wibTime';
 
@@ -59,6 +60,8 @@ export default function LeaveRequestPage() {
   const [cancellingId, setCancellingId] = useState(null);
   const [cancelError, setCancelError] = useState(null);
   const [requestingId, setRequestingId] = useState(null);
+  const [cancelTarget, setCancelTarget] = useState(null); // baris yang menunggu konfirmasi batalkan
+  const [requestCancelTarget, setRequestCancelTarget] = useState(null); // baris yang menunggu konfirmasi minta batalkan
   const [requestedIds, setRequestedIds] = useState([]); // permintaan batal terkirim di sesi ini
   const [requestInfo, setRequestInfo] = useState(null);
 
@@ -191,12 +194,10 @@ export default function LeaveRequestPage() {
   // Batalkan pengajuan yang masih pending. Validasi (milik sendiri + masih
   // pending) dilakukan di server; kalau ternyata sudah diproses admin, server
   // membalas 409 dan status di layar disinkronkan supaya tombolnya hilang.
-  const handleCancel = async (row) => {
-    const konfirmasi = window.confirm(
-      `Batalkan pengajuan cuti ${formatTanggal(row.tanggal_mulai)} — ${formatTanggal(row.tanggal_selesai)}?\n\nKalau masih ingin cuti, kamu perlu mengajukan ulang.`
-    );
-    if (!konfirmasi) return;
+  // Tombol hanya membuka dialog konfirmasi; aksinya di executeCancel.
+  const handleCancel = (row) => setCancelTarget(row);
 
+  const executeCancel = async (row) => {
     setCancelError(null);
     setCancellingId(row.id);
     try {
@@ -223,12 +224,9 @@ export default function LeaveRequestPage() {
   // Minta HR membatalkan cuti yang SUDAH disetujui. Status tidak berubah di
   // sini: server hanya mengirim notifikasi ke pemegang modul leave_request_admin,
   // dan HR yang memutuskan lewat aksi Batalkan di halaman admin.
-  const handleRequestCancel = async (row) => {
-    const konfirmasi = window.confirm(
-      `Minta HR membatalkan cuti ${formatTanggal(row.tanggal_mulai)} — ${formatTanggal(row.tanggal_selesai)}?\n\nCutimu tetap berlaku sampai HR membatalkannya.`
-    );
-    if (!konfirmasi) return;
+  const handleRequestCancel = (row) => setRequestCancelTarget(row);
 
+  const executeRequestCancel = async (row) => {
     setCancelError(null);
     setRequestInfo(null);
     setRequestingId(row.id);
@@ -478,6 +476,45 @@ export default function LeaveRequestPage() {
           </table>
         </div>
       )}
+      <ConfirmDialog
+        open={!!cancelTarget}
+        title="Batalkan Pengajuan Cuti"
+        message={
+          <>
+            Batalkan pengajuan cuti {cancelTarget && formatTanggal(cancelTarget.tanggal_mulai)} — {cancelTarget && formatTanggal(cancelTarget.tanggal_selesai)}?
+            <br />
+            Kalau masih ingin cuti, kamu perlu mengajukan ulang.
+          </>
+        }
+        confirmLabel="Ya, Batalkan"
+        busyLabel="Membatalkan..."
+        busy={!!cancelTarget && cancellingId === cancelTarget.id}
+        onConfirm={async () => {
+          await executeCancel(cancelTarget);
+          setCancelTarget(null);
+        }}
+        onCancel={() => setCancelTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={!!requestCancelTarget}
+        title="Minta HR Membatalkan Cuti"
+        message={
+          <>
+            Minta HR membatalkan cuti {requestCancelTarget && formatTanggal(requestCancelTarget.tanggal_mulai)} — {requestCancelTarget && formatTanggal(requestCancelTarget.tanggal_selesai)}?
+            <br />
+            Cutimu tetap berlaku sampai HR membatalkannya.
+          </>
+        }
+        confirmLabel="Ya, Kirim Permintaan"
+        busyLabel="Mengirim..."
+        busy={!!requestCancelTarget && requestingId === requestCancelTarget.id}
+        onConfirm={async () => {
+          await executeRequestCancel(requestCancelTarget);
+          setRequestCancelTarget(null);
+        }}
+        onCancel={() => setRequestCancelTarget(null)}
+      />
     </div>
   );
 }

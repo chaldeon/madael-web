@@ -14,6 +14,7 @@ import { isTelatEfektif, MAX_TOLERANSI_MENIT } from '@/lib/attendanceStatus';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import LokasiKerjaManager from '@/components/LokasiKerjaManager';
 import AbsensiReviewPanel from '@/components/AbsensiReviewPanel';
 import AbsensiSettingsPanel from '@/components/AbsensiSettingsPanel';
@@ -50,6 +51,7 @@ export default function SemuaKaryawanPage() {
   const [jadwalSaveError, setJadwalSaveError] = useState(null);
   const [bulkToleransi, setBulkToleransi] = useState('0');
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkToleransiConfirm, setBulkToleransiConfirm] = useState(null); // { toleransi, targetIds, tanpaJadwal, pakaiTemplate, namaPerusahaan } menunggu konfirmasi
   const [bulkMsg, setBulkMsg] = useState(null); // { type: 'ok' | 'error', text }
   // Template Shift + cabang (work_locations). Dimuat non-fatal: kalau migrasi shift belum
   // dijalankan, tab Jadwal & Rekap tetap jalan seperti sebelumnya.
@@ -60,6 +62,7 @@ export default function SemuaKaryawanPage() {
   const [jadwalFilterLocationId, setJadwalFilterLocationId] = useState('');
   const [bulkShiftId, setBulkShiftId] = useState('');
   const [bulkShiftSaving, setBulkShiftSaving] = useState(false);
+  const [bulkShiftConfirm, setBulkShiftConfirm] = useState(null); // { tpl, targets, baru, berubah } menunggu konfirmasi
   const [bulkShiftMsg, setBulkShiftMsg] = useState(null);
 
   // ---- Rekap Bulanan ----
@@ -382,8 +385,11 @@ export default function SemuaKaryawanPage() {
       return;
     }
     const namaPerusahaan = companies.find((c) => c.id === jadwalFilterClientId)?.nama || 'perusahaan ini';
-    if (!window.confirm(`Set toleransi ${toleransi} menit untuk ${targetIds.length} karyawan ${namaPerusahaan}?\n\nHanya berlaku untuk absensi baru ke depan.`)) return;
+    // Konfirmasi lewat ConfirmDialog; eksekusinya di executeBulkToleransi.
+    setBulkToleransiConfirm({ toleransi, targetIds, tanpaJadwal, pakaiTemplate, namaPerusahaan });
+  };
 
+  const executeBulkToleransi = async ({ toleransi, targetIds, tanpaJadwal, pakaiTemplate }) => {
     setBulkSaving(true);
     const res = await callScheduleApi('/bulk', 'POST', {
       mode: 'toleransi',
@@ -426,12 +432,11 @@ export default function SemuaKaryawanPage() {
     }
     const baru = targets.filter((r) => !r.sched).length;
     const berubah = targets.length - baru;
-    if (!window.confirm(
-      `Pasang shift "${tpl.nama}" ke ${targets.length} karyawan?\n\n` +
-      `${berubah} akan berganti dari jadwal sebelumnya, ${baru} belum punya jadwal (dibuatkan baru).\n\n` +
-      'Hanya berlaku untuk absensi baru ke depan.'
-    )) return;
+    // Konfirmasi lewat ConfirmDialog; eksekusinya di executeBulkShift.
+    setBulkShiftConfirm({ tpl, targets, baru, berubah });
+  };
 
+  const executeBulkShift = async ({ tpl, targets }) => {
     setBulkShiftSaving(true);
     const res = await callScheduleApi('/bulk', 'POST', {
       mode: 'shift',
@@ -1157,6 +1162,50 @@ export default function SemuaKaryawanPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!bulkToleransiConfirm}
+        title="Terapkan Toleransi Massal"
+        message={
+          bulkToleransiConfirm && (
+            <>
+              Set toleransi {bulkToleransiConfirm.toleransi} menit untuk {bulkToleransiConfirm.targetIds.length} karyawan {bulkToleransiConfirm.namaPerusahaan}?
+              <br />
+              Hanya berlaku untuk absensi baru ke depan.
+            </>
+          )
+        }
+        confirmLabel="Ya, Terapkan"
+        busy={bulkSaving}
+        onConfirm={async () => {
+          await executeBulkToleransi(bulkToleransiConfirm);
+          setBulkToleransiConfirm(null);
+        }}
+        onCancel={() => setBulkToleransiConfirm(null)}
+      />
+
+      <ConfirmDialog
+        open={!!bulkShiftConfirm}
+        title="Pasang Shift Massal"
+        message={
+          bulkShiftConfirm && (
+            <>
+              Pasang shift &quot;{bulkShiftConfirm.tpl.nama}&quot; ke {bulkShiftConfirm.targets.length} karyawan?
+              <br />
+              {bulkShiftConfirm.berubah} akan berganti dari jadwal sebelumnya, {bulkShiftConfirm.baru} belum punya jadwal (dibuatkan baru).
+              <br />
+              Hanya berlaku untuk absensi baru ke depan.
+            </>
+          )
+        }
+        confirmLabel="Ya, Pasang"
+        busy={bulkShiftSaving}
+        onConfirm={async () => {
+          await executeBulkShift(bulkShiftConfirm);
+          setBulkShiftConfirm(null);
+        }}
+        onCancel={() => setBulkShiftConfirm(null)}
+      />
     </div>
   );
 }
