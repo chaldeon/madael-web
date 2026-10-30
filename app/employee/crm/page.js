@@ -8,6 +8,7 @@ import { Plus, X, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { friendlyError } from '@/lib/errorMessage';
+import LoadingState from '@/components/LoadingState';
 
 const STAGES = [
   'Prospek',
@@ -330,7 +331,7 @@ export default function CrmClientListPage() {
         <span className="text-xs text-[#6B6B6B] ml-auto">{filtered.length} klien</span>
       </div>
 
-      {loading && <p className="text-sm text-[#6B6B6B]">Memuat data klien...</p>}
+      {loading && <LoadingState label="Memuat data klien..." />}
       {error && <p className="text-sm text-red-600">Error: {error}</p>}
 
       {!loading && !error && (

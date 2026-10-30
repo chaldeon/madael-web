@@ -11,6 +11,7 @@ import KontrakBerakhirWidget from '@/components/KontrakBerakhirWidget';
 import KehadiranHariIniWidget from '@/components/KehadiranHariIniWidget';
 import { KEHADIRAN_MODULES } from '@/lib/kehadiranHariIni';
 import EmployeeHeader from '@/components/EmployeeHeader';
+import LoadingState from '@/components/LoadingState';
 import QuickClockInCard from '@/components/QuickClockInCard';
 import { activeAnnouncementsQuery, isActive, isForCompany } from '@/lib/announcements';
 
@@ -240,7 +241,7 @@ export default function EmployeeDashboardPage() {
   if (loading) {
     return (
       <section className="min-h-screen flex items-center justify-center bg-[#F4F4F4]">
-        <p className="text-sm text-[#6B6B6B]">Memuat...</p>
+        <LoadingState label="Memuat..." />
       </section>
     );
   }
