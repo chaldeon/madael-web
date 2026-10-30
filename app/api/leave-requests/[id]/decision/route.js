@@ -18,6 +18,9 @@ import { friendlyError } from '@/lib/errorMessage';
 //   'cancelled' : approved -> cancelled (admin membatalkan cuti yang sudah
 //                 disetujui; kuota dikembalikan)
 //
+// Approve pengajuan yang tanggalnya di tahun berikutnya ditunda (ditolak dengan
+// pesan jelas) sampai tahun itu berjalan; reject tetap bisa kapan saja.
+//
 // Jenis sakit/izin tidak memotong kuota: approve/cancel hanya mengubah status
 // (lihat JENIS_CUTI di lib/leave.js). Hanya jenis yang memotong kuota
 // (tahunan) yang menyentuh employees_master.
@@ -127,7 +130,18 @@ export async function POST(request, { params }) {
     if (decision === 'rejected') {
       hasil = await updateStatus({ status: 'rejected', approved_by: emp.id, rejection_reason: alasanTolak });
     } else if (decision === 'approved') {
-      if (tahunDariTanggal(row.tanggal_mulai) !== tahun || tahunDariTanggal(row.tanggal_selesai) !== tahun) {
+      // Pengajuan untuk tahun depan boleh diajukan lebih awal (lihat POST
+      // /api/leave-requests) tetapi baru bisa disetujui setelah tahunnya
+      // berjalan: counter kuota di employees_master hanya melacak tahun
+      // berjalan. Status tetap pending; HR masih bisa menolaknya.
+      const tahunMulai = tahunDariTanggal(row.tanggal_mulai);
+      if (tahunMulai > tahun) {
+        return NextResponse.json(
+          { error: `Cuti tahun ${tahunMulai} bisa disetujui mulai 1 Januari ${tahunMulai}. Pengajuan ini tetap menunggu persetujuan.` },
+          { status: 400 }
+        );
+      }
+      if (tahunMulai !== tahun || tahunDariTanggal(row.tanggal_selesai) !== tahun) {
         return NextResponse.json(
           { error: `Pengajuan di luar tahun ${tahun} atau lintas tahun tidak bisa disetujui karena kuota hanya dilacak per tahun berjalan. Tolak, lalu minta karyawan mengajukan ulang.` },
           { status: 400 }

@@ -6,7 +6,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import {
-  hitungHariKerja, tahunSekarang,
+  hitungHariKerja, tahunSekarang, pecahPerTahun,
   JENIS_CUTI, JENIS_CUTI_DEFAULT, labelJenisCuti, potongKuota, lampiranWajib,
   LAMPIRAN_MAKS_BYTES, LAMPIRAN_MIME,
 } from '@/lib/leave';
@@ -56,7 +56,7 @@ export default function LeaveRequestPage() {
   const [fileInputKey, setFileInputKey] = useState(0); // ganti key = reset <input type=file>
   const [formError, setFormError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(null); // teks sukses (null = belum ada)
   const [cancellingId, setCancellingId] = useState(null);
   const [cancelError, setCancelError] = useState(null);
   const [requestingId, setRequestingId] = useState(null);
@@ -124,7 +124,7 @@ export default function LeaveRequestPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setFormError(null);
-    setSubmitSuccess(false);
+    setSubmitSuccess(null);
 
     if (!form.tanggalMulai || !form.tanggalSelesai) {
       setFormError('Tanggal mulai dan tanggal selesai wajib diisi.');
@@ -159,7 +159,7 @@ export default function LeaveRequestPage() {
     }
 
     setSubmitting(true);
-    let data;
+    let rows;
     try {
       // multipart (bukan JSON) supaya bisa membawa file lampiran.
       const payload = new FormData();
@@ -175,7 +175,8 @@ export default function LeaveRequestPage() {
         setFormError(json.error || 'Gagal mengirim pengajuan cuti, coba lagi.');
         return;
       }
-      data = json.request;
+      // Pengajuan lintas tahun dipecah server jadi satu baris per tahun.
+      rows = json.requests?.length ? json.requests : [json.request];
     } catch {
       setSubmitting(false);
       setFormError('Gagal mengirim pengajuan cuti. Periksa koneksi internet kamu.');
@@ -183,11 +184,15 @@ export default function LeaveRequestPage() {
     }
     setSubmitting(false);
 
-    setRequests((prev) => [data, ...prev]);
+    setRequests((prev) => [...rows, ...prev]);
     setForm({ jenis: JENIS_CUTI_DEFAULT, tanggalMulai: '', tanggalSelesai: '', alasan: '' });
     setLampiran(null);
     setFileInputKey((k) => k + 1);
-    setSubmitSuccess(true);
+    setSubmitSuccess(
+      rows.length > 1
+        ? `Pengajuan cuti lintas tahun berhasil dikirim sebagai ${rows.length} pengajuan (satu per tahun), menunggu persetujuan. Bagian tahun depan baru bisa disetujui mulai 1 Januari.`
+        : 'Pengajuan cuti berhasil dikirim, menunggu persetujuan.'
+    );
 
   };
 
@@ -280,11 +285,20 @@ export default function LeaveRequestPage() {
       ? hitungHariKerja(form.tanggalMulai, form.tanggalSelesai, hariKerja)
       : null;
 
+  // Rincian per tahun, hanya untuk rentang lintas tahun (bagian tanpa hari
+  // kerja tidak dibuatkan pengajuan, sama seperti di server).
+  const rincianTahun =
+    previewHari !== null
+      ? pecahPerTahun(form.tanggalMulai, form.tanggalSelesai)
+          .map((seg) => ({ tahun: seg.tahun, hari: hitungHariKerja(seg.tanggalMulai, seg.tanggalSelesai, hariKerja) }))
+          .filter((seg) => seg.hari > 0)
+      : [];
+
   return (
     <div className="max-w-[700px] mx-auto px-6 py-10">
       <div className="mb-6">
         <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Ajukan Cuti</h1>
-        <p className="text-sm text-[#6B6B6B] mt-1">Isi form di bawah untuk mengajukan cuti. Atasan akan meninjau pengajuanmu. Sabtu/Minggu dan hari libur di jadwal kerjamu tidak dihitung sebagai hari cuti. Pengajuan hanya untuk tahun berjalan dan tidak boleh lintas tahun. Cuti tahunan tidak boleh melebihi sisa kuota; sakit dan izin tidak memotong kuota.</p>
+        <p className="text-sm text-[#6B6B6B] mt-1">Isi form di bawah untuk mengajukan cuti. Atasan akan meninjau pengajuanmu. Sabtu/Minggu dan hari libur di jadwal kerjamu tidak dihitung sebagai hari cuti. Pengajuan bisa untuk tahun berjalan dan tahun depan; pengajuan lintas tahun otomatis dipecah per tahun, dan bagian tahun depan baru bisa disetujui mulai 1 Januari tahun itu. Cuti tahunan tidak boleh melebihi sisa kuota; sakit dan izin tidak memotong kuota.</p>
       </div>
 
       <div className="bg-white border border-[#E0E0E0] p-5 mb-8">
@@ -334,7 +348,7 @@ export default function LeaveRequestPage() {
             <input
               type="date"
               min={`${tahunSekarang()}-01-01`}
-              max={`${tahunSekarang()}-12-31`}
+              max={`${tahunSekarang() + 1}-12-31`}
               value={form.tanggalMulai}
               onChange={(e) => setForm((f) => ({ ...f, tanggalMulai: e.target.value }))}
               className={inputClass}
@@ -345,7 +359,7 @@ export default function LeaveRequestPage() {
             <input
               type="date"
               min={`${tahunSekarang()}-01-01`}
-              max={`${tahunSekarang()}-12-31`}
+              max={`${tahunSekarang() + 1}-12-31`}
               value={form.tanggalSelesai}
               onChange={(e) => setForm((f) => ({ ...f, tanggalSelesai: e.target.value }))}
               className={inputClass}
@@ -356,6 +370,9 @@ export default function LeaveRequestPage() {
         {previewHari !== null && (
           <p className="text-xs text-[#6B6B6B] mb-4">
             Total: {previewHari} hari kerja {hariKerja ? '' : '(pakai jadwal default Senin–Jumat, belum diatur admin)'}
+            {rincianTahun.length > 1 && (
+              <> — dipecah otomatis menjadi {rincianTahun.length} pengajuan: {rincianTahun.map((seg) => `${seg.hari} hari di ${seg.tahun}`).join(', ')}</>
+            )}
           </p>
         )}
 
@@ -385,7 +402,7 @@ export default function LeaveRequestPage() {
         </label>
 
         {formError && <p className="text-xs text-red-600 mb-4">{formError}</p>}
-        {submitSuccess && <p className="text-xs text-green-700 mb-4">Pengajuan cuti berhasil dikirim, menunggu persetujuan.</p>}
+        {submitSuccess && <p className="text-xs text-green-700 mb-4">{submitSuccess}</p>}
 
         <button
           type="submit"

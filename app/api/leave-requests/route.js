@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { getSessionEmployee } from '@/lib/sessionEmployee';
 import {
-  hitungHariKerja, hitungSisaCuti, tahunSekarang, tahunDariTanggal, tanggalValid,
+  hitungHariKerja, hitungSisaCuti, tahunSekarang, tahunDariTanggal, tanggalValid, pecahPerTahun,
   JENIS_CUTI_DEFAULT, JENIS_POTONG_KUOTA, jenisCutiValid, labelJenisCuti, potongKuota, lampiranWajib,
   LAMPIRAN_MAKS_BYTES, LAMPIRAN_MIME,
 } from '@/lib/leave';
@@ -17,12 +17,20 @@ const MAKS_ALASAN = 500;
 // Karyawan mengajukan cuti. Dulu insert langsung dari browser tanpa validasi
 // server; sekarang semua aturan dicek di sini:
 // - tanggal valid, selesai >= mulai, alasan terisi (maks 500 karakter)
-// - rentang harus di tahun berjalan dan tidak lintas tahun, karena kuota di
-//   employees_master hanya melacak satu tahun
-// - minimal 1 hari kerja menurut jadwal employee
+// - rentang boleh di tahun berjalan dan tahun berikutnya. Kuota di
+//   employees_master hanya melacak satu tahun, jadi pengajuan lintas tahun
+//   dipecah di sini menjadi satu baris leave_requests per tahun (semua baris
+//   di-insert dalam satu perintah, jadi semuanya masuk atau tidak sama sekali).
+//   Baris tahun depan baru bisa disetujui mulai 1 Januari tahun itu (lihat
+//   decision/route.js); sebelum itu ia menunggu di antrean.
+// - minimal 1 hari kerja menurut jadwal employee (bagian tahun yang tidak
+//   punya hari kerja tidak dibuatkan baris)
 // - tidak bentrok dengan pengajuan lain yang pending/approved
-// - tidak melebihi sisa kuota (dikurangi pengajuan pending lain tahun ini) —
-//   hanya untuk jenis yang memotong kuota (tahunan); sakit/izin tidak
+// - tidak melebihi sisa kuota tahun yang bersangkutan (dikurangi pengajuan
+//   pending lain di tahun itu) — hanya untuk jenis yang memotong kuota
+//   (tahunan); sakit/izin tidak. Sisa kuota tahun depan adalah proyeksi
+//   (hitungSaldoCuti menghitung lazy per tahun); angka finalnya dicek ulang
+//   saat approve.
 // - jenis cuti (tahunan/sakit/izin; kosong = tahunan, kompatibel klien lama)
 // - lampiran opsional (PDF/JPG/PNG maks 4MB); wajib untuk jenis tertentu
 //   (lihat JENIS_CUTI di lib/leave.js). Body boleh JSON (tanpa lampiran) atau
@@ -84,9 +92,10 @@ export async function POST(request) {
     }
 
     const tahun = tahunSekarang();
-    if (tahunDariTanggal(tanggalMulai) !== tahun || tahunDariTanggal(tanggalSelesai) !== tahun) {
+    const tahunMaks = tahun + 1;
+    if (tahunDariTanggal(tanggalMulai) < tahun || tahunDariTanggal(tanggalSelesai) > tahunMaks) {
       return NextResponse.json(
-        { error: `Pengajuan cuti hanya untuk tahun ${tahun} dan tidak boleh lintas tahun. Pisahkan jadi pengajuan per tahun.` },
+        { error: `Pengajuan cuti hanya untuk tahun ${tahun} dan ${tahunMaks}.` },
         { status: 400 }
       );
     }
@@ -99,7 +108,12 @@ export async function POST(request) {
       return NextResponse.json({ error: `Gagal memuat data cuti: ${friendlyError(ctx.error, 'terjadi kesalahan pada server.', { context: 'Muat data cuti' })}` }, { status: 500 });
     }
 
-    const jumlahHari = hitungHariKerja(tanggalMulai, tanggalSelesai, ctx.hariKerja);
+    // Pecah per tahun; bagian tahun tanpa hari kerja dibuang (tidak ada yang
+    // perlu diajukan). Total hari kerja dipakai untuk aturan lampiran.
+    const segmen = pecahPerTahun(tanggalMulai, tanggalSelesai)
+      .map((s) => ({ ...s, jumlahHari: hitungHariKerja(s.tanggalMulai, s.tanggalSelesai, ctx.hariKerja) }))
+      .filter((s) => s.jumlahHari > 0);
+    const jumlahHari = segmen.reduce((sum, s) => sum + s.jumlahHari, 0);
     if (jumlahHari === 0) {
       return NextResponse.json(
         { error: 'Rentang tanggal yang dipilih tidak ada hari kerja (semua jatuh di hari libur).' },
@@ -136,38 +150,43 @@ export async function POST(request) {
     // mendapat peringatan saat menyetujui. Jenis yang tidak memotong kuota
     // (sakit/izin) tidak dicek.
     if (ctx.master && potongKuota(jenis)) {
-      const { sisa, belumBerhak, berhakMulai } = hitungSisaCuti(ctx.master, tahun, ctx.kebijakan);
+      for (const seg of segmen) {
+        const { sisa, belumBerhak, berhakMulai } = hitungSisaCuti(ctx.master, seg.tahun, ctx.kebijakan);
 
-      const { data: pendingRows, error: pendingError } = await admin
-        .from('leave_requests')
-        .select('tanggal_mulai, tanggal_selesai')
-        .eq('employee_id', emp.id)
-        .eq('status', 'pending')
-        .in('jenis', JENIS_POTONG_KUOTA)
-        .gte('tanggal_mulai', `${tahun}-01-01`)
-        .lte('tanggal_mulai', `${tahun}-12-31`);
-      if (pendingError) {
-        return NextResponse.json({ error: `Gagal memeriksa kuota: ${friendlyError(pendingError, 'terjadi kesalahan pada server.', { context: 'Cek kuota cuti' })}` }, { status: 500 });
-      }
+        const { data: pendingRows, error: pendingError } = await admin
+          .from('leave_requests')
+          .select('tanggal_mulai, tanggal_selesai')
+          .eq('employee_id', emp.id)
+          .eq('status', 'pending')
+          .in('jenis', JENIS_POTONG_KUOTA)
+          .gte('tanggal_mulai', `${seg.tahun}-01-01`)
+          .lte('tanggal_mulai', `${seg.tahun}-12-31`);
+        if (pendingError) {
+          return NextResponse.json({ error: `Gagal memeriksa kuota: ${friendlyError(pendingError, 'terjadi kesalahan pada server.', { context: 'Cek kuota cuti' })}` }, { status: 500 });
+        }
 
-      const hariPending = (pendingRows || []).reduce(
-        (sum, r) => sum + hitungHariKerja(r.tanggal_mulai, r.tanggal_selesai, ctx.hariKerja),
-        0
-      );
-      const tersedia = Math.max(0, sisa - hariPending);
+        const hariPending = (pendingRows || []).reduce(
+          (sum, r) => sum + hitungHariKerja(r.tanggal_mulai, r.tanggal_selesai, ctx.hariKerja),
+          0
+        );
+        const tersedia = Math.max(0, sisa - hariPending);
 
-      if (jumlahHari > tersedia) {
-        if (belumBerhak) {
+        if (seg.jumlahHari > tersedia) {
+          if (belumBerhak) {
+            return NextResponse.json(
+              { error: `Hak cuti tahunan kamu baru terbuka mulai ${formatTanggal(berhakMulai)} (setelah masa kerja minimum terpenuhi).` },
+              { status: 400 }
+            );
+          }
+          // Sebut tahunnya kalau pengajuan menyentuh tahun selain tahun berjalan
+          // atau terbagi dua, supaya jelas bagian mana yang melebihi kuota.
+          const ketTahun = seg.tahun !== tahun || segmen.length > 1 ? ` di tahun ${seg.tahun}` : '';
+          const catatan = hariPending > 0 ? ` (${hariPending} hari sudah dipakai pengajuan lain yang menunggu persetujuan)` : '';
           return NextResponse.json(
-            { error: `Hak cuti tahunan kamu baru terbuka mulai ${formatTanggal(berhakMulai)} (setelah masa kerja minimum terpenuhi).` },
+            { error: `Pengajuan ${seg.jumlahHari} hari kerja${ketTahun} melebihi sisa kuota cuti${ketTahun}: tersedia ${tersedia} hari${catatan}.` },
             { status: 400 }
           );
         }
-        const catatan = hariPending > 0 ? ` (${hariPending} hari sudah dipakai pengajuan lain yang menunggu persetujuan)` : '';
-        return NextResponse.json(
-          { error: `Pengajuan ${jumlahHari} hari kerja melebihi sisa kuota cuti: tersedia ${tersedia} hari${catatan}.` },
-          { status: 400 }
-        );
       }
     }
 
@@ -186,20 +205,21 @@ export async function POST(request) {
       }
     }
 
-    const { data, error: insertError } = await admin
+    // Satu perintah insert untuk semua bagian tahun (atomik). Bagian yang
+    // lintas tahun memakai lampiran yang sama.
+    const { data: inserted, error: insertError } = await admin
       .from('leave_requests')
-      .insert([{
+      .insert(segmen.map((seg) => ({
         employee_id: emp.id,
-        tanggal_mulai: tanggalMulai,
-        tanggal_selesai: tanggalSelesai,
+        tanggal_mulai: seg.tanggalMulai,
+        tanggal_selesai: seg.tanggalSelesai,
         alasan,
         jenis,
         lampiran_drive_id: lampiran?.driveId || null,
         lampiran_nama: lampiran?.nama || null,
         status: 'pending',
-      }])
-      .select()
-      .single();
+      })))
+      .select();
 
     if (insertError) {
       if (lampiran) {
@@ -213,17 +233,23 @@ export async function POST(request) {
       return NextResponse.json({ error: `Gagal mengirim pengajuan cuti: ${friendlyError(insertError, 'terjadi kesalahan pada server.', { context: 'Kirim pengajuan cuti' })}` }, { status: 500 });
     }
 
+    const data = inserted[0];
+    const dataTerakhir = inserted[inserted.length - 1];
+
     // Notifikasi ke pemegang modul Kelola Cuti Tim (+ superadmin) disusun di
     // server dari data yang baru disimpan (dulu dikirim dari browser dengan
-    // teks bebas).
+    // teks bebas). Satu notifikasi per pengajuan, walau dipecah per tahun.
+    const ketPecah = inserted.length > 1 ? `, dicatat sebagai ${inserted.length} pengajuan per tahun` : '';
     await notifyByModule(admin, {
       moduleKey: 'leave_request_admin',
       tipe: 'cuti_diajukan',
-      pesan: `${emp.nama || 'Karyawan'} mengajukan ${potongKuota(data.jenis) ? 'cuti' : labelJenisCuti(data.jenis).toLowerCase()} ${formatTanggal(data.tanggal_mulai)} – ${formatTanggal(data.tanggal_selesai)} (${jumlahHari} hari kerja).`,
+      pesan: `${emp.nama || 'Karyawan'} mengajukan ${potongKuota(data.jenis) ? 'cuti' : labelJenisCuti(data.jenis).toLowerCase()} ${formatTanggal(data.tanggal_mulai)} – ${formatTanggal(dataTerakhir.tanggal_selesai)} (${jumlahHari} hari kerja${ketPecah}).`,
       link: '/employee/leave-request/admin',
     });
 
-    return NextResponse.json({ success: true, request: data, jumlahHari }, { status: 201 });
+    // `request` (baris pertama) dipertahankan demi kompatibilitas klien lama;
+    // `requests` berisi semua baris yang dibuat.
+    return NextResponse.json({ success: true, request: data, requests: inserted, jumlahHari }, { status: 201 });
   } catch (err) {
     console.error('Ajukan cuti error:', err);
     return NextResponse.json({ error: 'Terjadi kesalahan server.' }, { status: 500 });
