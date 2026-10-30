@@ -21,6 +21,7 @@ import {
   validateShiftForm,
 } from '@/lib/shifts';
 import EmptyState from '@/components/EmptyState';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 const EMPTY_FORM = {
   nama: '',
@@ -53,10 +54,15 @@ export default function ShiftTemplateManager({ templates, linkedCounts, unavaila
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState(null);
   const [listMsg, setListMsg] = useState(null); // { type: 'ok' | 'error', text }
+  const [confirmSave, setConfirmSave] = useState(null); // { value, linked } — template terpakai karyawan, menunggu konfirmasi simpan
+  const [deleteTarget, setDeleteTarget] = useState(null); // template yang menunggu konfirmasi hapus
+  const [deleting, setDeleting] = useState(false);
 
   const closeForm = () => setShowForm(false);
+  // Listener Esc modal form dimatikan selama dialog konfirmasi simpan terbuka,
+  // supaya Esc hanya menutup dialog konfirmasi (bukan memunculkan konfirmasi tutup form).
   const handleBackdrop = useModalDismiss(
-    showForm,
+    showForm && !confirmSave,
     closeForm,
     undefined,
     JSON.stringify(form) !== JSON.stringify(baseline)
@@ -102,11 +108,17 @@ export default function ShiftTemplateManager({ templates, linkedCounts, unavaila
       return;
     }
 
+    // Template yang sudah dipakai karyawan: minta konfirmasi lewat ConfirmDialog
+    // dulu; eksekusinya di executeSave.
     const linked = editing ? linkedCounts[editing.id] || 0 : 0;
-    if (linked > 0 && !window.confirm(
-      `Template ini dipakai ${linked} karyawan. Perubahan jam/hari/toleransi akan langsung berlaku untuk mereka.\n\nHanya berlaku untuk absensi baru ke depan.`
-    )) return;
+    if (linked > 0) {
+      setConfirmSave({ value, linked });
+      return;
+    }
+    await executeSave(value);
+  };
 
+  const executeSave = async (value) => {
     setSaving(true);
     setFormError(null);
 
@@ -142,9 +154,13 @@ export default function ShiftTemplateManager({ templates, linkedCounts, unavaila
     await onChanged();
   };
 
-  const handleDelete = async (tpl) => {
-    if (!window.confirm(`Hapus shift "${tpl.nama}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+  // Tombol hanya membuka dialog konfirmasi; aksinya di executeDelete.
+  const handleDelete = (tpl) => setDeleteTarget(tpl);
+
+  const executeDelete = async (tpl) => {
+    setDeleting(true);
     const res = await callScheduleApi(`/templates/${encodeURIComponent(tpl.id)}`, 'DELETE');
+    setDeleting(false);
     if (!res.ok) {
       setListMsg({ type: 'error', text: res.error });
       // Kalau ditolak karena masih dipakai, jumlah pemakaian di tabel sudah usang.
@@ -319,6 +335,47 @@ export default function ShiftTemplateManager({ templates, linkedCounts, unavaila
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmSave}
+        title="Simpan Perubahan Template"
+        message={
+          confirmSave && (
+            <>
+              Template ini dipakai {confirmSave.linked} karyawan. Perubahan jam/hari/toleransi akan langsung berlaku untuk mereka.
+              <br />
+              Hanya berlaku untuk absensi baru ke depan.
+            </>
+          )
+        }
+        confirmLabel="Ya, Simpan"
+        busy={saving}
+        onConfirm={async () => {
+          await executeSave(confirmSave.value);
+          setConfirmSave(null);
+        }}
+        onCancel={() => setConfirmSave(null)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Hapus Shift"
+        message={
+          deleteTarget && (
+            <>
+              Hapus shift <strong>{deleteTarget.nama}</strong>? Tindakan ini tidak bisa dibatalkan.
+            </>
+          )
+        }
+        confirmLabel="Hapus"
+        busyLabel="Menghapus..."
+        busy={deleting}
+        onConfirm={async () => {
+          await executeDelete(deleteTarget);
+          setDeleteTarget(null);
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

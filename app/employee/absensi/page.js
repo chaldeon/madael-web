@@ -21,6 +21,7 @@ import AttendanceReviewScreen from '@/components/AttendanceReviewScreen';
 import LiveClock from '@/components/LiveClock';
 import BreakControl from '@/components/BreakControl';
 import ExportCsvButton from '@/components/ExportCsvButton';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import { getBreakState, durasiIstirahatMenit, durasiKerjaMenit, formatDurasi } from '@/lib/attendanceBreak';
 import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
 import { todayWib, yesterdayWib, dayIndexWib } from '@/lib/wibTime';
@@ -120,6 +121,7 @@ export default function AbsensiPage() {
   const [koreksiSaving, setKoreksiSaving] = useState(false);
   const [koreksiError, setKoreksiError] = useState(null);
   const [cancelingKoreksiId, setCancelingKoreksiId] = useState(null);
+  const [cancelKoreksiTarget, setCancelKoreksiTarget] = useState(null); // baris koreksi yang menunggu konfirmasi batalkan
   const [koreksiCancelError, setKoreksiCancelError] = useState(null);
   
 
@@ -284,12 +286,10 @@ export default function AbsensiPage() {
 
   // Batalkan pengajuan koreksi yang masih pending. Validasi di server; kalau
   // sudah diproses superadmin, server membalas 409 dan status disinkronkan.
-  const handleCancelKoreksi = async (row) => {
-    const konfirmasi = window.confirm(
-      `Batalkan pengajuan koreksi absensi tanggal ${formatTanggal(row.tanggal)}?\n\nKalau masih perlu dikoreksi, kamu harus mengajukan ulang dan mengunggah foto bukti lagi.`
-    );
-    if (!konfirmasi) return;
+  // Tombol hanya membuka dialog konfirmasi; aksinya di executeCancelKoreksi.
+  const handleCancelKoreksi = (row) => setCancelKoreksiTarget(row);
 
+  const executeCancelKoreksi = async (row) => {
     setKoreksiCancelError(null);
     setCancelingKoreksiId(row.id);
     try {
@@ -881,6 +881,26 @@ export default function AbsensiPage() {
         onConfirm={handleConfirmReview}
         onCancel={closeReview}
         onRetake={handleRetakeFromReview}
+      />
+
+      <ConfirmDialog
+        open={!!cancelKoreksiTarget}
+        title="Batalkan Pengajuan Koreksi"
+        message={
+          <>
+            Batalkan pengajuan koreksi absensi tanggal {cancelKoreksiTarget && formatTanggal(cancelKoreksiTarget.tanggal)}?
+            <br />
+            Kalau masih perlu dikoreksi, kamu harus mengajukan ulang dan mengunggah foto bukti lagi.
+          </>
+        }
+        confirmLabel="Ya, Batalkan"
+        busyLabel="Membatalkan..."
+        busy={!!cancelKoreksiTarget && cancelingKoreksiId === cancelKoreksiTarget.id}
+        onConfirm={async () => {
+          await executeCancelKoreksi(cancelKoreksiTarget);
+          setCancelKoreksiTarget(null);
+        }}
+        onCancel={() => setCancelKoreksiTarget(null)}
       />
     </div>
   );

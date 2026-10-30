@@ -10,6 +10,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import LokasiQrDialog from '@/components/LokasiQrDialog';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import { friendlyError } from '@/lib/errorMessage';
 import { validateLokasiInput, LOKASI_RADIUS_MIN, LOKASI_RADIUS_MAX } from '@/lib/workLocationValidation';
 
@@ -48,6 +49,8 @@ export default function LokasiKerjaManager({ supabase }) {
   const [locatingMe, setLocatingMe] = useState(false);
   const [qrLoc, setQrLoc] = useState(null); // lokasi yang dialog QR-nya sedang dibuka
   const [actionError, setActionError] = useState(null); // gagal ubah status / hapus dari tabel
+  const [deleteTarget, setDeleteTarget] = useState(null); // lokasi yang menunggu konfirmasi hapus
+  const [deleting, setDeleting] = useState(false);
 
   // Assignment lokasi -> karyawan. Karyawan yang belum di-assign ke lokasi
   // manapun tetap bisa absen (dicek ke semua lokasi aktif) — assignment cuma
@@ -205,12 +208,14 @@ export default function LokasiKerjaManager({ supabase }) {
     loadLocations();
   };
 
-  const handleDelete = async (loc) => {
-    if (!window.confirm(`Hapus lokasi "${loc.nama}"? Data absensi lama tidak berubah, cuma lokasi ini tidak dipakai lagi untuk cek radius ke depannya.`)) {
-      return;
-    }
+  // Tombol hanya membuka dialog konfirmasi; aksinya di executeDelete.
+  const handleDelete = (loc) => setDeleteTarget(loc);
+
+  const executeDelete = async (loc) => {
     setActionError(null);
+    setDeleting(true);
     const res = await callApi(`/api/attendance/lokasi/${encodeURIComponent(loc.id)}`, 'DELETE');
+    setDeleting(false);
     if (!res.ok) {
       setActionError(res.error);
       return;
@@ -443,6 +448,26 @@ export default function LokasiKerjaManager({ supabase }) {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Hapus Lokasi Kerja"
+        message={
+          deleteTarget && (
+            <>
+              Hapus lokasi <strong>{deleteTarget.nama}</strong>? Data absensi lama tidak berubah, cuma lokasi ini tidak dipakai lagi untuk cek radius ke depannya.
+            </>
+          )
+        }
+        confirmLabel="Hapus"
+        busyLabel="Menghapus..."
+        busy={deleting}
+        onConfirm={async () => {
+          await executeDelete(deleteTarget);
+          setDeleteTarget(null);
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

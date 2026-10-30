@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { X, Printer, RefreshCw } from 'lucide-react';
 import QRCode from 'qrcode';
 import { friendlyCaught } from '@/lib/errorMessage';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 function esc(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -20,6 +21,7 @@ export default function LokasiQrDialog({ loc, onClose, onChanged }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
 
   const applyInfo = useCallback(async (data) => {
     setInfo(data);
@@ -67,9 +69,11 @@ export default function LokasiQrDialog({ loc, onClose, onChanged }) {
     }
   };
 
-  const handleRegenerate = () => {
-    if (!window.confirm('Buat ulang QR? QR yang sudah dicetak/ditempel akan langsung tidak berlaku dan harus diganti dengan yang baru.')) return;
-    patch({ regenerate: true });
+  const handleRegenerate = () => setConfirmRegenerate(true);
+
+  const executeRegenerate = async () => {
+    await patch({ regenerate: true });
+    setConfirmRegenerate(false);
   };
 
   const handlePrint = () => {
@@ -89,6 +93,7 @@ export default function LokasiQrDialog({ loc, onClose, onChanged }) {
   };
 
   return (
+    <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000] px-6" onClick={onClose}>
       <div className="bg-white w-full max-w-[420px] p-6 relative" onClick={(e) => e.stopPropagation()}>
         <button onClick={onClose} className="absolute top-4 right-4 text-[#9A9A9A] hover:text-black" aria-label="Tutup">
@@ -154,5 +159,17 @@ export default function LokasiQrDialog({ loc, onClose, onChanged }) {
         )}
       </div>
     </div>
+
+    {/* Di luar root modal supaya klik di dialog konfirmasi tidak ikut menutup dialog QR. */}
+    <ConfirmDialog
+      open={confirmRegenerate}
+      title="Buat Ulang QR"
+      message="QR yang sudah dicetak/ditempel akan langsung tidak berlaku dan harus diganti dengan yang baru."
+      confirmLabel="Ya, Buat Ulang"
+      busy={busy}
+      onConfirm={executeRegenerate}
+      onCancel={() => setConfirmRegenerate(false)}
+    />
+    </>
   );
 }

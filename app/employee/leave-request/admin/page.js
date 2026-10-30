@@ -12,6 +12,7 @@ import { hitungHariKerja, hitungSisaCuti, labelJenisCuti, potongKuota, MAKS_CATA
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import LeavePolicyCard from '@/components/LeavePolicyCard';
 import PaginationBar from '@/components/PaginationBar';
 import ExportCsvButton from '@/components/ExportCsvButton';
@@ -144,6 +145,7 @@ export default function LeaveRequestAdminPage() {
   const [actionError, setActionError] = useState(null);
   const [actionWarning, setActionWarning] = useState(null);
   const [rejectingRow, setRejectingRow] = useState(null); // baris yang sedang ditolak (dialog alasan)
+  const [revokeTarget, setRevokeTarget] = useState(null); // baris cuti disetujui yang menunggu konfirmasi pembatalan
 
   // Data dimuat lewat route server (bukan query browser) karena employees_master
   // dibatasi RLS superadmin — lihat catatan di app/api/leave-requests/admin.
@@ -255,15 +257,9 @@ export default function LeaveRequestAdminPage() {
   // di server lewat /api/leave-requests/[id]/decision. decision:
   // 'approved' | 'rejected' | 'cancelled' (batalkan cuti yang sudah disetujui).
   // extra: field tambahan di body (mis. { rejection_reason } saat menolak).
-  // Mengembalikan 'ok' | 'conflict' | 'error' | 'cancelled-by-user'.
+  // Mengembalikan 'ok' | 'conflict' | 'error'.
+  // Konfirmasi pembatalan cuti disetujui ada di ConfirmDialog (revokeTarget) di bawah.
   const handleDecision = async (row, decision, extra = {}) => {
-    if (decision === 'cancelled') {
-      const konfirmasi = window.confirm(
-        `Batalkan ${potongKuota(row.jenis) ? 'cuti' : labelJenisCuti(row.jenis).toLowerCase()} yang sudah disetujui (${formatTanggal(row.tanggal_mulai)} — ${formatTanggal(row.tanggal_selesai)})?${potongKuota(row.jenis) ? '\n\nKuota cuti karyawan akan dikembalikan.' : ''}`
-      );
-      if (!konfirmasi) return 'cancelled-by-user';
-    }
-
     setActionError(null);
     setActionWarning(null);
     setActingId(row.id);
@@ -474,7 +470,7 @@ export default function LeaveRequestAdminPage() {
                           </div>
                         ) : row.status === 'approved' ? (
                           <button
-                            onClick={() => handleDecision(row, 'cancelled')}
+                            onClick={() => setRevokeTarget(row)}
                             disabled={actingId === row.id}
                             className="inline-flex items-center gap-1 text-xs text-madael-red hover:text-madael-dark font-medium disabled:opacity-50"
                           >
@@ -515,6 +511,32 @@ export default function LeaveRequestAdminPage() {
           onClose={() => setRejectingRow(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={!!revokeTarget}
+        title="Batalkan Cuti yang Sudah Disetujui"
+        message={
+          revokeTarget && (
+            <>
+              Batalkan {potongKuota(revokeTarget.jenis) ? 'cuti' : labelJenisCuti(revokeTarget.jenis).toLowerCase()} yang sudah disetujui ({formatTanggal(revokeTarget.tanggal_mulai)} — {formatTanggal(revokeTarget.tanggal_selesai)})?
+              {potongKuota(revokeTarget.jenis) && (
+                <>
+                  <br />
+                  Kuota cuti karyawan akan dikembalikan.
+                </>
+              )}
+            </>
+          )
+        }
+        confirmLabel="Ya, Batalkan"
+        busyLabel="Membatalkan..."
+        busy={!!revokeTarget && actingId === revokeTarget.id}
+        onConfirm={async () => {
+          await handleDecision(revokeTarget, 'cancelled');
+          setRevokeTarget(null);
+        }}
+        onCancel={() => setRevokeTarget(null)}
+      />
     </div>
   );
 }
