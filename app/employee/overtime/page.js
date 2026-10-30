@@ -47,6 +47,7 @@ function StatusBadge({ status }) {
 
 export default function OvertimePage() {
   const [requests, setRequests] = useState([]);
+  const [riwayatTerpotong, setRiwayatTerpotong] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -69,6 +70,7 @@ export default function OvertimePage() {
         return;
       }
       setRequests(json.requests || []);
+      setRiwayatTerpotong(Boolean(json.terpotong));
     } catch (err) {
       console.error('Muat riwayat lembur error:', err);
       setLoadError('Gagal memuat riwayat lembur. Periksa koneksi lalu coba lagi.');
@@ -238,6 +240,11 @@ export default function OvertimePage() {
       </form>
 
       <h2 className="text-sm font-medium text-black mb-3">Riwayat Lembur</h2>
+      {riwayatTerpotong && (
+        <p className="text-xs text-[#6B6B6B] mb-3">
+          Menampilkan {requests.length} pengajuan terbaru. Pengajuan yang lebih lama tidak ditampilkan.
+        </p>
+      )}
       {requests.length === 0 ? (
         <div className="bg-white border border-[#E0E0E0]">
           <EmptyState message="Belum ada pengajuan lembur." icon={Timer} />

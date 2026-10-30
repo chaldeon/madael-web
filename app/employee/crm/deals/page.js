@@ -8,6 +8,7 @@ import { X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { friendlyError } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import LoadingState from '@/components/LoadingState';
 import Toast from '@/components/employee-list/Toast';
 
@@ -86,10 +87,13 @@ export default function CrmDealsPage() {
   const fetchDeals = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
-      .from('crm_deals')
-      .select('id, created_at, stage, nilai_potensial, catatan, company_id, companies ( id, nama_perusahaan, industri ), employees:pic_internal ( id, nama )')
-      .order('created_at', { ascending: false });
+    // fetchAllRows: tanpa ini PostgREST memotong diam-diam di 1.000 baris.
+    const { data, error } = await fetchAllRows(() =>
+      supabase
+        .from('crm_deals')
+        .select('id, created_at, stage, nilai_potensial, catatan, company_id, companies ( id, nama_perusahaan, industri ), employees:pic_internal ( id, nama )')
+        .order('created_at', { ascending: false })
+    );
 
     if (error) {
       setError(friendlyError(error, 'Gagal memuat data deal.'));

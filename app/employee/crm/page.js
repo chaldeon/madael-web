@@ -8,6 +8,7 @@ import { Plus, X, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { friendlyError } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import LoadingState from '@/components/LoadingState';
 
 const STAGES = [
@@ -148,11 +149,14 @@ export default function CrmClientListPage() {
   const fetchClients = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
-      .from('companies')
-      .select('id, created_at, nama_perusahaan, industri, ukuran, website, alamat, kota, pic_nama, pic_jabatan, pic_email, pic_telepon, stage, assigned_to, catatan, is_active, tipe, fee_structure, employees:assigned_to ( id, nama )')
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
+    // fetchAllRows: tanpa ini PostgREST memotong diam-diam di 1.000 baris.
+    const { data, error } = await fetchAllRows(() =>
+      supabase
+        .from('companies')
+        .select('id, created_at, nama_perusahaan, industri, ukuran, website, alamat, kota, pic_nama, pic_jabatan, pic_email, pic_telepon, stage, assigned_to, catatan, is_active, tipe, fee_structure, employees:assigned_to ( id, nama )')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+    );
 
     if (error) {
       setError(friendlyError(error, 'Gagal memuat data klien.'));
