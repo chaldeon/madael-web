@@ -16,6 +16,10 @@ import { ambilHariKerja, periksaPengajuanLembur } from '@/lib/overtimeServer';
 // Riwayat lembur milik sendiri. Tabel overtime_requests tidak punya policy RLS
 // untuk browser, jadi semua baca/tulis lewat route server (service role) dan
 // hak modul `overtime` dicek manual di sini.
+// Hanya RIWAYAT_LEMBUR_MAKS baris terbaru yang dikirim; bila ada yang lebih lama,
+// respons memuat `terpotong: true` supaya UI bisa memberi tahu pengguna.
+const RIWAYAT_LEMBUR_MAKS = 200;
+
 export async function GET() {
   try {
     const admin = createAdminClient();
@@ -31,13 +35,18 @@ export async function GET() {
       .eq('employee_id', emp.id)
       .order('tanggal', { ascending: false })
       .order('created_at', { ascending: false })
-      .limit(200);
+      .limit(RIWAYAT_LEMBUR_MAKS + 1); // +1 untuk mendeteksi ada data lebih lama
     if (error) {
       console.error('Muat riwayat lembur error:', error);
       return NextResponse.json({ error: 'Gagal memuat riwayat lembur.' }, { status: 500 });
     }
 
-    return NextResponse.json({ requests: data || [] });
+    const rows = data || [];
+    const terpotong = rows.length > RIWAYAT_LEMBUR_MAKS;
+    return NextResponse.json({
+      requests: terpotong ? rows.slice(0, RIWAYAT_LEMBUR_MAKS) : rows,
+      terpotong,
+    });
   } catch (err) {
     console.error('Muat riwayat lembur error:', err);
     return NextResponse.json({ error: 'Terjadi kesalahan server.' }, { status: 500 });

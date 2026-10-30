@@ -10,6 +10,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import { friendlyError } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 const JENIS_OPTIONS = [
   { kode: 'PRO', label: 'Proposal' },
@@ -143,10 +144,13 @@ export default function DocumentsListPage() {
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
-      .from('documents')
-      .select('id, created_at, nomor_surat, judul, kode_jenis, status, tanggal_dokumen, clients:client_id ( id, nama_perusahaan ), employees:created_by ( id, nama )')
-      .order('created_at', { ascending: false });
+    // fetchAllRows: tanpa ini PostgREST memotong diam-diam di 1.000 baris.
+    const { data, error } = await fetchAllRows(() =>
+      supabase
+        .from('documents')
+        .select('id, created_at, nomor_surat, judul, kode_jenis, status, tanggal_dokumen, clients:client_id ( id, nama_perusahaan ), employees:created_by ( id, nama )')
+        .order('created_at', { ascending: false })
+    );
 
     if (error) {
       setError(friendlyError(error, 'Gagal memuat dokumen.'));
