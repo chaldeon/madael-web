@@ -25,6 +25,7 @@ const AKSI_LABEL = {
   cancel_cuti: 'Batalkan Cuti (Karyawan)',
   request_cancel_cuti: 'Minta Batal Cuti Disetujui (Karyawan)',
   revoke_cuti: 'Batalkan Cuti Disetujui (Admin)',
+  reject_minta_batal_cuti: 'Tolak Permintaan Batal Cuti (Admin)',
   ajukan_lembur: 'Ajukan Lembur',
   cancel_lembur: 'Batalkan Lembur (Karyawan)',
   approve_lembur: 'Approve Lembur',

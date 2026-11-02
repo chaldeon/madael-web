@@ -16,7 +16,11 @@ import { friendlyError } from '@/lib/errorMessage';
 //                 opsional, maks MAKS_CATATAN_TOLAK_CUTI karakter; ikut
 //                 ditampilkan di teks notifikasi karyawan)
 //   'cancelled' : approved -> cancelled (admin membatalkan cuti yang sudah
-//                 disetujui; kuota dikembalikan)
+//                 disetujui; kuota dikembalikan). Bila karyawan sedang meminta
+//                 pembatalan (minta_batal_status = 'menunggu'), ini sekaligus
+//                 MENYETUJUI permintaannya: minta_batal_status jadi 'disetujui'
+//                 dan notifikasi ke karyawan menyebut permintaannya disetujui.
+//                 Menolak permintaan: /api/leave-requests/[id]/reject-cancel.
 //
 // Approve pengajuan yang tanggalnya di tahun berikutnya ditunda (ditolak dengan
 // pesan jelas) sampai tahun itu berjalan; reject tetap bisa kapan saja.
@@ -108,6 +112,8 @@ export async function POST(request, { params }) {
     const tahun = tahunSekarang();
     const hariDariJadwal = hitungHariKerja(row.tanggal_mulai, row.tanggal_selesai, ctx.hariKerja);
     const sekarang = new Date().toISOString();
+    // Pembatalan sebagai jawaban atas permintaan karyawan (bukan inisiatif HR).
+    const dariPermintaan = decision === 'cancelled' && row.minta_batal_status === 'menunggu';
     let warning = null;
     let kuota = null;
 
@@ -222,7 +228,10 @@ export async function POST(request, { params }) {
         warning = `Cuti dibatalkan, tetapi kuota tidak dikembalikan karena cuti ini bukan di tahun ${tahun} (kuota hanya dilacak untuk tahun berjalan).`;
       }
 
-      hasil = await updateStatus({ status: 'cancelled' });
+      hasil = await updateStatus({
+        status: 'cancelled',
+        ...(dariPermintaan ? { minta_batal_status: 'disetujui' } : {}),
+      });
 
       if ((hasil.error || !hasil.data) && sudahKembali) {
         await kembalikanKuota(jumlahHari);
@@ -255,6 +264,7 @@ export async function POST(request, { params }) {
         jumlah_hari_kerja: jumlahHari,
         kuota_terpakai_setelah: kuota ? kuota.cuti_terpakai : null,
         ...(decision === 'rejected' ? { rejection_reason: alasanTolak } : {}),
+        ...(decision === 'cancelled' ? { dari_permintaan_karyawan: dariPermintaan } : {}),
       },
     });
 
@@ -262,7 +272,9 @@ export async function POST(request, { params }) {
     await notifyEmployee(admin, {
       userId: row.employee_id,
       tipe: decision === 'cancelled' ? 'cuti_cancelled' : `cuti_${decision}`,
-      pesan: `Pengajuan ${potong ? 'cuti' : labelJenisCuti(row.jenis).toLowerCase()} kamu (${formatTanggal(row.tanggal_mulai)} – ${formatTanggal(row.tanggal_selesai)}, ${jumlahHari} hari kerja) telah ${label}.${decision === 'rejected' && alasanTolak ? ` Alasan: ${alasanTolak}` : ''}`,
+      pesan: dariPermintaan
+        ? `Permintaan pembatalan ${potong ? 'cuti' : labelJenisCuti(row.jenis).toLowerCase()} kamu (${formatTanggal(row.tanggal_mulai)} – ${formatTanggal(row.tanggal_selesai)}, ${jumlahHari} hari kerja) disetujui HR. Cutimu telah dibatalkan.`
+        : `Pengajuan ${potong ? 'cuti' : labelJenisCuti(row.jenis).toLowerCase()} kamu (${formatTanggal(row.tanggal_mulai)} – ${formatTanggal(row.tanggal_selesai)}, ${jumlahHari} hari kerja) telah ${label}.${decision === 'rejected' && alasanTolak ? ` Alasan: ${alasanTolak}` : ''}`,
       link: '/employee/leave-request',
     });
 

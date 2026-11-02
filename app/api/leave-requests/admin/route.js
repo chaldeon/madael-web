@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { requireModuleAccess } from '@/lib/moduleAccessServer';
-import { ambilKebijakanCuti, KOLOM_MASTER_CUTI } from '@/lib/leaveServer';
+import { ambilKebijakanCuti, KOLOM_MASTER_CUTI, FILTER_STATUS_CUTI_VALID, terapkanFilterStatusCuti } from '@/lib/leaveServer';
 import { parsePageParams, isRangeNotSatisfiable } from '@/lib/pagination';
-
-const STATUS_VALID = ['pending', 'approved', 'rejected', 'cancelled'];
 
 // GET /api/leave-requests/admin?status=pending&page=1&pageSize=50
 // Data untuk halaman Kelola Pengajuan Cuti: pengajuan (berhalaman) + data
 // pendukung untuk baris di halaman itu (karyawan, jadwal kerja, kolom kuota
-// employees_master) + kebijakan kuota. status kosong = 'pending'; 'all' = semua.
+// employees_master) + kebijakan kuota. status kosong = 'pending'; 'all' = semua;
+// 'minta_batal' = cuti disetujui yang diminta batal karyawan dan belum dijawab HR.
 //
 // Pengajuan dimuat per halaman (range + count), bukan seluruh riwayat, karena
 // PostgREST memotong respons di 1.000 baris tanpa error. Urutan: tanggal mulai
@@ -30,13 +29,13 @@ export async function GET(request) {
 
     const { searchParams } = new URL(request.url);
     const statusFilter = searchParams.get('status') || 'pending';
-    if (statusFilter !== 'all' && !STATUS_VALID.includes(statusFilter)) {
+    if (statusFilter !== 'all' && !FILTER_STATUS_CUTI_VALID.includes(statusFilter)) {
       return NextResponse.json({ error: 'Filter status tidak valid.' }, { status: 400 });
     }
     const { page, pageSize, from, to } = parsePageParams(searchParams);
 
     let reqQuery = admin.from('leave_requests').select('*', { count: 'exact' });
-    if (statusFilter !== 'all') reqQuery = reqQuery.eq('status', statusFilter);
+    reqQuery = terapkanFilterStatusCuti(reqQuery, statusFilter);
     reqQuery = reqQuery
       .order('tanggal_mulai', { ascending: false })
       .order('created_at', { ascending: false })

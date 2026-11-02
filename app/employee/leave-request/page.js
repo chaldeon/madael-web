@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase-browser';
 import {
   hitungHariKerja, tahunSekarang, pecahPerTahun,
   JENIS_CUTI, JENIS_CUTI_DEFAULT, labelJenisCuti, potongKuota, lampiranWajib,
-  LAMPIRAN_MAKS_BYTES, LAMPIRAN_MIME,
+  LAMPIRAN_MAKS_BYTES, LAMPIRAN_MIME, MAKS_ALASAN_MINTA_BATAL_CUTI,
 } from '@/lib/leave';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -39,6 +39,25 @@ function StatusBadge({ status }) {
   );
 }
 
+// Status permintaan batal (kolom minta_batal_* dari server) di bawah badge
+// status pengajuan.
+function MintaBatalInfo({ row }) {
+  if (row.minta_batal_status === 'menunggu') {
+    return <p className="text-[11px] text-amber-700 mt-1 max-w-[180px] whitespace-normal">Permintaan batal menunggu jawaban HR</p>;
+  }
+  if (row.minta_batal_status === 'ditolak') {
+    return (
+      <p className="text-[11px] text-[#9A9A9A] mt-1 max-w-[180px] whitespace-normal break-words">
+        Permintaan batal ditolak HR, cuti tetap berlaku{row.minta_batal_catatan ? `. Catatan: ${row.minta_batal_catatan}` : ''}
+      </p>
+    );
+  }
+  if (row.minta_batal_status === 'disetujui') {
+    return <p className="text-[11px] text-[#9A9A9A] mt-1 max-w-[180px] whitespace-normal">Dibatalkan atas permintaanmu</p>;
+  }
+  return null;
+}
+
 export default function LeaveRequestPage() {
   const supabase = createClient();
 
@@ -62,7 +81,7 @@ export default function LeaveRequestPage() {
   const [requestingId, setRequestingId] = useState(null);
   const [cancelTarget, setCancelTarget] = useState(null); // baris yang menunggu konfirmasi batalkan
   const [requestCancelTarget, setRequestCancelTarget] = useState(null); // baris yang menunggu konfirmasi minta batalkan
-  const [requestedIds, setRequestedIds] = useState([]); // permintaan batal terkirim di sesi ini
+  const [requestAlasan, setRequestAlasan] = useState(''); // alasan (opsional) di dialog minta batalkan
   const [requestInfo, setRequestInfo] = useState(null);
 
   const loadBalance = useCallback(async () => {
@@ -226,17 +245,25 @@ export default function LeaveRequestPage() {
     }
   };
 
-  // Minta HR membatalkan cuti yang SUDAH disetujui. Status tidak berubah di
-  // sini: server hanya mengirim notifikasi ke pemegang modul leave_request_admin,
-  // dan HR yang memutuskan lewat aksi Batalkan di halaman admin.
-  const handleRequestCancel = (row) => setRequestCancelTarget(row);
+  // Minta HR membatalkan cuti yang SUDAH disetujui. Permintaan disimpan di
+  // server (minta_batal_status di leave_requests), jadi statusnya tetap ada
+  // setelah reload. Status cuti dan kuota tidak berubah di sini; HR yang
+  // memutuskan di halaman admin (setujui = cuti dibatalkan, atau tolak).
+  const handleRequestCancel = (row) => {
+    setRequestAlasan('');
+    setRequestCancelTarget(row);
+  };
 
   const executeRequestCancel = async (row) => {
     setCancelError(null);
     setRequestInfo(null);
     setRequestingId(row.id);
     try {
-      const res = await fetch(`/api/leave-requests/${row.id}/request-cancel`, { method: 'POST' });
+      const res = await fetch(`/api/leave-requests/${row.id}/request-cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alasan: requestAlasan.trim() }),
+      });
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
@@ -248,10 +275,12 @@ export default function LeaveRequestPage() {
         return;
       }
 
-      setRequestedIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
+      if (json.request) {
+        setRequests((prev) => prev.map((r) => (r.id === row.id ? { ...r, ...json.request } : r)));
+      }
       setRequestInfo(
         json.alreadySent
-          ? 'Permintaan pembatalan hari ini sudah dikirim ke HR. Mohon tunggu tindak lanjut HR.'
+          ? 'Permintaan pembatalan ini sudah dikirim ke HR. Mohon tunggu tindak lanjut HR.'
           : 'Permintaan pembatalan sudah dikirim ke HR. Cutimu tetap berlaku sampai HR membatalkannya.'
       );
     } catch {
@@ -459,6 +488,7 @@ export default function LeaveRequestPage() {
                     {r.status === 'rejected' && r.rejection_reason && (
                       <p className="text-[11px] text-[#9A9A9A] mt-1 max-w-[180px] whitespace-normal break-words">Alasan: {r.rejection_reason}</p>
                     )}
+                    <MintaBatalInfo row={r} />
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     {r.status === 'pending' ? (
@@ -471,7 +501,7 @@ export default function LeaveRequestPage() {
                         {cancellingId === r.id ? 'Membatalkan...' : 'Batalkan'}
                       </button>
                     ) : r.status === 'approved' && r.tanggal_mulai >= todayWib() ? (
-                      requestedIds.includes(r.id) ? (
+                      r.minta_batal_status === 'menunggu' ? (
                         <span className="text-xs text-[#9A9A9A]">Menunggu HR</span>
                       ) : (
                         <button
@@ -480,7 +510,7 @@ export default function LeaveRequestPage() {
                           disabled={requestingId === r.id}
                           className="text-xs font-medium text-madael-red hover:text-madael-dark disabled:opacity-50"
                         >
-                          {requestingId === r.id ? 'Mengirim...' : 'Minta batalkan'}
+                          {requestingId === r.id ? 'Mengirim...' : r.minta_batal_status === 'ditolak' ? 'Minta lagi' : 'Minta batalkan'}
                         </button>
                       )
                     ) : (
@@ -523,6 +553,11 @@ export default function LeaveRequestPage() {
             Cutimu tetap berlaku sampai HR membatalkannya.
           </>
         }
+        inputLabel="Alasan (opsional)"
+        inputPlaceholder="Contoh: rencana berubah, acara dibatalkan."
+        inputMaxLength={MAKS_ALASAN_MINTA_BATAL_CUTI}
+        value={requestAlasan}
+        onChange={setRequestAlasan}
         confirmLabel="Ya, Kirim Permintaan"
         busyLabel="Mengirim..."
         busy={!!requestCancelTarget && requestingId === requestCancelTarget.id}
