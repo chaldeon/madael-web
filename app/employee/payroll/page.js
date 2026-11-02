@@ -6,7 +6,6 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { X, Plus, Pencil, Calculator, Paperclip, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLogClient';
 
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -230,31 +229,35 @@ export default function PayrollManagerPage() {
       nama_rekening: form.nama_rekening.trim() || null,
       no_rekening: form.no_rekening.trim() || null,
       jatah_cuti_tahunan: jatahCuti.value,
-      // Carry-over ditulis hanya kalau HR mengubahnya, supaya hitungan otomatis tidak terkunci.
+      // Carry-over dikirim hanya kalau HR mengubahnya, supaya hitungan otomatis tidak
+      // terkunci; tahun carry-over diisi server.
       ...(Number(form.cuti_carry_over) !== Number(formBaselineRef.current.cuti_carry_over)
-        ? { cuti_carry_over: Number(form.cuti_carry_over) || 0, cuti_carry_over_tahun: tahunSekarang() }
+        ? { cuti_carry_over: Number(form.cuti_carry_over) || 0 }
         : {}),
     };
 
+    // Penulisan lewat API route: hak modul payroll, validasi, dan activity log
+    // (sebelum→sesudah) ditegakkan di server, bukan update/insert dari browser.
     const isEdit = !!form.id;
-    const { error } = isEdit
-      ? await supabase.from('employees_master').update(payload).eq('id', form.id)
-      : await supabase.from('employees_master').insert(payload);
-
-    setSaving(false);
-
-    if (error) {
-      setSaveError(friendlyError(error, 'Gagal menyimpan, coba lagi.'));
+    try {
+      const res = await fetch(isEdit ? `/api/payroll/master/${encodeURIComponent(form.id)}` : '/api/payroll/master', {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSaving(false);
+        setSaveError(body.error || 'Gagal menyimpan, coba lagi.');
+        return;
+      }
+    } catch (err) {
+      setSaving(false);
+      setSaveError(friendlyCaught(err, 'Gagal menyimpan, coba lagi.'));
       return;
     }
 
-    logActivity({
-      aksi: isEdit ? 'edit_struktur_gaji' : 'tambah_employee_master',
-      targetTable: 'employees_master',
-      targetId: form.id || null,
-      detail: { nama: payload.nama, gaji_pokok: payload.gaji_pokok, tunjangan: payload.tunjangan },
-    });
-
+    setSaving(false);
     setModalOpen(false);
     loadData();
   };

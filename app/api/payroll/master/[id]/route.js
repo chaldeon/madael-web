@@ -3,32 +3,31 @@ import { createAdminClient } from '@/lib/supabase-admin';
 import { requireModuleAccess } from '@/lib/moduleAccessServer';
 import { logActivity } from '@/lib/activityLog';
 import { friendlyError } from '@/lib/errorMessage';
-import { STATUS_OPTIONS } from '@/lib/payrollConfig';
-import { validateKepegawaian } from '@/lib/kepegawaian';
+import {
+  MASTER_SELECT,
+  validateMasterInput,
+  cekRelasiMaster,
+  diffMaster,
+  samarkanUntukLog,
+} from '@/lib/payrollMasterServer';
 
 // PATCH /api/payroll/master/[id]
-//   body: { posisi?, status?, gaji_pokok?, tunjangan?,
-//           tanggal_bergabung?, jenis_hubungan_kerja?, kontrak_berakhir? }
+//   body: salah satu/semua kolom form Payroll Manager — nama, client_id, posisi,
+//         status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id,
+//         status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan,
+//         no_bpjs_ketenagakerjaan, nama_rekening, no_rekening,
+//         jatah_cuti_tahunan, cuti_carry_over, tanggal_bergabung,
+//         jenis_hubungan_kerja, kontrak_berakhir. Parsial: hanya key yang
+//         dikirim yang diubah (halaman detail Employee List hanya mengirim
+//         tujuh di antaranya).
 //
-// Edit data HR/payroll ringkas dari halaman detail employee (employees_master).
-// Dulu browser meng-update employees_master langsung tanpa activity log sama
-// sekali, padahal gaji_pokok/tunjangan menjadi dasar slip. Di sini hak modul
-// payroll dicek, hanya kolom di whitelist yang diterima, dan perubahan
-// (sebelum -> sesudah) dicatat server-side sebagai edit_struktur_gaji.
-//
-// Cakupan sengaja sempit: form lengkap di Payroll Manager
-// (app/employee/payroll/page.js) belum lewat rute ini.
-const KEPEGAWAIAN_KEYS = ['tanggal_bergabung', 'jenis_hubungan_kerja', 'kontrak_berakhir'];
-const EDITABLE = ['posisi', 'status', 'gaji_pokok', 'tunjangan', ...KEPEGAWAIAN_KEYS];
-const MAX_POSISI_LENGTH = 200;
-const MAX_NOMINAL = 1_000_000_000_000;
-
-function validNominal(value) {
-  if (value === '' || value === null || typeof value === 'boolean') return null;
-  const num = Number(value);
-  if (!Number.isFinite(num) || num < 0 || num > MAX_NOMINAL) return null;
-  return num;
-}
+// Jalan resmi mengubah data HR/payroll karyawan dari UI. Dulu browser meng-update
+// tabel ini langsung (form lengkap di app/employee/payroll/page.js): validasi hanya
+// di klien, log dikirim sesudah write dan tanpa nilai sebelum→sesudah. Di sini
+// hak modul payroll dicek, body divalidasi + di-whitelist (lib/payrollMasterServer.js),
+// dan perubahan dicatat server-side sebagai edit_struktur_gaji. NPWP, rekening,
+// dan nomor BPJS di log disamarkan (4 digit akhir). Bila tidak ada nilai yang
+// berubah, tidak ada UPDATE dan tidak ada log.
 
 // GET /api/payroll/master/[id]
 //
@@ -81,54 +80,11 @@ export async function PATCH(request, { params }) {
     }
     const { emp } = access;
 
-    const body = await request.json().catch(() => ({}));
-    const patch = {};
-
-    if (body.posisi !== undefined) {
-      if (typeof body.posisi !== 'string') {
-        return NextResponse.json({ error: 'Posisi tidak valid.' }, { status: 400 });
-      }
-      patch.posisi = body.posisi.trim().slice(0, MAX_POSISI_LENGTH);
-    }
-    if (body.status !== undefined) {
-      if (!STATUS_OPTIONS.includes(body.status)) {
-        return NextResponse.json({ error: 'Status karyawan tidak valid.' }, { status: 400 });
-      }
-      patch.status = body.status;
-    }
-    for (const key of ['gaji_pokok', 'tunjangan']) {
-      if (body[key] === undefined) continue;
-      const nominal = validNominal(body[key]);
-      if (nominal === null) {
-        return NextResponse.json(
-          { error: `${key === 'gaji_pokok' ? 'Gaji pokok' : 'Tunjangan'} harus berupa angka 0 atau lebih.` },
-          { status: 400 }
-        );
-      }
-      patch[key] = nominal;
-    }
-    // Data kepegawaian: string 'YYYY-MM-DD' / jenis, atau ''/null untuk
-    // mengosongkan. Aturan antar-field divalidasi setelah baris lama dimuat
-    // (di bawah), karena PATCH boleh hanya mengirim sebagian field.
-    for (const key of KEPEGAWAIAN_KEYS) {
-      if (body[key] === undefined) continue;
-      if (body[key] !== null && typeof body[key] !== 'string') {
-        return NextResponse.json({ error: 'Data kepegawaian tidak valid.' }, { status: 400 });
-      }
-      patch[key] = body[key] ? body[key].trim() : null;
-    }
-    // Ganti ke PKWTT tanpa menyebut tanggal berakhir = kosongkan tanggal itu
-    // (PKWTT tidak punya tanggal berakhir), sama seperti form di Payroll Manager.
-    if (patch.jenis_hubungan_kerja === 'PKWTT' && body.kontrak_berakhir === undefined) {
-      patch.kontrak_berakhir = null;
-    }
-    if (Object.keys(patch).length === 0) {
-      return NextResponse.json({ error: 'Tidak ada perubahan yang dikirim.' }, { status: 400 });
-    }
+    const body = await request.json().catch(() => null);
 
     const { data: before, error: beforeError } = await admin
       .from('employees_master')
-      .select(EDITABLE.join(', ') + ', nama')
+      .select(MASTER_SELECT)
       .eq('id', id)
       .maybeSingle();
     if (beforeError) {
@@ -144,24 +100,32 @@ export async function PATCH(request, { params }) {
       return NextResponse.json({ error: 'Data employee tidak ditemukan.' }, { status: 404 });
     }
 
-    if (KEPEGAWAIAN_KEYS.some((key) => key in patch)) {
-      const kepegawaianError = validateKepegawaian({
-        tanggal_bergabung: 'tanggal_bergabung' in patch ? patch.tanggal_bergabung : before.tanggal_bergabung,
-        jenis_hubungan_kerja: 'jenis_hubungan_kerja' in patch ? patch.jenis_hubungan_kerja : before.jenis_hubungan_kerja,
-        kontrak_berakhir: 'kontrak_berakhir' in patch ? patch.kontrak_berakhir : before.kontrak_berakhir,
-      });
-      if (kepegawaianError) {
-        return NextResponse.json({ error: kepegawaianError }, { status: 400 });
-      }
+    const { values, error: validationError } = validateMasterInput(body, { create: false, before });
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
+    }
+
+    const relasiError = await cekRelasiMaster(admin, values, { masterId: id, before });
+    if (relasiError) {
+      return NextResponse.json({ error: relasiError.error }, { status: relasiError.status });
+    }
+
+    const { sebelum, sesudah } = diffMaster(before, values);
+    if (Object.keys(sesudah).length === 0) {
+      return NextResponse.json({ success: true, unchanged: true, master: before });
     }
 
     const { data: updated, error: updateError } = await admin
       .from('employees_master')
-      .update(patch)
+      .update(values)
       .eq('id', id)
-      .select(EDITABLE.join(', '))
+      .select(MASTER_SELECT)
       .maybeSingle();
     if (updateError) {
+      // 23505 = akun absensi yang sama baru saja dipakai baris lain (unique index).
+      if (updateError.code === '23505') {
+        return NextResponse.json({ error: 'Akun absensi ini sudah terhubung ke employee master lain.' }, { status: 409 });
+      }
       return NextResponse.json(
         { error: `Gagal menyimpan data HR/payroll: ${friendlyError(updateError, 'terjadi kesalahan pada server.', { context: 'Ubah employees_master' })}` },
         { status: 500 }
@@ -171,23 +135,13 @@ export async function PATCH(request, { params }) {
       return NextResponse.json({ error: 'Data employee tidak ditemukan.' }, { status: 404 });
     }
 
-    const sebelum = {};
-    const sesudah = {};
-    for (const key of Object.keys(patch)) {
-      if (before[key] !== updated[key]) {
-        sebelum[key] = before[key];
-        sesudah[key] = updated[key];
-      }
-    }
-    if (Object.keys(sesudah).length > 0) {
-      await logActivity(admin, {
-        userId: emp.id,
-        aksi: 'edit_struktur_gaji',
-        targetTable: 'employees_master',
-        targetId: id,
-        detail: { nama: before.nama, sebelum, sesudah },
-      });
-    }
+    await logActivity(admin, {
+      userId: emp.id,
+      aksi: 'edit_struktur_gaji',
+      targetTable: 'employees_master',
+      targetId: id,
+      detail: { nama: updated.nama, sebelum: samarkanUntukLog(sebelum), sesudah: samarkanUntukLog(sesudah) },
+    });
 
     return NextResponse.json({ success: true, master: updated });
   } catch (err) {
