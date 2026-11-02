@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { runClockOutReminder } from '@/lib/clockOutReminder';
+import { runClockOutReminder, runClockOutReminderKemarin } from '@/lib/clockOutReminder';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,8 +14,10 @@ export const dynamic = 'force-dynamic';
 // Tanpa CRON_SECRET di server, rute menolak semua permintaan (fail closed).
 //
 // Aman dipanggil berkali-kali dalam sehari: satu karyawan paling banyak
-// menerima satu pengingat per hari. Rekomendasi jadwal: tiap 30 menit pada
-// jam kerja sore WIB (lihat lib/clockOutReminder.js untuk aturan lengkap).
+// menerima satu pengingat per hari (hari ini) dan satu pengingat untuk
+// kemarin yang masih tanpa clock out. Rekomendasi jadwal: tiap 30 menit pada
+// jam kerja sore WIB; pengingat kemarin ikut terkirim pada panggilan pertama
+// setelah 07:00 WIB (lihat lib/clockOutReminder.js untuk aturan lengkap).
 
 function authorized(request) {
   const secret = process.env.CRON_SECRET;
@@ -35,8 +37,17 @@ async function handle(request) {
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   try {
-    const summary = await runClockOutReminder(createAdminClient());
-    return NextResponse.json({ success: true, ...summary });
+    const admin = createAdminClient();
+    const summary = await runClockOutReminder(admin);
+    // Kegagalan pengingat kemarin tidak boleh menutupi hasil pengingat hari ini.
+    let kemarin;
+    try {
+      kemarin = await runClockOutReminderKemarin(admin);
+    } catch (err) {
+      console.error('Cron pengingat clock-out (kemarin) error:', err);
+      kemarin = { error: true };
+    }
+    return NextResponse.json({ success: true, ...summary, kemarin });
   } catch (err) {
     console.error('Cron pengingat clock-out error:', err);
     return NextResponse.json({ error: 'Terjadi kesalahan server.' }, { status: 500 });

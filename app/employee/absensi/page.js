@@ -24,7 +24,7 @@ import ExportCsvButton from '@/components/ExportCsvButton';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { getBreakState, durasiIstirahatMenit, durasiKerjaMenit, formatDurasi } from '@/lib/attendanceBreak';
 import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
-import { todayWib, yesterdayWib, dayIndexWib } from '@/lib/wibTime';
+import { todayWib, yesterdayWib, dayIndexWib, isoToWibTime } from '@/lib/wibTime';
 import { getAttendanceStatus } from '@/lib/attendanceStatus';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
@@ -228,9 +228,15 @@ export default function AbsensiPage() {
     });
   }, [summary]);
 
-  const openKoreksiForm = () => {
+  // prefill (opsional): { tanggal, jamMasuk } — dipakai banner lupa clock out.
+  const openKoreksiForm = (prefill) => {
     setKoreksiError(null);
-    const initial = { tanggal: todayStr(), jamMasuk: '', jamPulang: '', alasan: '' };
+    const initial = {
+      tanggal: prefill?.tanggal || todayStr(),
+      jamMasuk: prefill?.jamMasuk || '',
+      jamPulang: '',
+      alasan: '',
+    };
     koreksiFormBaselineRef.current = initial;
     setKoreksiForm(initial);
     setKoreksiFoto(null);
@@ -242,6 +248,11 @@ export default function AbsensiPage() {
 
     if (!koreksiForm.alasan.trim()) {
       setKoreksiError('Alasan koreksi wajib diisi.');
+      return;
+    }
+    // Tanggal lupa clock out: yang kurang pasti jam pulang (jam masuk sudah terisi dari data).
+    if (forgotClockOut && koreksiForm.tanggal === forgotClockOut.tanggal && !koreksiForm.jamPulang) {
+      setKoreksiError('Isi jam pulang yang seharusnya untuk tanggal ini.');
       return;
     }
     if (!koreksiForm.jamMasuk && !koreksiForm.jamPulang) {
@@ -347,6 +358,10 @@ export default function AbsensiPage() {
   }
 
   const isWorkday = schedule?.hari_kerja?.includes(HARI_LABEL[dayIndexWib()]);
+  // Sudah ada pengajuan koreksi pending untuk tanggal lupa clock out? (server hanya
+  // mengizinkan satu pending per tanggal, jadi tombol diganti keterangan.)
+  const forgotClockOutPending = !!forgotClockOut
+    && myCorrections.some((c) => c.tanggal === forgotClockOut.tanggal && c.status === 'pending');
 
   return (
     <div className="max-w-[700px] mx-auto px-6 py-10">
@@ -356,8 +371,27 @@ export default function AbsensiPage() {
       {forgotClockOut && (
         <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mb-6">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          Kamu clock in pada {formatTanggal(forgotClockOut.tanggal)} pukul {formatWaktu(forgotClockOut.clock_in)} tapi belum clock out.
-          Kalau ini kelupaan, hubungi superadmin untuk koreksi manual.
+          <div>
+            <p>
+              Kamu clock in pada {formatTanggal(forgotClockOut.tanggal)} pukul {formatWaktu(forgotClockOut.clock_in)} tapi belum clock out.
+              {forgotClockOutPending
+                ? ' Pengajuan koreksimu untuk tanggal ini sedang menunggu review superadmin.'
+                : ' Kalau ini kelupaan, ajukan koreksi jam pulang dengan foto bukti.'}
+            </p>
+            {!forgotClockOutPending && (
+              <button
+                type="button"
+                onClick={() => openKoreksiForm({
+                  tanggal: forgotClockOut.tanggal,
+                  jamMasuk: isoToWibTime(forgotClockOut.clock_in),
+                })}
+                className="mt-2 inline-flex items-center gap-1.5 font-medium underline hover:text-amber-900"
+              >
+                <FileEdit size={13} />
+                Ajukan koreksi untuk tanggal ini
+              </button>
+            )}
+          </div>
         </div>
       )}
       {!schedule && (
@@ -672,7 +706,7 @@ export default function AbsensiPage() {
       <div className="flex items-center justify-between mt-10 mb-3">
         <h2 className="text-sm font-medium text-black">Pengajuan Koreksi Kehadiran</h2>
         <button
-          onClick={openKoreksiForm}
+          onClick={() => openKoreksiForm()}
           className="flex items-center gap-1.5 text-xs font-medium tracking-[0.02em] text-madael-red hover:text-madael-dark"
         >
           <FileEdit size={14} />
