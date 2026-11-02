@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { Plus, Eye, Pencil } from 'lucide-react';
+import { Plus, Eye, Pencil, Lock } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 
 import { useModuleAccess } from '@/lib/useModuleAccess';
@@ -12,10 +12,11 @@ import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 import SortableHeader from '@/components/SortableHeader';
 import PayslipFormModal from '@/components/payslip-admin/PayslipFormModal';
-import { buildPeriodeLabel, previewNomorDokumen, NUMERIC_KEYS, EMPTY_FORM, calcTHP, SORT_COLUMNS } from '@/lib/payslipAdminConfig';
+import { previewNomorDokumen, NUMERIC_KEYS, EMPTY_FORM, calcTHP, SORT_COLUMNS } from '@/lib/payslipAdminConfig';
 import { formatRupiah } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
 import PaginationBar from '@/components/PaginationBar';
@@ -55,6 +56,9 @@ export default function PayslipAdminPage() {
   const formBaselineRef = useRef(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
+  // Slip terbit yang mau diedit: harus ditarik (kembali Draft) dulu lewat dialog konfirmasi.
+  const [unpublishTarget, setUnpublishTarget] = useState(null);
+  const [unpublishing, setUnpublishing] = useState(false);
 
   // Slip dimuat per halaman (range + count) dengan filter di server — dulu seluruh
   // riwayat ditarik sekaligus dan terpotong di batas 1.000 baris. Urutan dari
@@ -191,6 +195,11 @@ export default function PayslipAdminPage() {
   };
 
   const openEdit = (p) => {
+    // Slip yang sudah terbit terkunci: harus ditarik dulu (lihat dialog konfirmasi).
+    if (p.is_published) {
+      setUnpublishTarget(p);
+      return;
+    }
     const next = { ...EMPTY_FORM };
     Object.keys(next).forEach((key) => {
       if (p[key] !== undefined && p[key] !== null) next[key] = p[key];
@@ -202,65 +211,65 @@ export default function PayslipAdminPage() {
     setModalOpen(true);
   };
 
-  const handleSubmit = async (bpjsTkPerusahaan) => {
+  // Simpan lewat server (POST /api/payslips untuk slip baru, PATCH
+  // /api/payslips/[id] untuk edit draft). Server memvalidasi ulang, menurunkan
+  // Periode Label + total BPJS TK, mengambil nomor dokumen HANYA setelah
+  // validasi lolos (dan mengembalikannya kalau simpan gagal), serta mencatat
+  // activity log. Browser tidak lagi menulis ke tabel payslips.
+  const handleSubmit = async () => {
     setSaving(true);
     setSaveError(null);
-    const payload = { ...form, bpjs_tk_perusahaan: bpjsTkPerusahaan };
-    NUMERIC_KEYS.forEach((k) => { payload[k] = Number(payload[k]) || 0; });
-    if (!payload.tanggal_pembayaran) payload.tanggal_pembayaran = null;
-    delete payload.employees;
 
-    // Jaga-jaga: selalu turunkan ulang Periode Label dari Periode tepat sebelum
-    // disimpan, supaya tidak pernah kosong walau ada celah sinkronisasi di form.
-    if (/^\d{4}-\d{2}$/.test(payload.periode || '')) {
-      const [tahunFinal, bulanFinal] = payload.periode.split('-');
-      payload.periode_label = buildPeriodeLabel(tahunFinal, bulanFinal);
-    } else {
+    if (!/^\d{4}-\d{2}$/.test(form.periode || '')) {
       setSaving(false);
       setSaveError('Periode belum lengkap, pilih Tahun dan Bulan terlebih dahulu.');
       return;
     }
 
-    // Nomor dokumen baru hanya digenerate (dan counter INV di-increment) saat membuat slip baru
+    const body = {
+      periode: form.periode,
+      metode_pembayaran: form.metode_pembayaran,
+      tanggal_pembayaran: form.tanggal_pembayaran || null,
+    };
+    NUMERIC_KEYS.forEach((k) => { body[k] = Number(form[k]) || 0; });
     if (!editingId) {
-      const res = await fetch('/api/documents/generate-number', {
-        method: 'POST',
+      // Karyawan + data standing (dari employees_master) hanya dikirim saat
+      // membuat slip; slip yang sudah ada tidak mengubahnya.
+      body.employee_id = form.employee_id;
+      ['rekening', 'npwp', 'ptkp', 'no_bpjs_k', 'no_bpjs_tk'].forEach((k) => { body[k] = form[k] || ''; });
+    }
+
+    // is_published TIDAK ikut disimpan: terbit/tarik slip hanya lewat
+    // /api/payslips/[id]/publish (log + notifikasi server-side).
+    const wantPublished = !!form.is_published;
+    const wasPublished = !!formBaselineRef.current?.is_published;
+
+    let savedId = editingId;
+    try {
+      const res = await fetch(editingId ? `/api/payslips/${editingId}` : '/api/payslips', {
+        method: editingId ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kode_jenis: 'INV' }),
+        body: JSON.stringify(body),
       });
-      const numberData = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         setSaving(false);
-        setSaveError(numberData.error || 'Gagal generate nomor dokumen.');
+        if (json.terkunci) {
+          // Slip ternyata sudah diterbitkan (mis. oleh admin lain): tutup form
+          // dan muat ulang supaya statusnya terlihat.
+          setModalOpen(false);
+          setActionError(json.error);
+          loadData();
+          return;
+        }
+        setSaveError(json.error || 'Gagal menyimpan, coba lagi.');
         return;
       }
-      payload.nomor_dokumen = numberData.nomor_surat;
-    }
-
-    // is_published TIDAK ikut disimpan lewat update/insert langsung: terbit/tarik
-    // slip hanya lewat /api/payslips/[id]/publish (log + notifikasi server-side;
-    // trigger DB menolak perubahan is_published dari browser).
-    const wantPublished = !!payload.is_published;
-    const wasPublished = !!formBaselineRef.current?.is_published;
-    delete payload.is_published;
-
-    let error;
-    let savedId = editingId;
-    if (editingId) {
-      ({ error } = await supabase.from('payslips').update(payload).eq('id', editingId));
-    } else {
-      let inserted;
-      ({ data: inserted, error } = await supabase
-        .from('payslips')
-        .insert({ ...payload, is_published: false })
-        .select('id')
-        .single());
-      savedId = inserted?.id;
-    }
-
-    if (error) {
+      if (!editingId) savedId = json.id;
+    } catch (err) {
+      console.error('Simpan slip error:', err);
       setSaving(false);
-      setSaveError(friendlyError(error, 'Gagal menyimpan, coba lagi.'));
+      setSaveError('Koneksi bermasalah, coba lagi.');
       return;
     }
 
@@ -308,6 +317,26 @@ export default function PayslipAdminPage() {
     }
 
     setPayslips((prev) => prev.map((x) => (x.id === p.id ? { ...x, is_published: willPublish } : x)));
+  };
+
+  // Langkah eksplisit "Tarik dulu" sebelum mengedit slip terbit: slip ditarik
+  // lewat server (tercatat sebagai unpublish_payslip), lalu form edit dibuka.
+  // Slip tidak terbit lagi otomatis — admin menerbitkannya manual setelah selesai.
+  const handleUnpublishAndEdit = async () => {
+    const target = unpublishTarget;
+    if (!target) return;
+    setActionError(null);
+    setUnpublishing(true);
+    const publishError = await requestPublish(target.id, false);
+    setUnpublishing(false);
+    setUnpublishTarget(null);
+    if (publishError) {
+      setActionError(`Gagal menarik slip "${target.employees?.nama || 'ini'}": ${publishError}`);
+      return;
+    }
+    const drafted = { ...target, is_published: false };
+    setPayslips((prev) => prev.map((x) => (x.id === target.id ? drafted : x)));
+    openEdit(drafted);
   };
 
   const selectClass =
@@ -451,9 +480,20 @@ export default function PayslipAdminPage() {
                   </td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-3">
-                      <button onClick={() => openEdit(p)} className="text-[#6B6B6B] hover:text-madael-red" title="Edit">
-                        <Pencil size={15} />
-                      </button>
+                      {p.is_published ? (
+                        <button
+                          onClick={() => setUnpublishTarget(p)}
+                          className="text-[#B0B0B0] hover:text-madael-red"
+                          title="Slip sudah terbit, jadi terkunci. Klik untuk menarik slip lalu mengedit."
+                          aria-label="Slip terkunci karena sudah terbit"
+                        >
+                          <Lock size={15} />
+                        </button>
+                      ) : (
+                        <button onClick={() => openEdit(p)} className="text-[#6B6B6B] hover:text-madael-red" title="Edit">
+                          <Pencil size={15} />
+                        </button>
+                      )}
                       <Link href={`/employee/payslip/${p.id}`} target="_blank" className="text-[#6B6B6B] hover:text-madael-red" title="Lihat">
                         <Eye size={15} />
                       </Link>
@@ -477,6 +517,24 @@ export default function PayslipAdminPage() {
           satuan="slip gaji"
         />
       )}
+
+      <ConfirmDialog
+        open={!!unpublishTarget}
+        title="Slip Sudah Terbit"
+        message={
+          <>
+            Slip <strong>{unpublishTarget?.employees?.nama || 'ini'}</strong> periode{' '}
+            {unpublishTarget?.periode_label || unpublishTarget?.periode} sudah terbit dan mungkin sudah dilihat karyawan,
+            jadi tidak bisa diedit langsung. Untuk mengedit, slip harus ditarik dulu (kembali ke Draft). Penarikan dan
+            semua perubahan nominal dicatat di Activity Log. Setelah selesai, terbitkan lagi secara manual.
+          </>
+        }
+        confirmLabel="Tarik & Edit"
+        busyLabel="Menarik slip..."
+        busy={unpublishing}
+        onConfirm={handleUnpublishAndEdit}
+        onCancel={() => setUnpublishTarget(null)}
+      />
 
       {modalOpen && (
         <PayslipFormModal
