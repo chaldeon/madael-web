@@ -5,8 +5,8 @@ import { logActivity } from '@/lib/activityLog';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { hitungHariKerja, labelJenisCuti } from '@/lib/leave';
 import { todayJakarta } from '@/lib/serverTime';
+import { FILTER_STATUS_CUTI_VALID, terapkanFilterStatusCuti } from '@/lib/leaveServer';
 
-const STATUS_VALID = ['pending', 'approved', 'rejected', 'cancelled'];
 const STATUS_LABEL = { pending: 'MENUNGGU', approved: 'DISETUJUI', rejected: 'DITOLAK', cancelled: 'DIBATALKAN' };
 
 // GET /api/leave-requests/admin/export?status=pending
@@ -28,7 +28,7 @@ export async function GET(request) {
 
     const { searchParams } = new URL(request.url);
     const statusFilter = searchParams.get('status') || 'pending';
-    if (statusFilter !== 'all' && !STATUS_VALID.includes(statusFilter)) {
+    if (statusFilter !== 'all' && !FILTER_STATUS_CUTI_VALID.includes(statusFilter)) {
       return NextResponse.json({ error: 'Filter status tidak valid.' }, { status: 400 });
     }
 
@@ -37,7 +37,7 @@ export async function GET(request) {
         let query = admin
           .from('leave_requests')
           .select('id, employee_id, jenis, tanggal_mulai, tanggal_selesai, status, alasan, rejection_reason, created_at');
-        if (statusFilter !== 'all') query = query.eq('status', statusFilter);
+        query = terapkanFilterStatusCuti(query, statusFilter);
         // Urutan sama dengan daftar di halaman (tanggal mulai terbaru dulu);
         // `id` ditambahkan fetchAllRows sebagai pemutus seri.
         return query

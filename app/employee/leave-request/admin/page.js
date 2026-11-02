@@ -4,11 +4,12 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Check, X as XIcon, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { DEFAULT_KEBIJAKAN_CUTI } from '@/lib/leavePolicy';
-import { hitungHariKerja, hitungSisaCuti, labelJenisCuti, potongKuota, MAKS_CATATAN_TOLAK_CUTI } from '@/lib/leave';
+import { hitungHariKerja, hitungSisaCuti, labelJenisCuti, potongKuota, MAKS_CATATAN_TOLAK_CUTI, FILTER_MINTA_BATAL_CUTI } from '@/lib/leave';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -24,6 +25,38 @@ function formatTanggal(value) {
   return new Date(value + 'T00:00:00').toLocaleDateString('id-ID', {
     day: 'numeric', month: 'short', year: 'numeric',
   });
+}
+
+function formatWaktuMinta(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('id-ID', {
+    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Jakarta',
+  });
+}
+
+// Status permintaan batal dari karyawan (kolom minta_batal_*), tampil di bawah
+// badge status pengajuan. Tidak ada permintaan = tidak tampil.
+function MintaBatalInfo({ row }) {
+  if (!row.minta_batal_status) return null;
+  if (row.minta_batal_status === 'menunggu') {
+    return (
+      <div className="mt-1.5 max-w-[200px] whitespace-normal break-words">
+        <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-amber-100 text-amber-800">MINTA BATAL</span>
+        <p className="text-[11px] text-[#9A9A9A] mt-1">Diminta karyawan {formatWaktuMinta(row.minta_batal_at)}</p>
+        {row.minta_batal_alasan && (
+          <p className="text-[11px] text-[#6B6B6B] mt-0.5">Alasan: {row.minta_batal_alasan}</p>
+        )}
+      </div>
+    );
+  }
+  if (row.minta_batal_status === 'ditolak') {
+    return (
+      <p className="text-[11px] text-[#9A9A9A] mt-1.5 max-w-[200px] whitespace-normal break-words">
+        Permintaan batal ditolak{row.minta_batal_catatan ? `: ${row.minta_batal_catatan}` : ''}
+      </p>
+    );
+  }
+  return <p className="text-[11px] text-[#9A9A9A] mt-1.5">Atas permintaan karyawan</p>;
 }
 
 function StatusBadge({ status }) {
@@ -125,7 +158,12 @@ function RejectDialog({ row, namaKaryawan, saving, error, onSubmit, onClose }) {
 export default function LeaveRequestAdminPage() {
   const { status } = useModuleAccess('leave_request_admin');
 
-  const [statusFilter, setStatusFilter] = useState('pending');
+  // Tautan dari notifikasi / Inbox Persetujuan membuka filter permintaan batal
+  // (?status=minta_batal); selain itu filter awal tetap 'pending'.
+  const searchParams = useSearchParams();
+  const [statusFilter, setStatusFilter] = useState(
+    () => (searchParams.get('status') === FILTER_MINTA_BATAL_CUTI ? FILTER_MINTA_BATAL_CUTI : 'pending')
+  );
   const [sortField, setSortField] = useState('periode');
   const [sortDir, setSortDir] = useState('desc');
   const [employees, setEmployees] = useState([]);
@@ -146,6 +184,8 @@ export default function LeaveRequestAdminPage() {
   const [actionWarning, setActionWarning] = useState(null);
   const [rejectingRow, setRejectingRow] = useState(null); // baris yang sedang ditolak (dialog alasan)
   const [revokeTarget, setRevokeTarget] = useState(null); // baris cuti disetujui yang menunggu konfirmasi pembatalan
+  const [rejectCancelTarget, setRejectCancelTarget] = useState(null); // baris dengan permintaan batal yang akan ditolak
+  const [rejectCancelCatatan, setRejectCancelCatatan] = useState('');
 
   // Data dimuat lewat route server (bukan query browser) karena employees_master
   // dibatasi RLS superadmin — lihat catatan di app/api/leave-requests/admin.
@@ -305,6 +345,33 @@ export default function LeaveRequestAdminPage() {
     }
   };
 
+  // Tolak permintaan batal dari karyawan: cuti tetap berlaku, hanya status
+  // permintaannya yang berubah (route reject-cancel). Setujui permintaan =
+  // aksi Batalkan di atas (decision 'cancelled'), yang ikut menandai permintaan.
+  const handleRejectCancel = async (row, catatan) => {
+    setActionError(null);
+    setActionWarning(null);
+    setActingId(row.id);
+    try {
+      const res = await fetch(`/api/leave-requests/${row.id}/reject-cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ catatan }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(json.error || 'Gagal menolak permintaan pembatalan.');
+        if (res.status === 409) loadData();
+        return;
+      }
+      setRequests((prev) => prev.map((r) => (r.id === json.request.id ? json.request : r)));
+    } catch {
+      setActionError('Gagal memproses permintaan pembatalan. Periksa koneksi internet kamu.');
+    } finally {
+      setActingId(null);
+    }
+  };
+
   const handleRejectSubmit = async (extra) => {
     if (!rejectingRow) return;
     const hasil = await handleDecision(rejectingRow, 'rejected', extra);
@@ -363,6 +430,7 @@ export default function LeaveRequestAdminPage() {
         >
           <option value="pending">Menunggu</option>
           <option value="approved">Disetujui</option>
+          <option value={FILTER_MINTA_BATAL_CUTI}>Permintaan batal</option>
           <option value="rejected">Ditolak</option>
           <option value="cancelled">Dibatalkan</option>
           <option value="all">Semua</option>
@@ -449,6 +517,7 @@ export default function LeaveRequestAdminPage() {
                         {row.status === 'rejected' && row.rejection_reason && (
                           <p className="text-[11px] text-[#9A9A9A] mt-1 max-w-[160px]" title={row.rejection_reason}>{row.rejection_reason}</p>
                         )}
+                        <MintaBatalInfo row={row} />
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         {row.status === 'pending' ? (
@@ -466,6 +535,23 @@ export default function LeaveRequestAdminPage() {
                               className="inline-flex items-center gap-1 text-xs text-madael-red hover:text-madael-dark font-medium disabled:opacity-50"
                             >
                               <XIcon size={12} /> Tolak
+                            </button>
+                          </div>
+                        ) : row.status === 'approved' && row.minta_batal_status === 'menunggu' ? (
+                          <div className="flex items-center justify-end gap-3">
+                            <button
+                              onClick={() => setRevokeTarget(row)}
+                              disabled={actingId === row.id}
+                              className="inline-flex items-center gap-1 text-xs text-green-700 hover:text-green-900 font-medium disabled:opacity-50"
+                            >
+                              <Check size={12} /> Setujui pembatalan
+                            </button>
+                            <button
+                              onClick={() => { setActionError(null); setRejectCancelCatatan(''); setRejectCancelTarget(row); }}
+                              disabled={actingId === row.id}
+                              className="inline-flex items-center gap-1 text-xs text-madael-red hover:text-madael-dark font-medium disabled:opacity-50"
+                            >
+                              <XIcon size={12} /> Tolak permintaan
                             </button>
                           </div>
                         ) : row.status === 'approved' ? (
@@ -514,10 +600,13 @@ export default function LeaveRequestAdminPage() {
 
       <ConfirmDialog
         open={!!revokeTarget}
-        title="Batalkan Cuti yang Sudah Disetujui"
+        title={revokeTarget?.minta_batal_status === 'menunggu' ? 'Setujui Pembatalan Cuti' : 'Batalkan Cuti yang Sudah Disetujui'}
         message={
           revokeTarget && (
             <>
+              {revokeTarget.minta_batal_status === 'menunggu' && (
+                <>Karyawan meminta pembatalan ini; karyawan akan diberi tahu bahwa permintaannya disetujui.<br /></>
+              )}
               Batalkan {potongKuota(revokeTarget.jenis) ? 'cuti' : labelJenisCuti(revokeTarget.jenis).toLowerCase()} yang sudah disetujui ({formatTanggal(revokeTarget.tanggal_mulai)} — {formatTanggal(revokeTarget.tanggal_selesai)})?
               {potongKuota(revokeTarget.jenis) && (
                 <>
@@ -536,6 +625,32 @@ export default function LeaveRequestAdminPage() {
           setRevokeTarget(null);
         }}
         onCancel={() => setRevokeTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={!!rejectCancelTarget}
+        title="Tolak Permintaan Pembatalan"
+        message={
+          rejectCancelTarget && (
+            <>
+              Tolak permintaan {empById[rejectCancelTarget.employee_id]?.nama || 'karyawan'} untuk membatalkan cuti {formatTanggal(rejectCancelTarget.tanggal_mulai)} — {formatTanggal(rejectCancelTarget.tanggal_selesai)}?
+              <br />
+              Cutinya tetap berlaku dan kuota tidak berubah.
+            </>
+          )
+        }
+        inputLabel="Catatan untuk karyawan (opsional)"
+        inputMaxLength={MAKS_CATATAN_TOLAK_CUTI}
+        value={rejectCancelCatatan}
+        onChange={setRejectCancelCatatan}
+        confirmLabel="Ya, Tolak Permintaan"
+        busyLabel="Menolak..."
+        busy={!!rejectCancelTarget && actingId === rejectCancelTarget.id}
+        onConfirm={async () => {
+          await handleRejectCancel(rejectCancelTarget, rejectCancelCatatan.trim());
+          setRejectCancelTarget(null);
+        }}
+        onCancel={() => setRejectCancelTarget(null)}
       />
     </div>
   );

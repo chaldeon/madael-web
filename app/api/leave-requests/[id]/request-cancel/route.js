@@ -6,6 +6,10 @@ import { logActivity } from '@/lib/activityLog';
 import { notifyByModule } from '@/lib/notify';
 import { todayJakarta } from '@/lib/serverTime';
 import { friendlyError } from '@/lib/errorMessage';
+import { MAKS_ALASAN_MINTA_BATAL_CUTI } from '@/lib/leave';
+
+const KOLOM_STATUS_MINTA_BATAL =
+  'id, status, tanggal_mulai, tanggal_selesai, minta_batal_status, minta_batal_at, minta_batal_alasan, minta_batal_catatan';
 
 function formatTanggal(value) {
   if (!value) return '—';
@@ -14,18 +18,25 @@ function formatTanggal(value) {
   });
 }
 
-// POST /api/leave-requests/[id]/request-cancel
+// POST /api/leave-requests/[id]/request-cancel   body: { alasan? }
 // Karyawan MEMINTA pembatalan cuti miliknya yang sudah disetujui (approved)
 // dan belum dimulai (tanggal_mulai >= hari ini, WIB).
 //
-// Route ini TIDAK mengubah status pengajuan maupun kuota. Ia hanya
-// memberi tahu pemegang modul leave_request_admin; keputusan tetap di tangan
-// HR lewat aksi "Batalkan" yang sudah ada (decision route: approved ->
-// cancelled, kuota dikembalikan di sana).
+// Permintaan DISIMPAN di leave_requests (minta_batal_status = 'menunggu',
+// minta_batal_at, minta_batal_alasan), jadi statusnya tidak hilang saat halaman
+// dimuat ulang dan HR bisa menjawabnya: setujui lewat decision route
+// (approved -> cancelled, kuota dikembalikan di sana) atau tolak lewat
+// reject-cancel. Route ini TIDAK mengubah status pengajuan maupun kuota.
 //
-// Notifikasi dibatasi satu per pengajuan per hari (dedupeKey memuat tanggal
-// WIB), jadi klik berulang tidak membanjiri HR, tetapi karyawan tetap bisa
-// mengingatkan lagi esok harinya.
+// Idempoten: selama permintaan masih 'menunggu', permintaan ulang tidak
+// mengubah apa pun dan tidak mengirim notifikasi lagi (alreadySent: true).
+// Setelah HR menolak ('ditolak'), karyawan boleh meminta lagi; permintaan baru
+// menimpa alasan/catatan sebelumnya dan memberi tahu HR lagi.
+//
+// Update bersyarat (status approved + belum 'menunggu') sehingga atomik
+// terhadap HR yang membatalkan/menjawab di saat yang sama. Notifikasi ke HR
+// hanya pelengkap: bila gagal terkirim, permintaan tetap tersimpan dan muncul
+// di filter "Permintaan batal", badge, dan Inbox Persetujuan.
 export async function POST(request, { params }) {
   try {
     const { id } = await params;
@@ -63,9 +74,20 @@ export async function POST(request, { params }) {
 
     const admin = createAdminClient();
 
+    // Alasan: opsional, hanya teks (body kosong/bukan JSON dianggap tanpa alasan).
+    const body = await request.json().catch(() => ({}));
+    const alasanMentah = typeof body?.alasan === 'string' ? body.alasan.trim() : '';
+    if (alasanMentah.length > MAKS_ALASAN_MINTA_BATAL_CUTI) {
+      return NextResponse.json(
+        { error: `Alasan maksimal ${MAKS_ALASAN_MINTA_BATAL_CUTI} karakter.` },
+        { status: 400 }
+      );
+    }
+    const alasan = alasanMentah || null;
+
     const { data: row, error: rowError } = await admin
       .from('leave_requests')
-      .select('id, status, tanggal_mulai, tanggal_selesai')
+      .select(KOLOM_STATUS_MINTA_BATAL)
       .eq('id', id)
       .eq('employee_id', emp.id)
       .maybeSingle();
@@ -100,25 +122,67 @@ export async function POST(request, { params }) {
       );
     }
 
-    const periode = `${formatTanggal(row.tanggal_mulai)} – ${formatTanggal(row.tanggal_selesai)}`;
-    const notif = await notifyByModule(admin, {
-      moduleKey: 'leave_request_admin',
-      tipe: 'cuti_minta_batal',
-      pesan: `${emp.nama || 'Karyawan'} meminta pembatalan cuti yang sudah disetujui (${periode}). Buka Kelola Pengajuan Cuti, filter "Disetujui", lalu tekan Batalkan bila disetujui.`,
-      link: '/employee/leave-request/admin',
-      dedupeKey: `cuti_minta_batal:${row.id}:${hariIni}`,
-    });
+    // Permintaan yang sama masih menunggu jawaban HR: tidak ada yang berubah.
+    if (row.minta_batal_status === 'menunggu') {
+      return NextResponse.json({ success: true, alreadySent: true, request: row });
+    }
 
-    if (!notif.ok) {
+    const sekarang = new Date().toISOString();
+    const { data: updated, error: updateError } = await admin
+      .from('leave_requests')
+      .update({
+        minta_batal_status: 'menunggu',
+        minta_batal_at: sekarang,
+        minta_batal_alasan: alasan,
+        minta_batal_catatan: null,
+      })
+      .eq('id', row.id)
+      .eq('employee_id', emp.id)
+      .eq('status', 'approved')
+      .or('minta_batal_status.is.null,minta_batal_status.eq.ditolak')
+      .select(KOLOM_STATUS_MINTA_BATAL)
+      .maybeSingle();
+
+    if (updateError) {
+      console.error('Simpan permintaan batal cuti error:', updateError);
       return NextResponse.json(
-        { error: 'Permintaan gagal dikirim ke HR, coba lagi.' },
+        { error: `Gagal menyimpan permintaan pembatalan: ${friendlyError(updateError, 'terjadi kesalahan pada server.', { context: 'Simpan permintaan batal cuti' })}` },
         { status: 500 }
       );
     }
 
-    // inserted = 0 tanpa error: permintaan hari ini sudah pernah terkirim.
-    if (notif.inserted === 0) {
-      return NextResponse.json({ success: true, alreadySent: true });
+    if (!updated) {
+      // Kalah balapan: baca ulang untuk tahu apa yang terjadi.
+      const { data: terbaru } = await admin
+        .from('leave_requests')
+        .select(KOLOM_STATUS_MINTA_BATAL)
+        .eq('id', row.id)
+        .eq('employee_id', emp.id)
+        .maybeSingle();
+      if (terbaru?.status === 'approved' && terbaru.minta_batal_status === 'menunggu') {
+        return NextResponse.json({ success: true, alreadySent: true, request: terbaru });
+      }
+      return NextResponse.json(
+        {
+          error: 'Status pengajuan ini baru saja berubah. Muat ulang halaman lalu coba lagi.',
+          status: terbaru?.status || row.status,
+        },
+        { status: 409 }
+      );
+    }
+
+    const periode = `${formatTanggal(row.tanggal_mulai)} – ${formatTanggal(row.tanggal_selesai)}`;
+    const notif = await notifyByModule(admin, {
+      moduleKey: 'leave_request_admin',
+      tipe: 'cuti_minta_batal',
+      pesan: `${emp.nama || 'Karyawan'} meminta pembatalan cuti yang sudah disetujui (${periode}).${alasan ? ` Alasan: ${alasan}` : ''} Buka Kelola Pengajuan Cuti (filter "Permintaan batal") untuk menyetujui atau menolak.`,
+      link: '/employee/leave-request/admin?status=minta_batal',
+      // Kunci memuat waktu permintaan: permintaan baru setelah ditolak HR tetap
+      // memberi tahu HR, sedangkan permintaan ganda ditahan oleh status di atas.
+      dedupeKey: `cuti_minta_batal:${row.id}:${sekarang}`,
+    });
+    if (!notif.ok) {
+      console.error('Notifikasi permintaan batal cuti gagal terkirim (permintaan tetap tersimpan):', row.id);
     }
 
     await logActivity(admin, {
@@ -130,10 +194,12 @@ export async function POST(request, { params }) {
         employee_id: emp.id,
         tanggal_mulai: row.tanggal_mulai,
         tanggal_selesai: row.tanggal_selesai,
+        alasan,
+        permintaan_ulang: row.minta_batal_status === 'ditolak',
       },
     });
 
-    return NextResponse.json({ success: true, alreadySent: false });
+    return NextResponse.json({ success: true, alreadySent: false, request: updated });
   } catch (err) {
     console.error('Minta batal cuti error:', err);
     return NextResponse.json({ error: 'Terjadi kesalahan server.' }, { status: 500 });

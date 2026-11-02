@@ -17,7 +17,7 @@ const HREF_BY_KEY = Object.fromEntries(MODULE_REGISTRY.map((m) => [m.key, m.href
 // (lib/pendingQueue.js + lib/pendingQueueServer.js). Route ini hanya MEMBACA —
 // keputusan (approve/reject) tetap lewat route keputusan tiap modul.
 // Respons: { groups: [{ key, jenis, href, total, shown }], items: [{ id, module,
-// jenis, pemohon, ringkasan, diajukan, href }] }. Modul yang gagal dimuat masuk
+// jenis, pemohon, ringkasan, diajukan, href, aksiLangsung }] }. Modul yang gagal dimuat masuk
 // `failed` (nama jenis) dan tidak mematikan modul lain.
 export async function GET() {
   try {
@@ -81,11 +81,13 @@ export async function GET() {
       r.rows.map((row) => ({
         id: `${r.key}:${row.id}`,
         module: r.key,
-        jenis: r.config.jenis,
+        jenis: r.config.jenisItem?.(row) || r.config.jenis,
         pemohon: namaById[row.employee_id] || '—',
         ringkasan: r.config.ringkas(row),
-        diajukan: row.created_at,
-        href: HREF_BY_KEY[r.key] || '/employee/dashboard',
+        diajukan: r.config.diajukanDari?.(row) || row.created_at,
+        href: `${HREF_BY_KEY[r.key] || '/employee/dashboard'}${r.config.tinjauQuery?.(row) || ''}`,
+        // false = hanya "Tinjau" (lihat PENDING_QUERIES[...].aksiLangsung).
+        aksiLangsung: r.config.aksiLangsung ? !!r.config.aksiLangsung(row) : true,
       }))
     );
 
