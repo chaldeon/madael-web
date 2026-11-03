@@ -11,7 +11,7 @@ import { useModalDismiss } from '@/lib/useModalDismiss';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
-import { friendlyError } from '@/lib/errorMessage';
+import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 
 const STATUS_STYLES = {
   Draft: 'bg-[#F3F4F6] text-[#4B5563]',
@@ -43,6 +43,8 @@ function formatDate(value) {
 
 function EditCounterModal({ counter, onClose, onSave, saving, saveError }) {
   const [value, setValue] = useState(counter.last_number);
+  const [konfirmasiTurun, setKonfirmasiTurun] = useState(false);
+  const turun = value < counter.last_number;
   const handleModalBackdrop = useModalDismiss(true, onClose, undefined, value !== counter.last_number);
 
   return (
@@ -66,6 +68,18 @@ function EditCounterModal({ counter, onClose, onSave, saving, saveError }) {
           />
         </label>
 
+        {turun && (
+          <label className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-2 mb-4">
+            <input
+              type="checkbox"
+              checked={konfirmasiTurun}
+              onChange={(e) => setKonfirmasiTurun(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>Menurunkan nomor bisa menghasilkan nomor ganda dengan dokumen yang sudah ada. Saya mengerti dan ingin melanjutkan.</span>
+          </label>
+        )}
+
         {saveError && (
           <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 mb-4">
             <span>{saveError}</span>
@@ -80,8 +94,8 @@ function EditCounterModal({ counter, onClose, onSave, saving, saveError }) {
             Batal
           </button>
           <button
-            onClick={() => onSave(value)}
-            disabled={saving}
+            onClick={() => onSave(value, turun && konfirmasiTurun)}
+            disabled={saving || (turun && !konfirmasiTurun)}
             className="bg-madael-red text-white px-5 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors disabled:opacity-60"
           >
             {saving ? 'Menyimpan...' : 'Simpan'}
@@ -139,19 +153,29 @@ export default function NomorSuratPage() {
     if (status === 'allowed') loadData();
   }, [status, loadData]);
 
-  const handleSaveCounter = async (newValue) => {
+  const handleSaveCounter = async (newValue, konfirmasiTurun) => {
     setSaving(true);
     setSaveError(null);
-    const { error } = await supabase
-      .from('document_counters')
-      .update({ last_number: newValue })
-      .eq('id', editingCounter.id);
-    setSaving(false);
-
-    if (error) {
-      setSaveError(friendlyError(error, 'Gagal update nomor, coba lagi.'));
+    try {
+      // Lewat server: koreksi dicatat di activity log, dan ditolak kalau
+      // counter sudah berubah sejak halaman dimuat (ada dokumen baru).
+      const res = await fetch(`/api/documents/counters/${editingCounter.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          last_number: Number(newValue),
+          expected_last_number: Number(editingCounter.last_number),
+          konfirmasi_turun: !!konfirmasiTurun,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Gagal update nomor, coba lagi.');
+    } catch (err) {
+      setSaveError(friendlyCaught(err, 'Gagal update nomor, coba lagi.'));
+      setSaving(false);
       return;
     }
+    setSaving(false);
     setEditingCounter(null);
     loadData();
   };
