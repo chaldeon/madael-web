@@ -5,26 +5,16 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Upload, Trash2, FileText, ExternalLink } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
-import EmptyState from '@/components/EmptyState';
 import { formatRupiahOrDash } from '@/lib/format';
-import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
-import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
-import Toast from '@/components/employee-list/Toast';
-import ConfirmDialog from '@/components/ConfirmDialog';
+import { friendlyCaught } from '@/lib/errorMessage';
+import EmployeeDocumentsPanel from '@/components/EmployeeDocumentsPanel';
 import KontrakBadge from '@/components/KontrakBadge';
 import { formatTanggalKepegawaian, masaKerja } from '@/lib/kepegawaian';
-
-const DOKUMEN_OPTIONS = ['KTP', 'PKWT', 'Ijazah', 'Lainnya'];
-
-function formatDate(value) {
-  if (!value) return '-';
-  return new Date(value).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
 
 function totalTunjangan(row) {
   const komponenTotal = Object.values(row?.komponen_lain || {}).reduce((sum, v) => sum + (Number(v) || 0), 0);
@@ -50,22 +40,6 @@ export default function EmployeeDetailPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [notFound, setNotFound] = useState(false);
-
-  const [documents, setDocuments] = useState([]);
-  const [docsLoading, setDocsLoading] = useState(true);
-  const [docsError, setDocsError] = useState(null);
-
-  const [namaDokumen, setNamaDokumen] = useState('KTP');
-  const [namaDokumenLain, setNamaDokumenLain] = useState('');
-  const [file, setFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState(null);
-  const [deletingId, setDeletingId] = useState(null);
-  // Dokumen yang mau dihapus — membuka dialog konfirmasi (pengganti confirm()).
-  const [deleteTargetId, setDeleteTargetId] = useState(null);
-  // Notifikasi non-blocking (pengganti alert()) — { type: 'error'|'success', message }
-  const [toast, setToast] = useState(null);
-  const dismissToast = useCallback(() => setToast(null), []);
 
   const isSuperadmin = !!actingEmployee?.is_superadmin;
 
@@ -106,92 +80,11 @@ export default function EmployeeDetailPage() {
     setLoading(false);
   }, [supabase, params.id]);
 
-  const loadDocuments = useCallback(async () => {
-    setDocsLoading(true);
-    setDocsError(null);
-    const { data, error } = await supabase
-      .from('employee_documents')
-      .select('*')
-      .eq('employee_id', params.id)
-      .order('uploaded_at', { ascending: false });
-
-    if (error) {
-      setDocsError(friendlyError(error, 'Gagal memuat daftar dokumen.'));
-    } else {
-      setDocuments(data || []);
-    }
-    setDocsLoading(false);
-  }, [supabase, params.id]);
-
   useEffect(() => {
     if (accessStatus === 'allowed' && isSuperadmin) {
       loadEmployee();
-      loadDocuments();
     }
-  }, [accessStatus, isSuperadmin, loadEmployee, loadDocuments]);
-
-  const handleUpload = async (e) => {
-    e.preventDefault();
-    setUploadError(null);
-
-    const finalNamaDokumen = namaDokumen === 'Lainnya'
-      ? (namaDokumenLain.trim() ? `Lainnya: ${namaDokumenLain.trim()}` : 'Lainnya')
-      : namaDokumen;
-
-    if (!file) {
-      setUploadError('Pilih file terlebih dahulu.');
-      return;
-    }
-    if (file.size > UPLOAD_MAX_BYTES) {
-      setUploadError(PESAN_UKURAN_UPLOAD);
-      return;
-    }
-
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('nama_dokumen', finalNamaDokumen);
-      formData.append('file', file);
-
-      const res = await fetch(`/api/employee/${params.id}/documents`, {
-        method: 'POST',
-        body: formData,
-      });
-      await readUploadJson(res, 'Gagal mengupload dokumen.');
-
-      setFile(null);
-      setNamaDokumen('KTP');
-      setNamaDokumenLain('');
-      // reset input file di DOM
-      const fileInput = document.getElementById('doc-file-input');
-      if (fileInput) fileInput.value = '';
-      loadDocuments();
-    } catch (err) {
-      setUploadError(friendlyCaught(err, 'Gagal mengupload dokumen.'));
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleDelete = (docId) => setDeleteTargetId(docId);
-
-  // Dialog tetap terbuka (tombol busy) selama penghapusan berjalan, lalu menutup.
-  const handleConfirmDelete = async () => {
-    const docId = deleteTargetId;
-    if (!docId) return;
-    setDeletingId(docId);
-    try {
-      const res = await fetch(`/api/employee/${params.id}/documents?docId=${docId}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Gagal menghapus dokumen.');
-      setDocuments((prev) => prev.filter((d) => d.id !== docId));
-    } catch (err) {
-      setToast({ type: 'error', message: friendlyCaught(err, 'Gagal menghapus dokumen.') });
-    } finally {
-      setDeletingId(null);
-      setDeleteTargetId(null);
-    }
-  };
+  }, [accessStatus, isSuperadmin, loadEmployee]);
 
   if (accessStatus === 'loading') {
     return (
@@ -243,7 +136,6 @@ export default function EmployeeDetailPage() {
 
   return (
     <div className="max-w-[900px] mx-auto px-6 py-10">
-      <Toast toast={toast} onDismiss={dismissToast} />
       <Link href="/employee/payroll" className="inline-flex items-center gap-1.5 text-sm text-[#6B6B6B] hover:text-madael-red transition-colors mb-6">
         <ArrowLeft size={15} /> Kembali ke Payroll
       </Link>
@@ -281,122 +173,12 @@ export default function EmployeeDetailPage() {
 
       <div className="bg-white border border-[#E0E0E0] p-8">
         <h2 className="text-sm font-semibold text-black mb-1">Dokumen Employee</h2>
-        <p className="text-xs text-[#6B6B6B] mb-5">KTP, PKWT, ijazah, dan dokumen lain — tersimpan di Shared Drive, dikelompokkan per employee.</p>
-
-        <form onSubmit={handleUpload} className="border border-[#E0E0E0] p-4 mb-6">
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-[#6B6B6B]">Jenis Dokumen</span>
-              <select
-                value={namaDokumen}
-                onChange={(e) => setNamaDokumen(e.target.value)}
-                className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
-              >
-                {DOKUMEN_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
-            </label>
-
-            {namaDokumen === 'Lainnya' && (
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-[#6B6B6B]">Keterangan</span>
-                <input
-                  type="text"
-                  value={namaDokumenLain}
-                  onChange={(e) => setNamaDokumenLain(e.target.value)}
-                  placeholder="mis. Surat Referensi"
-                  className="border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors"
-                />
-              </label>
-            )}
-
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-[#6B6B6B]">File (PDF/JPG/PNG, maks {UPLOAD_MAX_LABEL})</span>
-              <input
-                id="doc-file-input"
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-                className="text-sm text-black file:mr-3 file:px-3 file:py-1.5 file:border-0 file:bg-[#F4F4F4] file:text-xs file:font-medium file:cursor-pointer"
-              />
-            </label>
-
-            <button
-              type="submit"
-              disabled={uploading}
-              className="flex items-center gap-2 bg-madael-red text-white px-5 py-2.5 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors disabled:opacity-60"
-            >
-              <Upload size={15} />
-              {uploading ? 'Mengupload...' : 'Upload'}
-            </button>
-          </div>
-          {uploadError && <p className="text-xs text-red-600 mt-3">{uploadError}</p>}
-        </form>
-
-        {docsLoading ? (
-          <LoadingState label="Memuat dokumen..." />
-        ) : docsError ? (
-          <ErrorState message={docsError} onRetry={loadDocuments} />
-        ) : documents.length === 0 ? (
-          <EmptyState message="Belum ada dokumen yang diupload." />
-        ) : (
-          <div className="border border-[#E0E0E0] overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[#E0E0E0] text-left text-xs text-[#6B6B6B]">
-                  <th className="px-4 py-3 font-medium">Dokumen</th>
-                  <th className="px-4 py-3 font-medium">File</th>
-                  <th className="px-4 py-3 font-medium">Diupload</th>
-                  <th className="px-4 py-3 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {documents.map((doc) => (
-                  <tr key={doc.id} className="border-b border-[#F0F0F0] last:border-0">
-                    <td className="px-4 py-3 text-black font-medium">{doc.nama_dokumen}</td>
-                    <td className="px-4 py-3 text-[#6B6B6B]">
-                      <span className="inline-flex items-center gap-1.5">
-                        <FileText size={13} /> {doc.file_name}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-[#6B6B6B] whitespace-nowrap">{formatDate(doc.uploaded_at)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-3">
-                        <a
-                          href={`https://drive.google.com/file/d/${doc.drive_file_id}/view`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-madael-red hover:text-madael-dark font-medium"
-                        >
-                          <ExternalLink size={13} /> Buka
-                        </a>
-                        <button
-                          onClick={() => handleDelete(doc.id)}
-                          disabled={deletingId === doc.id}
-                          className="text-[#9A9A9A] hover:text-madael-red disabled:opacity-50"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <p className="text-xs text-[#6B6B6B] mb-5">
+          KTP, kontrak/PKWT, ijazah, dan dokumen lain — tersimpan di Shared Drive, dikelompokkan per employee.
+          Dokumen yang diunggah karyawan sendiri lewat halaman Profil juga tampil di sini.
+        </p>
+        <EmployeeDocumentsPanel employeeId={params.id} canUpload />
       </div>
-
-      <ConfirmDialog
-        open={Boolean(deleteTargetId)}
-        title="Hapus Dokumen"
-        message="Hapus dokumen ini? File di Google Drive juga akan dihapus."
-        confirmLabel="Hapus"
-        busy={Boolean(deleteTargetId) && deletingId === deleteTargetId}
-        onConfirm={handleConfirmDelete}
-        onCancel={() => setDeleteTargetId(null)}
-      />
     </div>
   );
 }

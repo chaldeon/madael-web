@@ -351,7 +351,7 @@ export default function ProfilePage() {
           Cuma kamu dan superadmin yang bisa melihatnya.
         </p>
         {employeeId && (
-          <EmployeeDocumentsPanel supabase={supabase} employeeId={employeeId} canUpload canDelete />
+          <EmployeeDocumentsPanel employeeId={employeeId} canUpload />
         )}
       </div>
 

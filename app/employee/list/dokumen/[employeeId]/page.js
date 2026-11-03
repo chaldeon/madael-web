@@ -13,9 +13,10 @@ import ErrorState from '@/components/ErrorState';
 import EmployeeDocumentsPanel from '@/components/EmployeeDocumentsPanel';
 import { friendlyError } from '@/lib/errorMessage';
 
-// Dibuka dari menu aksi (⋯) di /employee/list — dokumen bersifat self-service
-// (employee upload sendiri lewat halaman Profil), jadi di sini superadmin
-// cuma bisa LIHAT + hapus (buat beres-beres), bukan upload atas nama karyawan.
+// Dibuka dari menu aksi (⋯) di /employee/list — superadmin melihat SEMUA
+// dokumen karyawan (yang diunggah sendiri lewat Profil maupun yang diunggah HR
+// lewat Payroll) dan bisa menghapus (beres-beres). Upload atas nama karyawan
+// tetap lewat halaman detail Payroll.
 export default function DokumenKaryawanPage() {
   const supabase = createClient();
   const { employeeId } = useParams();
@@ -79,7 +80,7 @@ export default function DokumenKaryawanPage() {
             <p className="text-sm text-[#6B6B6B] mt-1">{target.nama} — {target.email}</p>
           </div>
 
-          <EmployeeDocumentsPanel supabase={supabase} employeeId={target.id} canUpload={false} canDelete />
+          <EmployeeDocumentsPanel employeeId={target.id} canUpload={false} />
         </>
       )}
     </div>
