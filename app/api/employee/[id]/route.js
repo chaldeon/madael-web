@@ -4,9 +4,73 @@ import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { logActivity } from '@/lib/activityLog';
 import { friendlyError } from '@/lib/errorMessage';
+import { requireModuleAccess } from '@/lib/moduleAccessServer';
+import {
+  MASTER_SELECT,
+  validateMasterInput,
+  diffMaster,
+  samarkanUntukLog,
+} from '@/lib/payrollMasterServer';
+
+// Kolom employees_master yang boleh ikut diubah lewat endpoint ini (form Edit
+// Karyawan di Employee List). Sengaja lebih sempit daripada PATCH Payroll
+// Manager: gaji/tunjangan/posisi/kepegawaian saja, bukan NPWP/rekening/BPJS.
+const MASTER_EDIT_KEYS = [
+  'posisi',
+  'status',
+  'gaji_pokok',
+  'tunjangan',
+  'tanggal_bergabung',
+  'jenis_hubungan_kerja',
+  'kontrak_berakhir',
+];
+
+// Validasi bagian HR/payroll SEBELUM ada yang ditulis. Baris master dicari di
+// server lewat linked_employee_id = id akun yang sedang diedit (id master dari
+// klien tidak dipercaya), jadi request tidak bisa menyentuh master karyawan lain.
+// Return { before, values, sebelum, sesudah } atau { error, status }.
+async function siapkanUbahMaster(admin, employeeId, masterBody) {
+  if (masterBody === null || typeof masterBody !== 'object' || Array.isArray(masterBody)) {
+    return { error: 'Data HR/payroll tidak valid.', status: 400 };
+  }
+  const input = {};
+  for (const key of MASTER_EDIT_KEYS) {
+    if (masterBody[key] !== undefined) input[key] = masterBody[key];
+  }
+  if (Object.keys(input).length === 0) return { skip: true };
+
+  const { data: before, error: beforeError } = await admin
+    .from('employees_master')
+    .select(MASTER_SELECT)
+    .eq('linked_employee_id', employeeId)
+    .maybeSingle();
+  if (beforeError) {
+    return {
+      error: 'Gagal memuat data HR/payroll: ' + friendlyError(beforeError, 'terjadi kesalahan pada server.', { context: 'Muat employees_master' }),
+      status: 500,
+    };
+  }
+  if (!before) {
+    return {
+      error: 'Data HR/payroll karyawan ini belum ada. Isi dulu di Payroll Manager.',
+      status: 409,
+    };
+  }
+
+  const { values, error: validationError } = validateMasterInput(input, { create: false, before });
+  if (validationError) return { error: validationError, status: 400 };
+
+  const { sebelum, sesudah } = diffMaster(before, values);
+  return { before, values, sebelum, sesudah };
+}
 
 // PATCH /api/employee/[id]
 // Update data karyawan (nama, employee_id, client_id, status, is_superadmin).
+// Opsional `master` ({ posisi, status, gaji_pokok, tunjangan, tanggal_bergabung,
+// jenis_hubungan_kerja, kontrak_berakhir }) mengubah baris employees_master yang
+// terhubung dalam request yang sama: kedua bagian divalidasi dulu sebelum ada
+// yang ditulis, dan bila penulisan akun gagal setelah master tersimpan, master
+// dikembalikan ke nilai semula — supaya tidak ada hasil "tersimpan setengah".
 // Email sengaja tidak diubah lewat sini karena email = identitas login di
 // Supabase Auth — ubah email butuh flow terpisah (admin.auth.admin.updateUserById).
 export async function PATCH(request, { params }) {
@@ -49,7 +113,7 @@ export async function PATCH(request, { params }) {
     }
 
     const body = await request.json();
-    const { nama, employee_id, client_id, status, is_superadmin } = body;
+    const { nama, employee_id, client_id, status, is_superadmin, master: masterBody } = body;
 
     if (!nama) {
       return NextResponse.json({ error: 'Nama wajib diisi.' }, { status: 400 });
@@ -96,6 +160,49 @@ export async function PATCH(request, { params }) {
       }
     }
 
+    // Validasi bagian HR/payroll (kalau dikirim) SEBELUM menulis apa pun, supaya
+    // data master yang tidak valid tidak berakhir sebagai "akun tersimpan, HR gagal".
+    let masterPlan = null;
+    if (masterBody !== undefined && masterBody !== null) {
+      const access = await requireModuleAccess(admin, ['payroll']);
+      if (access.error) {
+        return NextResponse.json({ error: access.error }, { status: access.status });
+      }
+      const plan = await siapkanUbahMaster(admin, id, masterBody);
+      if (plan.error) {
+        return NextResponse.json({ error: plan.error }, { status: plan.status });
+      }
+      if (!plan.skip) masterPlan = plan;
+    }
+
+    // Tulis master lebih dulu: aksinya satu UPDATE yang bisa dibatalkan dengan
+    // mudah. Akun (status/superadmin + sinkron blokir Auth) ditulis sesudahnya.
+    let masterWritten = false;
+    let masterUpdated = null;
+    if (masterPlan && Object.keys(masterPlan.sesudah).length > 0) {
+      const { data: updatedMaster, error: masterError } = await admin
+        .from('employees_master')
+        .update(masterPlan.values)
+        .eq('id', masterPlan.before.id)
+        .select(MASTER_SELECT)
+        .maybeSingle();
+      if (masterError || !updatedMaster) {
+        return NextResponse.json(
+          {
+            error:
+              'Gagal menyimpan data HR/payroll: ' +
+              (masterError
+                ? friendlyError(masterError, 'terjadi kesalahan pada server.', { context: 'Ubah employees_master' })
+                : 'data tidak ditemukan.') +
+              ' Tidak ada perubahan yang tersimpan.',
+          },
+          { status: masterError ? 500 : 404 }
+        );
+      }
+      masterWritten = true;
+      masterUpdated = updatedMaster;
+    }
+
     const { data: empRow, error: empError } = await admin
       .from('employees')
       .update({
@@ -110,10 +217,56 @@ export async function PATCH(request, { params }) {
       .single();
 
     if (empError) {
-      return NextResponse.json(
-        { error: 'Gagal mengubah data employee: ' + friendlyError(empError, 'terjadi kesalahan pada server.', { context: 'Ubah data employee', showField: true }) },
-        { status: 500 }
-      );
+      const akunPesan = 'Gagal mengubah data employee: ' + friendlyError(empError, 'terjadi kesalahan pada server.', { context: 'Ubah data employee', showField: true });
+      if (masterWritten) {
+        // Batalkan perubahan master supaya akun dan data HR tetap konsisten.
+        const { error: rollbackError } = await admin
+          .from('employees_master')
+          .update(masterPlan.sebelum)
+          .eq('id', masterPlan.before.id);
+        if (rollbackError) {
+          console.error('Rollback employees_master gagal untuk employee', id, rollbackError);
+          await logActivity(admin, {
+            userId: requester.id,
+            aksi: 'edit_struktur_gaji',
+            targetTable: 'employees_master',
+            targetId: masterPlan.before.id,
+            detail: {
+              nama: masterUpdated.nama,
+              sebelum: samarkanUntukLog(masterPlan.sebelum),
+              sesudah: samarkanUntukLog(masterPlan.sesudah),
+              rollback_gagal: true,
+            },
+          });
+          return NextResponse.json(
+            {
+              error:
+                akunPesan +
+                ' Data HR/payroll sempat tersimpan dan pembatalannya juga gagal — periksa dan perbaiki di Payroll Manager.',
+            },
+            { status: 500 }
+          );
+        }
+        return NextResponse.json(
+          { error: akunPesan + ' Perubahan data HR/payroll dibatalkan, tidak ada yang tersimpan.' },
+          { status: 500 }
+        );
+      }
+      return NextResponse.json({ error: akunPesan }, { status: 500 });
+    }
+
+    if (masterWritten) {
+      await logActivity(admin, {
+        userId: requester.id,
+        aksi: 'edit_struktur_gaji',
+        targetTable: 'employees_master',
+        targetId: masterPlan.before.id,
+        detail: {
+          nama: masterUpdated.nama,
+          sebelum: samarkanUntukLog(masterPlan.sebelum),
+          sesudah: samarkanUntukLog(masterPlan.sesudah),
+        },
+      });
     }
 
     // Samakan status dengan Supabase Auth: karyawan non-aktif diblokir dari
@@ -172,7 +325,12 @@ export async function PATCH(request, { params }) {
     });
 
     return NextResponse.json(
-      { success: true, employee: empRow, ...(warning ? { warning } : {}) },
+      {
+        success: true,
+        employee: empRow,
+        ...(masterUpdated ? { master: masterUpdated } : {}),
+        ...(warning ? { warning } : {}),
+      },
       { status: 200 }
     );
   } catch (err) {
