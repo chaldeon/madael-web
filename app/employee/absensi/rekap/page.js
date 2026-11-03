@@ -13,28 +13,8 @@ import EmptyState from '@/components/EmptyState';
 import { isTelatEfektif } from '@/lib/attendanceStatus';
 import { friendlyError } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
-
-const HARI_LABEL = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-
-function currentMonthValue() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-// Hitung jumlah hari kerja terjadwal dalam sebuah bulan, dibatasi sampai
-// tanggal cutoff (hari ini, kalau bulan yang dipilih adalah bulan berjalan)
-// supaya sisa hari yang belum terjadi tidak ikut dihitung sebagai "tidak hadir".
-function countScheduledWorkdays(year, month, hariKerja, cutoffDate) {
-  if (!hariKerja?.length) return 0;
-  const lastDay = new Date(year, month, 0).getDate();
-  const cutoff = cutoffDate < lastDay ? cutoffDate : lastDay;
-  let count = 0;
-  for (let day = 1; day <= cutoff; day++) {
-    const date = new Date(year, month - 1, day);
-    if (hariKerja.includes(HARI_LABEL[date.getDay()])) count++;
-  }
-  return count;
-}
+import { summarizeMonth, monthBounds } from '@/lib/attendanceSummary';
+import { todayWib, currentMonthWib } from '@/lib/wibTime';
 
 // Bikin CSV manual dari data yang sudah ditampilkan di tabel (tanpa library
 // tambahan). BOM di depan supaya Excel buka karakter non-ASCII dengan benar.
@@ -45,16 +25,17 @@ function toCsvValue(value) {
 }
 
 function downloadRekapCsv(rows, monthValue) {
-  const header = ['Nama', 'Perusahaan', 'Total Hadir', 'Total Telat', 'Tidak Hadir'];
+  const header = ['Nama', 'Perusahaan', 'Total Hadir', 'Total Telat', 'Tidak Hadir', 'Cuti (hari kerja)'];
   const lines = [header.map(toCsvValue).join(',')];
 
-  rows.forEach(({ emp, totalHadir, totalTelat, totalTidakHadir }) => {
+  rows.forEach(({ emp, totalHadir, totalTelat, totalTidakHadir, cutiHari }) => {
     lines.push([
       emp.nama,
       emp.companies?.nama_perusahaan || '',
       totalHadir,
       totalTelat,
       totalTidakHadir === null ? '' : totalTidakHadir,
+      cutiHari,
     ].map(toCsvValue).join(','));
   });
 
@@ -74,11 +55,12 @@ export default function RekapAbsensiPage() {
   const supabase = createClient();
   const { status, employee } = useModuleAccess('absensi_admin');
 
-  const [monthValue, setMonthValue] = useState(currentMonthValue());
+  const [monthValue, setMonthValue] = useState(currentMonthWib());
   const [employeeFilter, setEmployeeFilter] = useState('all');
   const [employees, setEmployees] = useState([]);
   const [schedules, setSchedules] = useState({}); // employee_id -> row
   const [attendance, setAttendance] = useState([]);
+  const [leaves, setLeaves] = useState([]); // cuti/sakit/izin approved yang beririsan dengan bulan ini
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -87,12 +69,17 @@ export default function RekapAbsensiPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const [year, month] = monthValue.split('-').map(Number);
-    const firstDay = `${monthValue}-01`;
-    const lastDayNum = new Date(year, month, 0).getDate();
-    const lastDay = `${monthValue}-${String(lastDayNum).padStart(2, '0')}`;
+    const { firstDay, lastDay } = monthBounds(monthValue);
 
-    const [empRes, schedRes, attRes] = await Promise.all([
+    // Cuti disetujui dibaca lewat API server (service role), bukan dari browser.
+    const leaveRequest = fetch(`/api/attendance/rekap-cuti?month=${monthValue}`, { cache: 'no-store' })
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        return res.ok ? { data: body.leaves || [], error: null } : { data: null, error: { message: body.error } };
+      })
+      .catch((err) => ({ data: null, error: err }));
+
+    const [empRes, schedRes, attRes, leaveRes] = await Promise.all([
       supabase
         .from('employees')
         .select('id, nama, employee_id, status, companies:client_id ( nama_perusahaan )')
@@ -108,9 +95,12 @@ export default function RekapAbsensiPage() {
           .gte('tanggal', firstDay)
           .lte('tanggal', lastDay)
       ),
+      leaveRequest,
     ]);
 
-    const firstError = empRes.error || schedRes.error || attRes.error;
+    // Tanpa data cuti, "Tidak Hadir" akan terlalu besar (cuti terhitung absen),
+    // jadi kegagalan memuat cuti diperlakukan sebagai kegagalan memuat rekap.
+    const firstError = empRes.error || schedRes.error || attRes.error || leaveRes.error;
     if (firstError) {
       setLoadError(friendlyError(firstError, 'Gagal memuat data rekap.'));
       setLoading(false);
@@ -122,6 +112,7 @@ export default function RekapAbsensiPage() {
     (schedRes.data || []).forEach((s) => { byEmp[s.employee_id] = s; });
     setSchedules(byEmp);
     setAttendance(attRes.data || []);
+    setLeaves(leaveRes.data || []);
     setLoading(false);
   }, [supabase, monthValue]);
 
@@ -130,30 +121,43 @@ export default function RekapAbsensiPage() {
   }, [status, isSuperadmin, loadData]);
 
   const rows = useMemo(() => {
-    const [year, month] = monthValue.split('-').map(Number);
-    const isCurrentMonth = monthValue === currentMonthValue();
-    const cutoffDate = isCurrentMonth ? new Date().getDate() : new Date(year, month, 0).getDate();
+    // Aturan hitung sama dengan "Absensi Saya" (summarizeMonth): hari ini belum
+    // dihitung tidak hadir, dan hari kerja yang tertutup cuti/sakit/izin
+    // disetujui dihitung cuti, bukan tidak hadir. "Hari ini" menurut WIB.
+    const today = todayWib();
+
+    const attByEmp = new Map();
+    attendance.forEach((a) => {
+      if (!attByEmp.has(a.employee_id)) attByEmp.set(a.employee_id, []);
+      attByEmp.get(a.employee_id).push(a);
+    });
+    const leaveByEmp = new Map();
+    leaves.forEach((l) => {
+      if (!leaveByEmp.has(l.employee_id)) leaveByEmp.set(l.employee_id, []);
+      leaveByEmp.get(l.employee_id).push(l);
+    });
 
     const list = employeeFilter === 'all'
       ? employees
       : employees.filter((e) => e.id === employeeFilter);
 
     return list.map((emp) => {
-      const empAtt = attendance.filter((a) => a.employee_id === emp.id);
-      const totalHadir = empAtt.filter((a) => a.clock_in).length;
-      const totalTelat = empAtt.filter(isTelatEfektif).length; // Justified tidak dihitung telat
-
-      const sched = schedules[emp.id];
-      const scheduledWorkdays = sched
-        ? countScheduledWorkdays(year, month, sched.hari_kerja, cutoffDate)
-        : null;
-      const totalTidakHadir = scheduledWorkdays === null
-        ? null
-        : Math.max(0, scheduledWorkdays - totalHadir);
-
-      return { emp, totalHadir, totalTelat, totalTidakHadir };
+      const summary = summarizeMonth({
+        monthValue,
+        rows: attByEmp.get(emp.id) || [],
+        leaves: leaveByEmp.get(emp.id) || [],
+        hariKerja: schedules[emp.id]?.hari_kerja || null,
+        today,
+      });
+      return {
+        emp,
+        totalHadir: summary.totalHadir,
+        totalTelat: summary.totalTelat,
+        totalTidakHadir: summary.totalTidakHadir, // null = jadwal belum diatur
+        cutiHari: summary.cutiHari,
+      };
     });
-  }, [employees, attendance, schedules, employeeFilter, monthValue]);
+  }, [employees, attendance, leaves, schedules, employeeFilter, monthValue]);
 
   if (status === 'loading') {
     return (
@@ -227,8 +231,10 @@ export default function RekapAbsensiPage() {
 
       <div className="flex items-start gap-2 bg-[#F4F4F4] border border-[#E0E0E0] text-[#6B6B6B] text-xs px-4 py-3 mb-6">
         <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-        Kolom "Tidak Hadir" dihitung dari jadwal kerja yang sudah diatur (halaman Jadwal Kerja).
-        Employee tanpa jadwal akan tampil "—" karena hari kerjanya belum diketahui.
+        Kolom "Tidak Hadir" dihitung dari jadwal kerja yang sudah diatur (halaman Jadwal Kerja),
+        tidak termasuk hari ini dan hari kerja yang tertutup cuti, sakit, atau izin yang sudah disetujui
+        (kolom "Cuti"). Employee tanpa jadwal akan tampil "—" karena hari kerjanya belum diketahui.
+        Hari libur nasional belum dikenali, jadi masih terhitung "Tidak Hadir".
       </div>
 
       {loading ? (
@@ -243,18 +249,19 @@ export default function RekapAbsensiPage() {
                 <th className="px-4 py-3 font-medium">Total Hadir</th>
                 <th className="px-4 py-3 font-medium">Total Telat</th>
                 <th className="px-4 py-3 font-medium">Tidak Hadir</th>
+                <th className="px-4 py-3 font-medium">Cuti</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-0">
+                  <td colSpan={7} className="p-0">
                     <EmptyState message="Tidak ada data karyawan untuk bulan atau filter ini." />
                   </td>
                 </tr>
               ) : (
-                rows.map(({ emp, totalHadir, totalTelat, totalTidakHadir }) => (
+                rows.map(({ emp, totalHadir, totalTelat, totalTidakHadir, cutiHari }) => (
                   <tr key={emp.id} className="border-b border-[#E0E0E0] last:border-0">
                     <td className="px-4 py-3 text-black">{emp.nama}</td>
                     <td className="px-4 py-3 text-[#6B6B6B]">{emp.companies?.nama_perusahaan || '—'}</td>
@@ -263,6 +270,7 @@ export default function RekapAbsensiPage() {
                     <td className="px-4 py-3 text-[#6B6B6B]">
                       {totalTidakHadir === null ? '—' : totalTidakHadir}
                     </td>
+                    <td className="px-4 py-3 text-[#6B6B6B]">{cutiHari}</td>
                     <td className="px-4 py-3 text-right">
                       <Link
                         href={`/employee/absensi/rekap/${emp.id}?month=${monthValue}`}
