@@ -3,19 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { friendlyError } from '@/lib/errorMessage';
-import { todayJakarta } from '@/lib/serverTime';
-
-// Jenis dokumen yang boleh diminta form -> label kode di nomor surat + counter yang dipakai
-const JENIS_CONFIG = {
-  PRO:    { label: 'MKT', counter: 'GLOBAL' },
-  QUO:    { label: 'MKT', counter: 'GLOBAL' },
-  PROQUO: { label: 'MKT', counter: 'GLOBAL' },
-  AGR:    { label: 'ADM', counter: 'GLOBAL' },
-  ADM:    { label: 'ADM', counter: 'GLOBAL' },
-  INV:    { label: 'INV', counter: 'INV' },
-};
-
-const ROMAWI_BULAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+import { DOKUMEN_JENIS, ambilNomorDokumen } from '@/lib/documentNumberServer';
 
 export async function POST(request) {
   try {
@@ -54,39 +42,32 @@ export async function POST(request) {
     const body = await request.json();
     const { kode_jenis } = body;
 
-    const config = JENIS_CONFIG[kode_jenis];
+    const config = DOKUMEN_JENIS[kode_jenis];
     if (!config) {
       return NextResponse.json(
-        { error: `Jenis dokumen tidak valid. Harus salah satu dari: ${Object.keys(JENIS_CONFIG).join(', ')}` },
+        { error: `Jenis dokumen tidak valid. Harus salah satu dari: ${Object.keys(DOKUMEN_JENIS).join(', ')}` },
         { status: 400 }
       );
     }
 
     const admin = createAdminClient();
 
-    // Atomic increment lewat Postgres function — aman dari race condition
-    const { data: newNumber, error: rpcError } = await admin.rpc(
-      'increment_document_counter',
-      { p_counter_kode: config.counter }
-    );
-
-    if (rpcError) {
+    // Atomic increment lewat Postgres function — aman dari race condition.
+    // Format nomor ada di lib/documentNumberServer.js (satu sumber dengan
+    // POST /api/documents). Catatan: route ini hanya mengambil nomor; form
+    // Dokumen Baru sekarang memakai POST /api/documents supaya nomor tidak
+    // hangus kalau insert gagal.
+    let nomor;
+    try {
+      nomor = await ambilNomorDokumen(admin, kode_jenis);
+    } catch (rpcError) {
       return NextResponse.json(
         { error: 'Gagal generate nomor surat: ' + friendlyError(rpcError, 'terjadi kesalahan pada server.', { context: 'Generate nomor surat' }) },
         { status: 500 }
       );
     }
-
-    // Bulan & tahun nomor surat memakai waktu Jakarta (server berjalan di UTC,
-    // jadi getMonth()/getFullYear() salah pada 00:00-06:59 WIB tanggal 1).
-    const [tahunJakarta, bulanJakarta] = todayJakarta().split('-');
-    const nomorPadded = String(newNumber).padStart(3, '0');
-    const bulanRomawi = ROMAWI_BULAN[Number(bulanJakarta) - 1];
-    const tahun = Number(tahunJakarta);
-
-    const nomorSurat = kode_jenis === 'INV'
-      ? `${config.label}/${tahun}/${nomorPadded}`
-      : `${nomorPadded}/${config.label}/MPSI/${bulanRomawi}-${tahun}`;
+    const nomorSurat = nomor.nomor;
+    const newNumber = nomor.urutan;
 
     return NextResponse.json(
       { success: true, nomor_surat: nomorSurat, kode_jenis, nomor: newNumber },

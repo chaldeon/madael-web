@@ -164,38 +164,37 @@ export default function InvoiceTrackerPage() {
     e.preventDefault();
     setFormError(null);
 
-    if (!form.nomorSurat.trim()) {
-      setFormError('Nomor surat wajib diisi.');
-      return;
-    }
     if (!form.nominal || Number(form.nominal) <= 0) {
       setFormError('Nominal wajib diisi dan harus lebih dari 0.');
       return;
     }
 
+    // Nomor surat dikosongkan = nomor otomatis dari counter INV (dibuat di
+    // server bersamaan dengan insert, jadi tidak hangus kalau gagal).
     setSubmitting(true);
-    const { data, error } = await supabase
-      .from('invoices')
-      .insert([{
-        client_id: form.clientId || null,
-        nomor_surat: form.nomorSurat.trim(),
-        nominal: Number(form.nominal),
-        tanggal_terbit: form.tanggalTerbit,
-        catatan: form.catatan.trim() || null,
-        status: 'draft',
-        created_by: employee.id,
-      }])
-      .select()
-      .single();
-
-    setSubmitting(false);
-    if (error) {
-      setFormError(friendlyError(error, 'Gagal menambahkan invoice.'));
-      return;
+    try {
+      const res = await fetch('/api/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: form.clientId || null,
+          nomor_surat: form.nomorSurat.trim() || null,
+          nominal: Number(form.nominal),
+          tanggal_terbit: form.tanggalTerbit,
+          catatan: form.catatan.trim() || null,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.invoice) {
+        throw new Error(body.error || 'Gagal menambahkan invoice.');
+      }
+      setInvoices((prev) => [body.invoice, ...prev]);
+      setForm(emptyForm);
+    } catch (err) {
+      setFormError(friendlyCaught(err, 'Gagal menambahkan invoice.'));
+    } finally {
+      setSubmitting(false);
     }
-
-    setInvoices((prev) => [data, ...prev]);
-    setForm(emptyForm);
   };
 
   const handleStatusChange = async (row, newStatus) => {
@@ -308,7 +307,7 @@ export default function InvoiceTrackerPage() {
       <div className="mb-8 flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Invoice & Billing Tracker</h1>
-          <p className="text-sm text-[#6B6B6B] mt-1">Pantau status invoice per klien. Nomor surat diisi manual (belum terhubung otomatis ke Document Generator).</p>
+          <p className="text-sm text-[#6B6B6B] mt-1">Pantau status invoice per klien. Nomor surat dibuat otomatis dari counter INV; isi manual hanya untuk invoice lama atau berformat lain.</p>
         </div>
         <div className="bg-white border border-[#E0E0E0] px-5 py-3">
           <p className="text-[11px] text-[#9A9A9A] uppercase tracking-[0.04em]">Outstanding</p>
@@ -317,7 +316,7 @@ export default function InvoiceTrackerPage() {
       </div>
 
       <form onSubmit={handleAdd} className="bg-white border border-[#E0E0E0] p-4 mb-6">
-        <p className="text-xs text-[#6B6B6B] mb-3">Tambah Invoice Manual</p>
+        <p className="text-xs text-[#6B6B6B] mb-3">Tambah Invoice</p>
         <div className="flex flex-wrap gap-2 items-start">
           <select
             value={form.clientId}
@@ -330,10 +329,11 @@ export default function InvoiceTrackerPage() {
             ))}
           </select>
           <input
-            placeholder="Nomor Surat"
+            placeholder="Nomor (kosong = otomatis)"
+            title="Kosongkan untuk nomor otomatis dari counter INV. Isi hanya untuk invoice lama atau berformat lain."
             value={form.nomorSurat}
             onChange={(e) => setForm((f) => ({ ...f, nomorSurat: e.target.value }))}
-            className={`${inputClass} w-44`}
+            className={`${inputClass} w-56`}
           />
           <input
             type="number"

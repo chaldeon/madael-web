@@ -432,7 +432,6 @@ export default function NewDocumentPage() {
   const [clients, setClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(true);
   const [clientsError, setClientsError] = useState(null);
-  const [employeeId, setEmployeeId] = useState(null);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -456,24 +455,9 @@ export default function NewDocumentPage() {
     setLoadingClients(false);
   }, [supabase]);
 
-  const loadEmployee = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      router.push('/employee/login');
-      return;
-    }
-    const { data: emp } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('email', user.email)
-      .maybeSingle();
-    setEmployeeId(emp?.id || null);
-  }, [supabase, router]);
-
   useEffect(() => {
     loadClients();
-    loadEmployee();
-  }, [loadClients, loadEmployee]);
+  }, [loadClients]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -506,37 +490,26 @@ export default function NewDocumentPage() {
         finalContent.total = subtotal - (Number(content.diskon) || 0);
       }
 
-      // 1. Generate nomor surat
-      const res = await fetch('/api/documents/generate-number', {
+      // Nomor surat dibuat di server bersamaan dengan insert dokumen
+      // (POST /api/documents), jadi nomor tidak hangus kalau penyimpanan gagal.
+      const res = await fetch('/api/documents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kode_jenis: type }),
-      });
-      const numberData = await res.json();
-      if (!res.ok) {
-        throw new Error(numberData.error || 'Gagal generate nomor surat.');
-      }
-
-      // 2. Simpan dokumen
-      const { data: inserted, error: insertError } = await supabase
-        .from('documents')
-        .insert({
-          nomor_surat: numberData.nomor_surat,
+        body: JSON.stringify({
           kode_jenis: type,
           judul: judul.trim(),
           client_id: clientId || null,
-          created_by: employeeId,
-          status: 'Draft',
           content: finalContent,
           catatan: catatan.trim() || null,
           tanggal_dokumen: tanggalDokumen,
-        })
-        .select('id')
-        .single();
+        }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok || !result.id) {
+        throw new Error(result.error || 'Gagal menyimpan dokumen.');
+      }
 
-      if (insertError) throw new Error(friendlyError(insertError, 'Gagal menyimpan dokumen.'));
-
-      router.push(`/employee/documents/${inserted.id}`);
+      router.push(`/employee/documents/${result.id}`);
     } catch (err) {
       setError(friendlyCaught(err, 'Gagal menyimpan dokumen.'));
       setSaving(false);
