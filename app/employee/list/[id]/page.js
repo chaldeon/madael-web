@@ -52,6 +52,9 @@ export default function EmployeeDetailPage() {
   const [editForm, setEditForm] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState(null);
+  // Peringatan dari server untuk edit yang sudah tersimpan (mis. sinkron blokir
+  // login di Supabase Auth gagal). Ditampilkan di halaman karena modal sudah tutup.
+  const [saveWarning, setSaveWarning] = useState(null);
   // Snapshot data awal saat modal edit dibuka.
   const editFormBaselineRef = useRef(null);
 
@@ -142,8 +145,8 @@ export default function EmployeeDetailPage() {
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     setEditError(null);
-    // Validasi data kepegawaian sebelum akun disimpan, supaya tidak terjadi
-    // "akun tersimpan tapi data HR gagal" hanya karena tanggal tidak valid.
+    // Validasi cepat di browser; server memvalidasi ulang kedua bagian sebelum
+    // menulis apa pun.
     if (master) {
       const kepegawaianError = validateKepegawaian(editForm);
       if (kepegawaianError) {
@@ -154,8 +157,9 @@ export default function EmployeeDetailPage() {
     setSavingEdit(true);
 
     try {
-      // Data akun login (employees) — lewat API supaya konsisten dengan
-      // aturan akses (hanya superadmin) yang sudah ditegakkan di sana.
+      // Satu request untuk akun login (employees) dan data HR/payroll
+      // (employees_master, hanya kalau row-nya sudah ada — kalau belum, arahkan
+      // ke Payroll Manager). Server menyimpan keduanya atau tidak sama sekali.
       const res = await fetch(`/api/employee/${employee.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -165,46 +169,34 @@ export default function EmployeeDetailPage() {
           client_id: editForm.client_id,
           status: editForm.status,
           is_superadmin: editForm.is_superadmin,
+          ...(master
+            ? {
+                master: {
+                  posisi: editForm.posisi,
+                  status: editForm.status_karyawan,
+                  gaji_pokok: editForm.gaji_pokok,
+                  tunjangan: editForm.tunjangan,
+                  tanggal_bergabung: editForm.tanggal_bergabung,
+                  jenis_hubungan_kerja: editForm.jenis_hubungan_kerja,
+                  kontrak_berakhir: editForm.kontrak_berakhir,
+                },
+              }
+            : {}),
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setEditError(data.error || 'Gagal menyimpan data akun.');
+        // Form tetap terbuka dengan isian yang sama supaya bisa langsung dicoba lagi.
+        setEditError(data.error || 'Gagal menyimpan perubahan.');
         setSavingEdit(false);
         return;
       }
 
-      // Data HR/payroll (employees_master) — hanya kalau row-nya sudah ada.
-      // Kalau belum ada, arahkan ke Payroll Manager (bukan dibuat dari sini).
-      if (master) {
-        // Lewat API (hak modul payroll dicek di server, perubahan gaji dicatat
-        // di activity log server-side) — bukan update langsung dari browser.
-        const masterRes = await fetch(`/api/payroll/master/${master.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            posisi: editForm.posisi,
-            status: editForm.status_karyawan,
-            gaji_pokok: editForm.gaji_pokok,
-            tunjangan: editForm.tunjangan,
-            tanggal_bergabung: editForm.tanggal_bergabung,
-            jenis_hubungan_kerja: editForm.jenis_hubungan_kerja,
-            kontrak_berakhir: editForm.kontrak_berakhir,
-          }),
-        });
-        const masterData = await masterRes.json().catch(() => ({}));
-
-        if (!masterRes.ok) {
-          setEditError('Data akun tersimpan, tapi gagal menyimpan data HR/payroll: ' + (masterData.error || 'terjadi kesalahan.'));
-          setSavingEdit(false);
-          return;
-        }
-      }
-
+      setSaveWarning(data.warning || null);
       setShowEditModal(false);
       loadData();
     } catch (err) {
-      setEditError('Terjadi kesalahan. Coba lagi.');
+      setEditError('Terjadi kesalahan. Periksa koneksi lalu coba lagi.');
     }
     setSavingEdit(false);
   };
@@ -227,6 +219,20 @@ export default function EmployeeDetailPage() {
       <Link href="/employee/list" className="inline-flex items-center gap-1.5 text-sm text-[#6B6B6B] hover:text-black mb-6">
         <ArrowLeft size={14} /> Kembali ke Employee List
       </Link>
+
+      {saveWarning && (
+        <div className="mb-6 flex items-start justify-between gap-3 border border-madael-red bg-white px-4 py-3">
+          <p className="text-sm text-madael-red">{saveWarning}</p>
+          <button
+            type="button"
+            onClick={() => setSaveWarning(null)}
+            className="text-[#6B6B6B] hover:text-black cursor-pointer bg-transparent border-0"
+            aria-label="Tutup peringatan"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex items-start justify-between mb-8 flex-wrap gap-4">
