@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase-browser';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { callJsonApi } from '@/lib/apiClient';
 
 const JENIS_LABEL = {
   PRO: 'Proposal',
@@ -502,18 +503,15 @@ export default function EditDocumentPage() {
         finalContent.total = subtotal - (Number(content.diskon) || 0);
       }
 
-      const { error: updateError } = await supabase
-        .from('documents')
-        .update({
-          judul: judul.trim(),
-          client_id: clientId || null,
-          content: finalContent,
-          catatan: catatan.trim() || null,
-          tanggal_dokumen: tanggalDokumen,
-        })
-        .eq('id', docMeta.id);
-
-      if (updateError) throw new Error(friendlyError(updateError, 'Gagal memperbarui dokumen.'));
+      // Disimpan lewat server: divalidasi, dicek haknya, dan dicatat di activity log.
+      const result = await callJsonApi(`/api/documents/${docMeta.id}`, 'PATCH', {
+        judul: judul.trim(),
+        client_id: clientId || null,
+        content: finalContent,
+        catatan: catatan.trim() || null,
+        tanggal_dokumen: tanggalDokumen,
+      });
+      if (!result.ok) throw new Error(result.error || 'Gagal memperbarui dokumen.');
 
       router.push(`/employee/documents/${docMeta.id}`);
     } catch (err) {

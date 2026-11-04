@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { formatRupiahOrDash } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
+import { callJsonApi } from '@/lib/apiClient';
 import { todayJakarta } from '@/lib/serverTime';
 import Toast from '@/components/employee-list/Toast';
 
@@ -252,10 +253,10 @@ export default function ClientDetailPage() {
       tipe: editForm.tipe,
       fee_structure: fee_structure_tipe ? { tipe: fee_structure_tipe, detail: fee_structure_detail || '' } : null,
     };
-    const { error } = await supabase.from('companies').update(payload).eq('id', clientId);
+    const result = await callJsonApi(`/api/crm/clients/${clientId}`, 'PATCH', payload);
     setSavingEdit(false);
-    if (error) {
-      setToast({ type: 'error', message: 'Gagal menyimpan: ' + friendlyError(error, 'terjadi kesalahan.') });
+    if (!result.ok) {
+      setToast({ type: 'error', message: result.error || 'Gagal menyimpan, coba lagi.' });
       return;
     }
     setShowEditModal(false);
@@ -271,10 +272,10 @@ export default function ClientDetailPage() {
   const handleStageSubmit = async (e) => {
     e.preventDefault();
     setSavingStage(true);
-    const { error } = await supabase.from('companies').update({ stage: stageDraft }).eq('id', clientId);
+    const result = await callJsonApi(`/api/crm/clients/${clientId}/stage`, 'PATCH', { stage: stageDraft });
     setSavingStage(false);
-    if (error) {
-      setToast({ type: 'error', message: 'Gagal ganti stage: ' + friendlyError(error, 'terjadi kesalahan.') });
+    if (!result.ok) {
+      setToast({ type: 'error', message: 'Gagal ganti stage: ' + (result.error || 'terjadi kesalahan.') });
       return;
     }
     setShowStageModal(false);
@@ -291,12 +292,8 @@ export default function ClientDetailPage() {
     e.preventDefault();
     setSavingActivity(true);
 
-    const { data: { user } } = await supabase.auth.getUser();
-    const { data: currentEmp } = await supabase.from('employees').select('id').eq('email', user?.email).maybeSingle();
-
+    // employee_id diambil server dari sesi login.
     const payload = {
-      client_id: clientId,
-      employee_id: currentEmp?.id || null,
       tipe: activityForm.tipe,
       judul: activityForm.judul || null,
       deskripsi: activityForm.deskripsi || null,
@@ -304,10 +301,10 @@ export default function ClientDetailPage() {
       follow_up_date: activityForm.follow_up_date || null,
     };
 
-    const { error } = await supabase.from('client_activities').insert(payload);
+    const result = await callJsonApi(`/api/crm/clients/${clientId}/activities`, 'POST', payload);
     setSavingActivity(false);
-    if (error) {
-      setToast({ type: 'error', message: 'Gagal menyimpan aktivitas: ' + friendlyError(error, 'terjadi kesalahan.') });
+    if (!result.ok) {
+      setToast({ type: 'error', message: 'Gagal menyimpan aktivitas: ' + (result.error || 'terjadi kesalahan.') });
       return;
     }
     setShowActivityModal(false);
@@ -326,7 +323,6 @@ export default function ClientDetailPage() {
     setSavingProject(true);
 
     const payload = {
-      client_id: clientId,
       nama_project: projectForm.nama_project.trim(),
       jenis_layanan: projectForm.jenis_layanan || null,
       status: projectForm.status || 'Aktif',
@@ -337,10 +333,10 @@ export default function ClientDetailPage() {
       catatan: projectForm.catatan || null,
     };
 
-    const { error } = await supabase.from('client_projects').insert(payload);
+    const result = await callJsonApi(`/api/crm/clients/${clientId}/projects`, 'POST', payload);
     setSavingProject(false);
-    if (error) {
-      setToast({ type: 'error', message: 'Gagal menyimpan project: ' + friendlyError(error, 'terjadi kesalahan.') });
+    if (!result.ok) {
+      setToast({ type: 'error', message: 'Gagal menyimpan project: ' + (result.error || 'terjadi kesalahan.') });
       return;
     }
     setShowProjectModal(false);
@@ -365,10 +361,10 @@ export default function ClientDetailPage() {
       catatan: dealForm.catatan || null,
     };
 
-    const { error } = await supabase.from('crm_deals').insert(payload);
+    const result = await callJsonApi('/api/crm/deals', 'POST', payload);
     setSavingDeal(false);
-    if (error) {
-      setToast({ type: 'error', message: 'Gagal menyimpan deal: ' + friendlyError(error, 'terjadi kesalahan.') });
+    if (!result.ok) {
+      setToast({ type: 'error', message: 'Gagal menyimpan deal: ' + (result.error || 'terjadi kesalahan.') });
       return;
     }
     setShowDealModal(false);
@@ -378,10 +374,10 @@ export default function ClientDetailPage() {
   const updateDealStage = async (dealId, newStage) => {
     const prevDeals = deals;
     setDeals((cur) => cur.map((d) => (d.id === dealId ? { ...d, stage: newStage } : d)));
-    const { error } = await supabase.from('crm_deals').update({ stage: newStage, updated_at: new Date().toISOString() }).eq('id', dealId);
-    if (error) {
+    const result = await callJsonApi(`/api/crm/deals/${dealId}`, 'PATCH', { stage: newStage });
+    if (!result.ok) {
       setDeals(prevDeals);
-      setToast({ type: 'error', message: 'Gagal update stage deal: ' + friendlyError(error, 'terjadi kesalahan.') });
+      setToast({ type: 'error', message: 'Gagal update stage deal: ' + (result.error || 'terjadi kesalahan.') });
     }
   };
 

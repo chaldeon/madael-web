@@ -13,6 +13,7 @@ import EmptyState from '@/components/EmptyState';
 import { formatRupiah } from '@/lib/format';
 import { todayJakarta } from '@/lib/serverTime';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { callJsonApi } from '@/lib/apiClient';
 import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 
 const STATUS_OPTIONS = ['draft', 'terkirim', 'lunas'];
@@ -201,22 +202,15 @@ export default function InvoiceTrackerPage() {
     setUpdateError(null);
     setUpdatingId(row.id);
 
-    const patch = { status: newStatus, updated_at: new Date().toISOString() };
-    if (newStatus === 'lunas' && !row.tanggal_lunas) patch.tanggal_lunas = todayValue();
-    if (newStatus !== 'lunas') patch.tanggal_lunas = null;
-
-    const { data, error } = await supabase
-      .from('invoices')
-      .update(patch)
-      .eq('id', row.id)
-      .select()
-      .single();
+    // Status + tanggal lunas ditulis dan dicatat di server (transisi divalidasi).
+    const result = await callJsonApi(`/api/invoices/${row.id}/status`, 'PATCH', { status: newStatus });
 
     setUpdatingId(null);
-    if (error) {
-      setUpdateError(friendlyError(error, 'Gagal memperbarui status invoice.'));
+    if (!result.ok || !result.data?.invoice) {
+      setUpdateError(result.error || 'Gagal memperbarui status invoice.');
       return;
     }
+    const data = result.data.invoice;
     setInvoices((prev) => prev.map((i) => (i.id === data.id ? data : i)));
   };
 
