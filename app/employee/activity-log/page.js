@@ -31,6 +31,8 @@ const AKSI_LABEL = {
   approve_lembur: 'Approve Lembur',
   reject_lembur: 'Reject Lembur',
   cancel_koreksi_absensi: 'Batalkan Koreksi Absensi (Karyawan)',
+  daftar_foto_referensi: 'Daftar Foto Referensi Wajah (Karyawan)',
+  ganti_foto_referensi: 'Ganti Foto Referensi Wajah (Karyawan)',
   ubah_status_payroll: 'Ubah Status Payroll',
   generate_slip_payroll: 'Generate Slip Payroll',
   generate_ulang_slip_payroll: 'Generate Ulang Slip Payroll',

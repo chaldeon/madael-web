@@ -15,6 +15,7 @@ import CameraCapture from '@/components/CameraCapture';
 import EmployeeDocumentsPanel from '@/components/EmployeeDocumentsPanel';
 import AttendancePreferenceCard from '@/components/AttendancePreferenceCard';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
+import { UPLOAD_MAX_BYTES, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 
 function StatusBadge({ status }) {
   const map = {
@@ -137,9 +138,10 @@ export default function ProfilePage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  // Ambil descriptor wajah dari frame video (masih live), upload foto ke
-  // storage, lalu simpan path+descriptor lewat API route (bukan update
-  // langsung dari client — lihat komentar di app/api/profile/foto-referensi).
+  // Ambil descriptor wajah dari frame video (masih live), lalu kirim foto +
+  // descriptor ke API route. Upload ke storage dan penulisan ke database
+  // dilakukan server (bukan langsung dari client — lihat komentar di
+  // app/api/profile/foto-referensi).
   const handleCapturePhoto = async (blob, videoEl) => {
     setPhotoError(null);
     setPhotoSuccess(false);
@@ -150,21 +152,16 @@ export default function ProfilePage() {
         throw new Error('Wajah tidak terdeteksi dengan jelas. Coba lagi dengan pencahayaan lebih baik dan posisi wajah lurus ke kamera.');
       }
 
-      const path = `${employeeId}/reference.jpg`;
-      const { error: uploadError } = await supabase.storage
-        .from('employee-photos')
-        .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
-      if (uploadError) throw uploadError;
+      if (blob.size > UPLOAD_MAX_BYTES) throw new Error(PESAN_UKURAN_UPLOAD);
 
-      const res = await fetch('/api/profile/foto-referensi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, descriptor }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Gagal menyimpan foto referensi.');
+      const formData = new FormData();
+      formData.append('foto', blob, 'reference.jpg');
+      formData.append('descriptor', JSON.stringify(descriptor));
+      const res = await fetch('/api/profile/foto-referensi', { method: 'POST', body: formData });
+      const body = await readUploadJson(res, 'Gagal menyimpan foto referensi.');
 
-      const { data: signed } = await supabase.storage.from('employee-photos').createSignedUrl(path, 60 * 60);
+      // Path ditentukan server (bukan dari klien); dipakai hanya untuk preview.
+      const { data: signed } = await supabase.storage.from('employee-photos').createSignedUrl(body.path, 60 * 60);
       setPhotoUrl(signed?.signedUrl || null);
       setPhotoSuccess(true);
       setShowCamera(false);
@@ -297,7 +294,7 @@ export default function ProfilePage() {
       <div className="bg-white border border-[#E0E0E0] p-5 mb-6">
         <p className="text-xs font-semibold text-black tracking-[0.02em] mb-1">Foto Referensi Wajah</p>
         <p className="text-xs text-[#6B6B6B] mb-4">
-          Dipakai untuk mencocokkan wajah secara otomatis saat kamu clock in/out di Absensi. Daftarkan atau ganti kapan saja.
+          Dipakai untuk mencocokkan wajah secara otomatis saat kamu clock in/out di Absensi. Penggantian foto dicatat dan diberitahukan ke HR.
         </p>
 
         <div className="flex items-center gap-4">
