@@ -12,6 +12,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import { formatRupiahOrDash } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
+import { callJsonApi } from '@/lib/apiClient';
 
 const TYPE_LABEL = {
   PRO: 'Proposal',
@@ -306,10 +307,11 @@ export default function DocumentDetailPage() {
   const handleStatusChange = async (newStatus) => {
     setUpdatingStatus(true);
     setStatusError(null);
-    const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id);
+    // Perubahan status dicek hak/transisinya dan dicatat di server.
+    const result = await callJsonApi(`/api/documents/${doc.id}/status`, 'PATCH', { status: newStatus });
     setUpdatingStatus(false);
-    if (error) {
-      setStatusError(friendlyError(error, 'Gagal update status, coba lagi.'));
+    if (!result.ok) {
+      setStatusError(result.error || 'Gagal update status, coba lagi.');
       return;
     }
     setDoc((d) => ({ ...d, status: newStatus }));

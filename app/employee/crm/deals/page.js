@@ -8,6 +8,7 @@ import { X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { friendlyError } from '@/lib/errorMessage';
+import { callJsonApi } from '@/lib/apiClient';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import LoadingState from '@/components/LoadingState';
 import Toast from '@/components/employee-list/Toast';
@@ -140,10 +141,10 @@ export default function CrmDealsPage() {
     const prev = deals;
     setDeals((cur) => cur.map((d) => (d.id === dealId ? { ...d, stage: newStage } : d)));
 
-    const { error } = await supabase.from('crm_deals').update({ stage: newStage, updated_at: new Date().toISOString() }).eq('id', dealId);
-    if (error) {
+    const result = await callJsonApi(`/api/crm/deals/${dealId}`, 'PATCH', { stage: newStage });
+    if (!result.ok) {
       setDeals(prev);
-      setToast({ type: 'error', message: 'Gagal update stage: ' + friendlyError(error, 'terjadi kesalahan.') });
+      setToast({ type: 'error', message: 'Gagal update stage: ' + (result.error || 'terjadi kesalahan.') });
     }
   };
 
@@ -204,11 +205,11 @@ export default function CrmDealsPage() {
       catatan: form.catatan.trim() || null,
     };
 
-    const { error } = await supabase.from('crm_deals').insert(payload);
+    const result = await callJsonApi('/api/crm/deals', 'POST', payload);
     setSubmitting(false);
 
-    if (error) {
-      setFormError(friendlyError(error, 'Gagal menyimpan deal.'));
+    if (!result.ok) {
+      setFormError(result.error || 'Gagal menyimpan deal.');
       return;
     }
     setShowAddModal(false);

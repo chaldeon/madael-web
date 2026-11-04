@@ -8,6 +8,7 @@ import { Plus, X, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { friendlyError } from '@/lib/errorMessage';
+import { callJsonApi } from '@/lib/apiClient';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import LoadingState from '@/components/LoadingState';
 
@@ -267,10 +268,11 @@ export default function CrmClientListPage() {
         : null,
     };
 
-    const { error } = await supabase.from('companies').insert(payload);
+    // Disimpan lewat server (divalidasi + dicatat di activity log).
+    const result = await callJsonApi('/api/crm/clients', 'POST', payload);
 
-    if (error) {
-      setFormError(friendlyError(error, 'Gagal menyimpan klien.'));
+    if (!result.ok) {
+      setFormError(result.error || 'Gagal menyimpan klien.');
       setSubmitting(false);
       return;
     }
