@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Check, X as XIcon, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { Check, X as XIcon, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown, Plus } from 'lucide-react';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { DEFAULT_KEBIJAKAN_CUTI } from '@/lib/leavePolicy';
@@ -15,6 +15,7 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import LeavePolicyCard from '@/components/LeavePolicyCard';
+import LeaveOnBehalfDialog from '@/components/LeaveOnBehalfDialog';
 import PaginationBar from '@/components/PaginationBar';
 import ExportCsvButton from '@/components/ExportCsvButton';
 import { ADMIN_PAGE_SIZE_DEFAULT, totalPagesOf } from '@/lib/pagination';
@@ -186,6 +187,8 @@ export default function LeaveRequestAdminPage() {
   const [revokeTarget, setRevokeTarget] = useState(null); // baris cuti disetujui yang menunggu konfirmasi pembatalan
   const [rejectCancelTarget, setRejectCancelTarget] = useState(null); // baris dengan permintaan batal yang akan ditolak
   const [rejectCancelCatatan, setRejectCancelCatatan] = useState('');
+  const [inputOpen, setInputOpen] = useState(false); // dialog catat cuti atas nama karyawan
+  const [inputInfo, setInputInfo] = useState(null); // pesan sukses setelah mencatat
 
   // Data dimuat lewat route server (bukan query browser) karena employees_master
   // dibatasi RLS superadmin — lihat catatan di app/api/leave-requests/admin.
@@ -372,6 +375,22 @@ export default function LeaveRequestAdminPage() {
     }
   };
 
+  // Cuti dicatat HR atas nama karyawan: baris baru berstatus disetujui dan kuota
+  // sudah berubah di server, jadi data dimuat ulang (karyawan di baris baru
+  // belum ada di peta karyawan/jadwal/master halaman ini).
+  const handleInputSaved = (json) => {
+    setInputOpen(false);
+    setActionError(null);
+    setActionWarning(json.warning || null);
+    setInputInfo(`Tercatat dan langsung disetujui (${json.jumlahHari} hari kerja). Karyawan sudah diberi notifikasi.`);
+    if (statusFilter === 'pending' || statusFilter === FILTER_MINTA_BATAL_CUTI) {
+      setStatusFilter('approved');
+      setPage(1);
+    } else {
+      loadData();
+    }
+  };
+
   const handleRejectSubmit = async (extra) => {
     if (!rejectingRow) return;
     const hasil = await handleDecision(rejectingRow, 'rejected', extra);
@@ -443,6 +462,13 @@ export default function LeaveRequestAdminPage() {
           neutralizeFormulas
           label="Ekspor CSV"
         />
+        <button
+          type="button"
+          onClick={() => { setActionError(null); setActionWarning(null); setInputInfo(null); setInputOpen(true); }}
+          className="inline-flex items-center gap-1.5 bg-madael-red text-white px-4 py-2 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
+        >
+          <Plus size={14} /> Catat atas nama karyawan
+        </button>
       </div>
 
       <LeavePolicyCard
@@ -455,6 +481,7 @@ export default function LeaveRequestAdminPage() {
 
       {actionError && <p className="text-xs text-red-600 mb-4">{actionError}</p>}
       {actionWarning && <p className="text-xs text-amber-700 mb-4">{actionWarning}</p>}
+      {inputInfo && <p className="text-xs text-green-700 mb-4">{inputInfo}</p>}
 
       {loading ? (
         <LoadingState label="Memuat pengajuan cuti..." />
@@ -514,6 +541,9 @@ export default function LeaveRequestAdminPage() {
                       <td className="px-4 py-3 text-[#6B6B6B] max-w-[200px] truncate" title={row.alasan}>{row.alasan}</td>
                       <td className="px-4 py-3">
                         <StatusBadge status={row.status} />
+                        {row.diinput_oleh && (
+                          <p className="text-[11px] text-[#9A9A9A] mt-1.5 max-w-[160px]">Dicatat HR</p>
+                        )}
                         {row.status === 'rejected' && row.rejection_reason && (
                           <p className="text-[11px] text-[#9A9A9A] mt-1 max-w-[160px]" title={row.rejection_reason}>{row.rejection_reason}</p>
                         )}
@@ -584,6 +614,13 @@ export default function LeaveRequestAdminPage() {
           onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
           catatanUrutan
           satuan="pengajuan"
+        />
+      )}
+
+      {inputOpen && (
+        <LeaveOnBehalfDialog
+          onClose={() => setInputOpen(false)}
+          onSaved={handleInputSaved}
         />
       )}
 
