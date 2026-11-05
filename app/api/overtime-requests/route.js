@@ -11,6 +11,7 @@ import {
   tambahHari, RENTANG_HARI_PENGAJUAN,
 } from '@/lib/overtimeRules';
 import { ambilHariKerja, periksaPengajuanLembur } from '@/lib/overtimeServer';
+import { ambilLibur, liburUntukJadwal } from '@/lib/publicHolidays';
 
 // GET /api/overtime-requests
 // Riwayat lembur milik sendiri. Tabel overtime_requests tidak punya policy RLS
@@ -61,8 +62,8 @@ export async function GET() {
 // - tidak bentrok dengan pengajuan pending/approved lain
 // - hari kerja biasa: maks 4 jam/hari dan 18 jam/minggu (lihat overtimeRules)
 // employee_id dan jenis_hari TIDAK dipercaya dari body: employee_id dari sesi,
-// jenis_hari diturunkan dari jadwal kerja (admin bisa menimpanya saat approve,
-// mis. untuk hari libur nasional).
+// jenis_hari diturunkan dari jadwal kerja dan tabel hari libur nasional (admin
+// masih bisa menimpanya saat approve, mis. untuk cuti bersama).
 export async function POST(request) {
   try {
     const admin = createAdminClient();
@@ -100,7 +101,19 @@ export async function POST(request) {
       console.error('Ajukan lembur — jadwal kerja error:', jadwal.error);
       return NextResponse.json({ error: 'Gagal memuat jadwal kerja.' }, { status: 500 });
     }
-    const jenisHari = jenisHariUntukTanggal(tanggal, jadwal.hariKerja);
+    // Tanggal merah nasional otomatis berjenis liburNasional (kecuali jadwalnya
+    // memang bekerja di hari libur). Gagal memuat libur menghentikan pengajuan
+    // supaya jenis hari tidak salah tersimpan.
+    const liburRes = await ambilLibur(admin, { dari: tanggal, sampai: tanggal });
+    if (liburRes.error) {
+      console.error('Ajukan lembur — hari libur error:', liburRes.error);
+      return NextResponse.json({ error: 'Gagal memuat data hari libur.' }, { status: 500 });
+    }
+    const jenisHari = jenisHariUntukTanggal(
+      tanggal,
+      jadwal.hariKerja,
+      liburUntukJadwal(liburRes.libur, { bekerja_di_hari_libur: jadwal.bekerjaDiHariLibur })
+    );
 
     const masalah = await periksaPengajuanLembur(admin, {
       employeeId: emp.id, tanggal, jamMulai, durasiMenit, jenisHari,

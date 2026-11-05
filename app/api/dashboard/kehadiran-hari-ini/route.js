@@ -5,6 +5,7 @@ import { todayJakarta, jamJakarta } from '@/lib/serverTime';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { friendlyError } from '@/lib/errorMessage';
 import { labelJenisCuti } from '@/lib/leave';
+import { ambilLibur, adalahLibur, liburUntukJadwal } from '@/lib/publicHolidays';
 import {
   KEHADIRAN_MODULES,
   KEHADIRAN_KINDS,
@@ -22,6 +23,8 @@ import {
 //   - work_schedule : hari kerja, jam masuk, toleransi
 //   - attendance    : clock-in hari ini
 //   - leave_requests: cuti berstatus approved yang mencakup hari ini
+//   - public_holidays: hari ini hari libur nasional / cuti bersama? (karyawan
+//     yang jadwalnya bekerja_di_hari_libur tidak ikut dikecualikan)
 // Identitas karyawan dari employees_master (sumber kebenaran); hanya yang punya
 // akun aktif (linked_employee_id) yang ikut, karena hanya mereka yang bisa
 // clock-in. Baris payroll-only tidak dihitung.
@@ -48,7 +51,7 @@ export async function GET() {
     const jamSekarang = jamJakarta(now);
     const hariIni = namaHari(today);
 
-    const [empRes, schedRes, attRes, leaveRes] = await Promise.all([
+    const [empRes, schedRes, attRes, leaveRes, liburRes] = await Promise.all([
       fetchAllRows(() =>
         admin
           .from('employees_master')
@@ -58,7 +61,9 @@ export async function GET() {
           .not('linked_employee_id', 'is', null)
       ),
       fetchAllRows(() =>
-        admin.from('work_schedule').select('id, employee_id, jam_masuk, hari_kerja, toleransi_menit')
+        // '*' supaya kolom bekerja_di_hari_libur yang baru tidak membuat query
+        // gagal sebelum migrasinya dijalankan.
+        admin.from('work_schedule').select('*')
       ),
       fetchAllRows(() =>
         admin
@@ -74,9 +79,10 @@ export async function GET() {
           .lte('tanggal_mulai', today)
           .gte('tanggal_selesai', today)
       ),
+      ambilLibur(admin, { dari: today, sampai: today }),
     ]);
 
-    const firstError = empRes.error || schedRes.error || attRes.error || leaveRes.error;
+    const firstError = empRes.error || schedRes.error || attRes.error || leaveRes.error || liburRes.error;
     if (firstError) {
       return NextResponse.json(
         { error: `Gagal memuat kehadiran hari ini: ${friendlyError(firstError, 'terjadi kesalahan pada server.', { context: 'Muat kehadiran hari ini' })}` },
@@ -100,12 +106,14 @@ export async function GET() {
         const empId = r.linked_employee_id;
         const attendance = attByEmp.get(empId) || null;
         const cuti = leaveByEmp.get(empId) || null;
+        const schedule = scheduleByEmp.get(empId) || null;
         const kind = klasifikasiKehadiran({
           hariIni,
           jamSekarang,
-          schedule: scheduleByEmp.get(empId) || null,
+          schedule,
           attendance,
           cuti,
+          liburHariIni: adalahLibur(liburUntukJadwal(liburRes.libur, schedule), today),
         });
         return {
           id: r.id,

@@ -9,7 +9,8 @@ import { Check, X as XIcon, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown, Plus } f
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { DEFAULT_KEBIJAKAN_CUTI } from '@/lib/leavePolicy';
-import { hitungHariKerja, hitungSisaCuti, labelJenisCuti, potongKuota, MAKS_CATATAN_TOLAK_CUTI, FILTER_MINTA_BATAL_CUTI } from '@/lib/leave';
+import { hariCutiBaris, hitungSisaCuti, labelJenisCuti, potongKuota, MAKS_CATATAN_TOLAK_CUTI, FILTER_MINTA_BATAL_CUTI } from '@/lib/leave';
+import { petaLibur, liburUntukJadwal } from '@/lib/publicHolidays';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -81,7 +82,7 @@ function StatusBadge({ status }) {
 const SORT_COLUMNS = {
   nama: { get: (r, ctx) => (ctx.empById[r.employee_id]?.nama || '').toLowerCase() },
   periode: { get: (r) => r.tanggal_mulai || '' },
-  hari_kerja: { get: (r, ctx) => hitungHariKerja(r.tanggal_mulai, r.tanggal_selesai, ctx.hariKerjaByEmpId[r.employee_id]) },
+  hari_kerja: { get: (r, ctx) => hariCutiBaris(r, ctx.hariKerjaByEmpId[r.employee_id], ctx.liburByEmpId[r.employee_id] ?? ctx.libur) },
   sisa_kuota: {
     get: (r, ctx) => {
       const sisa = hitungSisaCuti(ctx.masterByEmpId[r.employee_id], undefined, ctx.kebijakan);
@@ -170,6 +171,7 @@ export default function LeaveRequestAdminPage() {
   const [employees, setEmployees] = useState([]);
   const [requests, setRequests] = useState([]);
   const [schedules, setSchedules] = useState([]); // work_schedule rows
+  const [liburList, setLiburList] = useState([]); // hari libur nasional/cuti bersama (tahun ini & depan)
   const [masterList, setMasterList] = useState([]); // employees_master rows (kolom kuota saja)
   const [kebijakan, setKebijakan] = useState(DEFAULT_KEBIJAKAN_CUTI); // kebijakan kuota cuti (leave_policies)
   const [kebijakanVersi, setKebijakanVersi] = useState(null);
@@ -221,6 +223,7 @@ export default function LeaveRequestAdminPage() {
       setEmployees(json.employees || []);
       setRequests(json.requests || []);
       setSchedules(json.schedules || []);
+      setLiburList(json.libur || []);
       setMasterList(json.master || []);
       setTotalCount(total);
       setKebijakan(json.kebijakan || DEFAULT_KEBIJAKAN_CUTI);
@@ -260,6 +263,16 @@ export default function LeaveRequestAdminPage() {
     return map;
   }, [schedules]);
 
+  // Hari libur nasional/cuti bersama; per karyawan kosong kalau jadwalnya
+  // menandai bekerja di hari libur. Hanya memengaruhi pengajuan pending
+  // (lihat hariCutiBaris).
+  const libur = useMemo(() => petaLibur(liburList), [liburList]);
+  const liburByEmpId = useMemo(() => {
+    const map = {};
+    schedules.forEach((s) => { map[s.employee_id] = liburUntukJadwal(libur, s); });
+    return map;
+  }, [schedules, libur]);
+
   // employee_id (akun portal) -> row employees_master, lewat linked_employee_id.
   // Employee yang belum di-link (linked_employee_id null) sengaja tidak masuk map ini.
   const masterByEmpId = useMemo(() => {
@@ -273,7 +286,7 @@ export default function LeaveRequestAdminPage() {
     // baris di halaman yang sedang dibuka.
     const filtered = requests;
 
-    const ctx = { empById, hariKerjaByEmpId, masterByEmpId, kebijakan };
+    const ctx = { empById, hariKerjaByEmpId, liburByEmpId, libur, masterByEmpId, kebijakan };
     const getValue = SORT_COLUMNS[sortField]?.get;
     if (!getValue) return filtered;
 
@@ -285,7 +298,7 @@ export default function LeaveRequestAdminPage() {
       return 0;
     });
     return sortDir === 'desc' ? sorted.reverse() : sorted;
-  }, [requests, sortField, sortDir, empById, hariKerjaByEmpId, masterByEmpId, kebijakan]);
+  }, [requests, sortField, sortDir, empById, hariKerjaByEmpId, liburByEmpId, libur, masterByEmpId, kebijakan]);
 
   const handleSort = (colKey) => {
     if (sortField === colKey) {
@@ -531,7 +544,7 @@ export default function LeaveRequestAdminPage() {
                         {formatTanggal(row.tanggal_mulai)} — {formatTanggal(row.tanggal_selesai)}
                       </td>
                       <td className="px-4 py-3 text-[#6B6B6B]">
-                        {hitungHariKerja(row.tanggal_mulai, row.tanggal_selesai, hariKerjaByEmpId[row.employee_id])}
+                        {hariCutiBaris(row, hariKerjaByEmpId[row.employee_id], liburByEmpId[row.employee_id] ?? libur)}
                       </td>
                       <td className="px-4 py-3 text-[#6B6B6B] whitespace-nowrap">
                         {!potongKuota(row.jenis)

@@ -155,7 +155,7 @@ export default function LeaveOnBehalfDialog({ onClose, onSaved }) {
             </label>
           </div>
           <p className="text-[11px] text-[#9A9A9A] -mt-2">
-            Hanya di tahun berjalan; tanggal mulai paling jauh {MAKS_HARI_LAMPAU_INPUT_HR} hari ke belakang. Hari dihitung dari jadwal kerja karyawan.
+            Hanya di tahun berjalan; tanggal mulai paling jauh {MAKS_HARI_LAMPAU_INPUT_HR} hari ke belakang. Hari dihitung dari jadwal kerja karyawan, di luar hari libur nasional dan cuti bersama.
           </p>
 
           <label className="flex flex-col gap-1">
