@@ -11,6 +11,7 @@ import { useModalDismiss } from '@/lib/useModalDismiss';
 import { formatRupiahOrDash } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
 import KontrakBadge from '@/components/KontrakBadge';
+import KontrakRiwayatPanel from '@/components/KontrakRiwayatPanel';
 import {
   JENIS_HUBUNGAN_KERJA_OPTIONS,
   formatTanggalKepegawaian,
@@ -319,6 +320,13 @@ export default function EmployeeDetailPage() {
           </Link>
         </div>
       </div>
+
+      {/* Riwayat Kontrak PKWT/Magang. Dimuat ulang bila data kepegawaian berubah. */}
+      <KontrakRiwayatPanel
+        masterId={master?.id}
+        reloadKey={`${master?.jenis_hubungan_kerja || ''}|${master?.tanggal_bergabung || ''}|${master?.kontrak_berakhir || ''}`}
+        onChanged={loadData}
+      />
 
       {/* Riwayat Perubahan Profil */}
       <div className="bg-white border border-[#E0E0E0] p-5 mt-6 flex items-center justify-between flex-wrap gap-3">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLanguage } from '@/context/LanguageContext';
 import CalculatorDevWarning from '@/components/CalculatorDevWarning';
 
@@ -193,6 +193,21 @@ export default function KalkulatorPKWT() {
   const [inputs, setInputs] = useState(initialInputs);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+
+  // Tautan "Hitung Kompensasi" dari Riwayat Kontrak (/employee/list/[id]) membawa
+  // ?mulai=YYYY-MM-DD&berakhir=YYYY-MM-DD. Hanya tanggal yang diisi; gaji tidak
+  // dibawa lewat URL. Dibaca setelah mount (bukan saat render) supaya HTML
+  // prerender halaman publik ini tetap sama dan tidak ada beda hidrasi.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const mulai = params.get('mulai');
+    const berakhir = params.get('berakhir');
+    const iso = /^\d{4}-\d{2}-\d{2}$/;
+    if (iso.test(mulai || '') && iso.test(berakhir || '')) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setInputs((prev) => ({ ...prev, tglMulai: mulai, tglBerakhir: berakhir }));
+    }
+  }, []);
 
   const handleNumberChange = (field) => (e) => {
     const raw = e.target.value.replace(/[^\d]/g, '');

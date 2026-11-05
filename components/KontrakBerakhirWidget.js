@@ -7,6 +7,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import KontrakBadge from '@/components/KontrakBadge';
+import KontrakPerpanjangModal from '@/components/KontrakPerpanjangModal';
 import { formatTanggalKepegawaian } from '@/lib/kepegawaian';
 
 // Widget dashboard HRIS: kontrak PKWT/Magang yang segera atau sudah berakhir.
@@ -17,6 +18,8 @@ export default function KontrakBerakhirWidget() {
   const [state, setState] = useState({ status: 'loading', data: null, error: null });
   // Dinaikkan oleh tombol "Coba Lagi" untuk memicu muat ulang.
   const [reloadKey, setReloadKey] = useState(0);
+  // id employees_master yang sedang diperpanjang (modal terbuka), atau null.
+  const [perpanjangId, setPerpanjangId] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,19 +82,34 @@ export default function KontrakBerakhirWidget() {
         <>
           <ul className="divide-y divide-[#F0F0F0]">
             {data.items.map((item) => (
-              <li key={item.id}>
-                <Link href={item.href} className="flex items-center justify-between gap-4 px-5 py-3 hover:bg-[#FAFAFA]">
+              <li key={item.id} className="flex items-center hover:bg-[#FAFAFA]">
+                <Link href={item.href} className="flex flex-1 min-w-0 items-center justify-between gap-4 px-5 py-3">
                   <div className="min-w-0">
                     <p className="text-sm text-black truncate">{item.nama}</p>
                     <p className="text-xs text-[#6B6B6B] truncate">
                       {[item.jenis, item.posisi, item.perusahaan].filter(Boolean).join(' · ') || '—'}
                     </p>
+                    {item.batas_durasi && (
+                      <p className={`text-xs truncate ${item.batas_durasi.status === 'melewati' ? 'text-red-700' : 'text-amber-800'}`}>
+                        {item.batas_durasi.status === 'melewati' ? 'Melewati batas masa kontrak. ' : 'Mendekati batas masa kontrak. '}
+                        {item.batas_durasi.label}
+                      </p>
+                    )}
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <span className="text-xs text-[#6B6B6B]">{formatTanggalKepegawaian(item.kontrak_berakhir)}</span>
                     <KontrakBadge kontrakBerakhir={item.kontrak_berakhir} today={data.today} />
                   </div>
                 </Link>
+                {item.bisa_perpanjang && (
+                  <button
+                    type="button"
+                    onClick={() => setPerpanjangId(item.id)}
+                    className="mr-5 shrink-0 px-3 py-1.5 text-xs font-medium text-madael-red border border-madael-red bg-white hover:bg-madael-red hover:text-white transition-colors cursor-pointer"
+                  >
+                    Perpanjang
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -102,6 +120,13 @@ export default function KontrakBerakhirWidget() {
             </p>
           )}
         </>
+      )}
+      {perpanjangId && (
+        <KontrakPerpanjangModal
+          masterId={perpanjangId}
+          onClose={() => setPerpanjangId(null)}
+          onDone={() => { setPerpanjangId(null); retry(); }}
+        />
       )}
     </div>
   );
