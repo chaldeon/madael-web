@@ -17,6 +17,7 @@ import {
   LAMPIRAN_MAKS_BYTES, LAMPIRAN_MIME, MAKS_HARI_LAMPAU_INPUT_HR,
   SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN,
 } from '@/lib/leave';
+import { ambilLibur } from '@/lib/publicHolidays';
 
 // GET /api/leave-requests/admin?status=pending&page=1&pageSize=50
 // Data untuk halaman Kelola Pengajuan Cuti: pengajuan (berhalaman) + data
@@ -83,29 +84,43 @@ export async function GET(request) {
     let employees = [];
     let schedules = [];
     let master = [];
+    let libur = [];
     if (empIds.length > 0) {
-      const [empRes, schedRes, masterRes] = await Promise.all([
+      const tahun = tahunSekarang();
+      const [empRes, schedRes, masterRes, liburRes] = await Promise.all([
         admin.from('employees').select('id, nama').in('id', empIds).order('nama'),
-        admin.from('work_schedule').select('employee_id, hari_kerja').in('employee_id', empIds),
+        // '*' supaya kolom bekerja_di_hari_libur yang baru tidak membuat query
+        // gagal sebelum migrasinya dijalankan; yang dikirim ke klien tetap
+        // hanya tiga kolom di bawah.
+        admin.from('work_schedule').select('*').in('employee_id', empIds),
         admin
           .from('employees_master')
           .select(`${KOLOM_MASTER_CUTI}, linked_employee_id`)
           .in('linked_employee_id', empIds),
+        ambilLibur(admin, { dari: `${tahun}-01-01`, sampai: `${tahun + 1}-12-31` }),
       ]);
-      const supportError = empRes.error || schedRes.error || masterRes.error;
+      const supportError = empRes.error || schedRes.error || masterRes.error || liburRes.error;
       if (supportError) {
         console.error('Muat data pendukung kelola cuti error:', supportError);
         return NextResponse.json({ error: 'Gagal memuat data pengajuan cuti.' }, { status: 500 });
       }
       employees = empRes.data || [];
-      schedules = schedRes.data || [];
+      schedules = (schedRes.data || []).map((sc) => ({
+        employee_id: sc.employee_id,
+        hari_kerja: sc.hari_kerja,
+        bekerja_di_hari_libur: sc.bekerja_di_hari_libur === true,
+      }));
       master = masterRes.data || [];
+      // Hari libur nasional/cuti bersama (tahun ini dan depan) untuk menghitung
+      // jumlah hari kerja pengajuan yang masih menunggu.
+      libur = liburRes.rows.map((l) => ({ tanggal: l.tanggal, nama: l.nama, jenis: l.jenis }));
     }
 
     return NextResponse.json({
       employees,
       requests,
       schedules,
+      libur,
       master,
       total: reqRes.count ?? 0,
       page,
@@ -241,7 +256,7 @@ export async function POST(request) {
       return NextResponse.json({ error: `Gagal memuat data cuti: ${friendlyError(ctx.error, 'terjadi kesalahan pada server.', { context: 'Muat data cuti' })}` }, { status: 500 });
     }
 
-    const jumlahHari = hitungHariKerja(tanggalMulai, tanggalSelesai, ctx.hariKerja);
+    const jumlahHari = hitungHariKerja(tanggalMulai, tanggalSelesai, ctx.hariKerja, ctx.libur);
     if (jumlahHari === 0) {
       return NextResponse.json(
         { error: 'Rentang tanggal yang dipilih tidak ada hari kerja menurut jadwal karyawan (semua jatuh di hari libur).' },

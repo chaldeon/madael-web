@@ -110,7 +110,16 @@ export async function POST(request, { params }) {
 
     const potong = potongKuota(row.jenis);
     const tahun = tahunSekarang();
-    const hariDariJadwal = hitungHariKerja(row.tanggal_mulai, row.tanggal_selesai, ctx.hariKerja);
+    // Menyetujui menghitung dengan hari libur nasional/cuti bersama (tidak
+    // memotong kuota untuk tanggal merah). Pembatalan memakai jumlah_hari yang
+    // tersimpan; baris lama tanpa kolom itu dihitung tanpa libur (forward-only,
+    // sama seperti saat mereka disetujui).
+    const hariDariJadwal = hitungHariKerja(
+      row.tanggal_mulai,
+      row.tanggal_selesai,
+      ctx.hariKerja,
+      decision === 'approved' ? ctx.libur : null
+    );
     const sekarang = new Date().toISOString();
     // Pembatalan sebagai jawaban atas permintaan karyawan (bukan inisiatif HR).
     const dariPermintaan = decision === 'cancelled' && row.minta_batal_status === 'menunggu';
@@ -155,7 +164,7 @@ export async function POST(request, { params }) {
       }
       if (hariDariJadwal === 0) {
         return NextResponse.json(
-          { error: 'Rentang tanggal ini tidak mengandung hari kerja menurut jadwal karyawan. Tolak pengajuan ini.' },
+          { error: 'Rentang tanggal ini tidak mengandung hari kerja menurut jadwal karyawan (hari libur nasional/cuti bersama tidak dihitung). Tolak pengajuan ini.' },
           { status: 400 }
         );
       }

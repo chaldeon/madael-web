@@ -302,6 +302,7 @@ export default function SemuaKaryawanPage() {
           hari_kerja: existing.hari_kerja || DEFAULT_HARI,
           toleransi_menit: String(existing.toleransi_menit ?? 0),
           shift_template_id: existing.shift_template_id || '',
+          bekerja_di_hari_libur: existing.bekerja_di_hari_libur === true,
         }
       : EMPTY_JADWAL_FORM;
     jadwalFormBaselineRef.current = initial;
@@ -318,13 +319,15 @@ export default function SemuaKaryawanPage() {
       setJadwalForm((f) => ({ ...f, shift_template_id: '' }));
       return;
     }
-    setJadwalForm({
+    // bekerja_di_hari_libur bukan bagian template: nilai di form dipertahankan.
+    setJadwalForm((f) => ({
       jam_masuk: tpl.jam_masuk.slice(0, 5),
       jam_pulang: tpl.jam_pulang.slice(0, 5),
       hari_kerja: tpl.hari_kerja,
       toleransi_menit: String(tpl.toleransi_menit ?? 0),
       shift_template_id: tpl.id,
-    });
+      bekerja_di_hari_libur: f.bekerja_di_hari_libur === true,
+    }));
   };
 
   const toggleHari = (hari) => {
@@ -354,6 +357,7 @@ export default function SemuaKaryawanPage() {
       hari_kerja: jadwalForm.hari_kerja,
       toleransi_menit: toleransi,
       shift_template_id: jadwalForm.shift_template_id || null,
+      bekerja_di_hari_libur: jadwalForm.bekerja_di_hari_libur === true,
     });
 
     setJadwalSaving(false);
@@ -1105,6 +1109,22 @@ export default function SemuaKaryawanPage() {
               />
               <span className="text-[11px] text-[#9A9A9A]">
                 0 = tanpa toleransi. Dianggap telat kalau clock-in lewat jam masuk + toleransi. Hanya berlaku untuk absensi baru.
+              </span>
+            </label>
+
+            <label className="flex items-start gap-2 mb-6 text-xs text-[#6B6B6B]">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={jadwalForm.bekerja_di_hari_libur === true}
+                onChange={(e) => setJadwalForm((f) => ({ ...f, bekerja_di_hari_libur: e.target.checked }))}
+              />
+              <span>
+                Tetap bekerja di hari libur nasional / cuti bersama
+                <span className="block text-[11px] text-[#9A9A9A]">
+                  Untuk shift atau penempatan yang tidak libur di tanggal merah. Tanggal merah diperlakukan sebagai hari
+                  kerja biasa untuk karyawan ini (tetap dihitung di rekap, monitor kehadiran, dan hari cuti).
+                </span>
               </span>
             </label>
 

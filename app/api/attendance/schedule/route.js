@@ -6,7 +6,8 @@ import { scheduleFieldsFromTemplate } from '@/lib/shifts';
 import { ambilTemplate, isSafeId, requireJadwalAdmin, validateJadwalKustom } from '@/lib/scheduleServer';
 
 // POST /api/attendance/schedule
-// body: { employee_id, shift_template_id?, jam_masuk, jam_pulang, hari_kerja, toleransi_menit }
+// body: { employee_id, shift_template_id?, jam_masuk, jam_pulang, hari_kerja, toleransi_menit,
+//         bekerja_di_hari_libur? }
 // Simpan (buat atau ganti) jadwal kerja SATU karyawan. Khusus superadmin.
 //
 // - Dengan shift_template_id: jam/hari/toleransi DISALIN dari template di server
@@ -15,6 +16,13 @@ import { ambilTemplate, isSafeId, requireJadwalAdmin, validateJadwalKustom } fro
 //   kalau memang sudah dipakai karyawan itu.
 // - Tanpa shift_template_id (kustom): nilai dari klien divalidasi (format jam,
 //   hari kerja, toleransi) dan tautan template dilepas.
+//
+// bekerja_di_hari_libur (boolean, opsional): true = karyawan ini tetap bekerja di
+// hari libur nasional/cuti bersama, jadi tanggal merah diperlakukan sebagai hari
+// biasa untuk dia (cuti, rekap, monitor, lembur). Berlaku untuk jadwal kustom
+// maupun yang tertaut template (bukan bagian template). Kalau tidak dikirim,
+// nilai yang tersimpan tidak diubah — dan kolomnya baru ada setelah migrasi
+// hari libur dijalankan, jadi tanpa field ini route berjalan seperti sebelumnya.
 //
 // Dulu ditulis langsung dari browser ke tabel work_schedule. Tabel itu tidak
 // lagi punya hak tulis untuk browser (lihat migrasi
@@ -63,6 +71,10 @@ export async function POST(request) {
       );
     }
 
+    if (body.bekerja_di_hari_libur !== undefined && typeof body.bekerja_di_hari_libur !== 'boolean') {
+      return NextResponse.json({ error: 'Pengaturan bekerja di hari libur tidak valid.' }, { status: 400 });
+    }
+
     const templateId = body.shift_template_id ? body.shift_template_id : null;
     let nilai;
     if (templateId) {
@@ -84,6 +96,10 @@ export async function POST(request) {
       if (before && 'shift_template_id' in before) nilai.shift_template_id = null;
     }
 
+    if (typeof body.bekerja_di_hari_libur === 'boolean') {
+      nilai.bekerja_di_hari_libur = body.bekerja_di_hari_libur;
+    }
+
     const { data: saved, error } = await admin
       .from('work_schedule')
       .upsert([{ employee_id: emp.id, ...nilai }], { onConflict: 'employee_id' })
@@ -103,6 +119,7 @@ export async function POST(request) {
       hari_kerja: row.hari_kerja,
       toleransi_menit: row.toleransi_menit,
       shift_template_id: row.shift_template_id ?? null,
+      bekerja_di_hari_libur: row.bekerja_di_hari_libur ?? false,
     } : null);
     await logActivity(admin, {
       userId: access.emp.id,

@@ -23,8 +23,9 @@ const MAKS_ALASAN = 500;
 //   di-insert dalam satu perintah, jadi semuanya masuk atau tidak sama sekali).
 //   Baris tahun depan baru bisa disetujui mulai 1 Januari tahun itu (lihat
 //   decision/route.js); sebelum itu ia menunggu di antrean.
-// - minimal 1 hari kerja menurut jadwal employee (bagian tahun yang tidak
-//   punya hari kerja tidak dibuatkan baris)
+// - minimal 1 hari kerja menurut jadwal employee dan di luar hari libur
+//   nasional/cuti bersama (tabel public_holidays; bagian tahun yang tidak punya
+//   hari kerja tidak dibuatkan baris)
 // - tidak bentrok dengan pengajuan lain yang pending/approved
 // - tidak melebihi sisa kuota tahun yang bersangkutan (dikurangi pengajuan
 //   pending lain di tahun itu) — hanya untuk jenis yang memotong kuota
@@ -111,7 +112,7 @@ export async function POST(request) {
     // Pecah per tahun; bagian tahun tanpa hari kerja dibuang (tidak ada yang
     // perlu diajukan). Total hari kerja dipakai untuk aturan lampiran.
     const segmen = pecahPerTahun(tanggalMulai, tanggalSelesai)
-      .map((s) => ({ ...s, jumlahHari: hitungHariKerja(s.tanggalMulai, s.tanggalSelesai, ctx.hariKerja) }))
+      .map((s) => ({ ...s, jumlahHari: hitungHariKerja(s.tanggalMulai, s.tanggalSelesai, ctx.hariKerja, ctx.libur) }))
       .filter((s) => s.jumlahHari > 0);
     const jumlahHari = segmen.reduce((sum, s) => sum + s.jumlahHari, 0);
     if (jumlahHari === 0) {
@@ -166,7 +167,7 @@ export async function POST(request) {
         }
 
         const hariPending = (pendingRows || []).reduce(
-          (sum, r) => sum + hitungHariKerja(r.tanggal_mulai, r.tanggal_selesai, ctx.hariKerja),
+          (sum, r) => sum + hitungHariKerja(r.tanggal_mulai, r.tanggal_selesai, ctx.hariKerja, ctx.libur),
           0
         );
         const tersedia = Math.max(0, sisa - hariPending);

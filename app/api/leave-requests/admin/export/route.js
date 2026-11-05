@@ -3,7 +3,8 @@ import { createAdminClient } from '@/lib/supabase-admin';
 import { requireModuleAccess } from '@/lib/moduleAccessServer';
 import { logActivity } from '@/lib/activityLog';
 import { fetchAllRows } from '@/lib/fetchAllRows';
-import { hitungHariKerja, labelJenisCuti } from '@/lib/leave';
+import { hariCutiBaris, labelJenisCuti, tahunSekarang } from '@/lib/leave';
+import { ambilLibur, liburUntukJadwal } from '@/lib/publicHolidays';
 import { todayJakarta } from '@/lib/serverTime';
 import { FILTER_STATUS_CUTI_VALID, terapkanFilterStatusCuti } from '@/lib/leaveServer';
 
@@ -32,11 +33,12 @@ export async function GET(request) {
       return NextResponse.json({ error: 'Filter status tidak valid.' }, { status: 400 });
     }
 
-    const [reqRes, empRes, schedRes] = await Promise.all([
+    const tahun = tahunSekarang();
+    const [reqRes, empRes, schedRes, liburRes] = await Promise.all([
       fetchAllRows(() => {
         let query = admin
           .from('leave_requests')
-          .select('id, employee_id, jenis, tanggal_mulai, tanggal_selesai, status, alasan, rejection_reason, created_at');
+          .select('id, employee_id, jenis, tanggal_mulai, tanggal_selesai, jumlah_hari, status, alasan, rejection_reason, created_at');
         query = terapkanFilterStatusCuti(query, statusFilter);
         // Urutan sama dengan daftar di halaman (tanggal mulai terbaru dulu);
         // `id` ditambahkan fetchAllRows sebagai pemutus seri.
@@ -45,10 +47,11 @@ export async function GET(request) {
           .order('created_at', { ascending: false });
       }),
       fetchAllRows(() => admin.from('employees').select('id, nama')),
-      fetchAllRows(() => admin.from('work_schedule').select('employee_id, hari_kerja'), { orderKey: 'employee_id' }),
+      fetchAllRows(() => admin.from('work_schedule').select('*'), { orderKey: 'employee_id' }),
+      ambilLibur(admin, { dari: `${tahun - 1}-01-01`, sampai: `${tahun + 1}-12-31` }),
     ]);
 
-    const firstError = reqRes.error || empRes.error || schedRes.error;
+    const firstError = reqRes.error || empRes.error || schedRes.error || liburRes.error;
     if (firstError) {
       console.error('Ekspor kelola cuti error:', firstError);
       return NextResponse.json({ error: 'Gagal menyiapkan data ekspor cuti.' }, { status: 500 });
@@ -56,13 +59,14 @@ export async function GET(request) {
 
     const namaById = Object.fromEntries((empRes.data || []).map((e) => [e.id, e.nama]));
     const hariKerjaById = Object.fromEntries((schedRes.data || []).map((s) => [s.employee_id, s.hari_kerja]));
+    const liburById = Object.fromEntries((schedRes.data || []).map((s) => [s.employee_id, liburUntukJadwal(liburRes.libur, s)]));
 
     const rows = (reqRes.data || []).map((r) => ({
       nama: namaById[r.employee_id] || '',
       jenis: labelJenisCuti(r.jenis),
       tanggal_mulai: r.tanggal_mulai || '',
       tanggal_selesai: r.tanggal_selesai || '',
-      hari_kerja: hitungHariKerja(r.tanggal_mulai, r.tanggal_selesai, hariKerjaById[r.employee_id]),
+      hari_kerja: hariCutiBaris(r, hariKerjaById[r.employee_id], liburById[r.employee_id] ?? liburRes.libur),
       status: STATUS_LABEL[r.status] || r.status || '',
       alasan: r.alasan || '',
       alasan_penolakan: r.rejection_reason || '',

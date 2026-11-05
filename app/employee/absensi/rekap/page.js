@@ -14,6 +14,7 @@ import { isTelatEfektif } from '@/lib/attendanceStatus';
 import { friendlyError } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { summarizeMonth, monthBounds } from '@/lib/attendanceSummary';
+import { ambilLibur, liburUntukJadwal } from '@/lib/publicHolidays';
 import { todayWib, currentMonthWib } from '@/lib/wibTime';
 
 // Bikin CSV manual dari data yang sudah ditampilkan di tabel (tanpa library
@@ -61,6 +62,7 @@ export default function RekapAbsensiPage() {
   const [schedules, setSchedules] = useState({}); // employee_id -> row
   const [attendance, setAttendance] = useState([]);
   const [leaves, setLeaves] = useState([]); // cuti/sakit/izin approved yang beririsan dengan bulan ini
+  const [libur, setLibur] = useState(() => new Map()); // hari libur nasional/cuti bersama di bulan ini
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -79,7 +81,7 @@ export default function RekapAbsensiPage() {
       })
       .catch((err) => ({ data: null, error: err }));
 
-    const [empRes, schedRes, attRes, leaveRes] = await Promise.all([
+    const [empRes, schedRes, attRes, leaveRes, liburRes] = await Promise.all([
       supabase
         .from('employees')
         .select('id, nama, employee_id, status, companies:client_id ( nama_perusahaan )')
@@ -96,11 +98,13 @@ export default function RekapAbsensiPage() {
           .lte('tanggal', lastDay)
       ),
       leaveRequest,
+      ambilLibur(supabase, { dari: firstDay, sampai: lastDay }),
     ]);
 
     // Tanpa data cuti, "Tidak Hadir" akan terlalu besar (cuti terhitung absen),
     // jadi kegagalan memuat cuti diperlakukan sebagai kegagalan memuat rekap.
-    const firstError = empRes.error || schedRes.error || attRes.error || leaveRes.error;
+    // Tanpa data libur, tanggal merah terhitung "Tidak Hadir" — sama seperti cuti.
+    const firstError = empRes.error || schedRes.error || attRes.error || leaveRes.error || liburRes.error;
     if (firstError) {
       setLoadError(friendlyError(firstError, 'Gagal memuat data rekap.'));
       setLoading(false);
@@ -113,6 +117,7 @@ export default function RekapAbsensiPage() {
     setSchedules(byEmp);
     setAttendance(attRes.data || []);
     setLeaves(leaveRes.data || []);
+    setLibur(liburRes.libur);
     setLoading(false);
   }, [supabase, monthValue]);
 
@@ -148,6 +153,7 @@ export default function RekapAbsensiPage() {
         leaves: leaveByEmp.get(emp.id) || [],
         hariKerja: schedules[emp.id]?.hari_kerja || null,
         today,
+        libur: liburUntukJadwal(libur, schedules[emp.id]),
       });
       return {
         emp,
@@ -157,7 +163,7 @@ export default function RekapAbsensiPage() {
         cutiHari: summary.cutiHari,
       };
     });
-  }, [employees, attendance, leaves, schedules, employeeFilter, monthValue]);
+  }, [employees, attendance, leaves, libur, schedules, employeeFilter, monthValue]);
 
   if (status === 'loading') {
     return (
@@ -233,8 +239,9 @@ export default function RekapAbsensiPage() {
         <AlertTriangle size={14} className="mt-0.5 shrink-0" />
         Kolom "Tidak Hadir" dihitung dari jadwal kerja yang sudah diatur (halaman Jadwal Kerja),
         tidak termasuk hari ini dan hari kerja yang tertutup cuti, sakit, atau izin yang sudah disetujui
-        (kolom "Cuti"). Employee tanpa jadwal akan tampil "—" karena hari kerjanya belum diketahui.
-        Hari libur nasional belum dikenali, jadi masih terhitung "Tidak Hadir".
+        (kolom "Cuti"), serta hari libur nasional dan cuti bersama (diatur superadmin di menu Hari Libur;
+        karyawan yang jadwalnya ditandai bekerja di hari libur tetap dihitung). Employee tanpa jadwal
+        akan tampil "—" karena hari kerjanya belum diketahui.
       </div>
 
       {loading ? (

@@ -6,10 +6,11 @@ import { useEffect, useState, useCallback } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import {
-  hitungHariKerja, tahunSekarang, pecahPerTahun,
+  hitungHariKerja, hariCutiBaris, tahunSekarang, pecahPerTahun,
   JENIS_CUTI, JENIS_CUTI_DEFAULT, labelJenisCuti, potongKuota, lampiranWajib,
   LAMPIRAN_MAKS_BYTES, LAMPIRAN_MIME, MAKS_ALASAN_MINTA_BATAL_CUTI,
 } from '@/lib/leave';
+import { ambilLibur, liburUntukJadwal } from '@/lib/publicHolidays';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -63,6 +64,7 @@ export default function LeaveRequestPage() {
 
   const [employeeName, setEmployeeName] = useState('');
   const [hariKerja, setHariKerja] = useState(null); // null = belum diatur, pakai default Senin-Jumat
+  const [libur, setLibur] = useState(() => new Map()); // hari libur nasional/cuti bersama (tahun ini & depan) yang berlaku untuk jadwalku
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -122,9 +124,13 @@ export default function LeaveRequestPage() {
 
     setEmployeeName(emp.nama || '');
 
-    const [reqRes, schedRes] = await Promise.all([
+    const tahun = tahunSekarang();
+    const [reqRes, schedRes, liburRes] = await Promise.all([
       supabase.from('leave_requests').select('*').eq('employee_id', emp.id).order('created_at', { ascending: false }),
-      supabase.from('work_schedule').select('hari_kerja').eq('employee_id', emp.id).maybeSingle(),
+      // '*' supaya kolom bekerja_di_hari_libur yang baru tidak membuat query
+      // gagal sebelum migrasinya dijalankan.
+      supabase.from('work_schedule').select('*').eq('employee_id', emp.id).maybeSingle(),
+      ambilLibur(supabase, { dari: `${tahun}-01-01`, sampai: `${tahun + 1}-12-31` }),
     ]);
 
     if (reqRes.error) {
@@ -135,6 +141,10 @@ export default function LeaveRequestPage() {
 
     setRequests(reqRes.data || []);
     setHariKerja(schedRes.data?.hari_kerja || null);
+    // Hari libur hanya untuk pratinjau jumlah hari; server tetap yang
+    // menghitung final saat mengajukan. Gagal memuat libur tidak menghentikan
+    // halaman (pratinjau dihitung tanpa libur).
+    setLibur(liburRes.error ? new Map() : liburUntukJadwal(liburRes.libur, schedRes.data));
     setLoading(false);
   }, [supabase]);
 
@@ -157,7 +167,7 @@ export default function LeaveRequestPage() {
       setFormError('Alasan cuti wajib diisi.');
       return;
     }
-    const jumlahHari = hitungHariKerja(form.tanggalMulai, form.tanggalSelesai, hariKerja);
+    const jumlahHari = hitungHariKerja(form.tanggalMulai, form.tanggalSelesai, hariKerja, libur);
     if (jumlahHari === 0) {
       setFormError('Rentang tanggal yang dipilih tidak ada hari kerja (semua jatuh di hari libur).');
       return;
@@ -311,7 +321,7 @@ export default function LeaveRequestPage() {
 
   const previewHari =
     form.tanggalMulai && form.tanggalSelesai && form.tanggalSelesai >= form.tanggalMulai
-      ? hitungHariKerja(form.tanggalMulai, form.tanggalSelesai, hariKerja)
+      ? hitungHariKerja(form.tanggalMulai, form.tanggalSelesai, hariKerja, libur)
       : null;
 
   // Rincian per tahun, hanya untuk rentang lintas tahun (bagian tanpa hari
@@ -319,7 +329,7 @@ export default function LeaveRequestPage() {
   const rincianTahun =
     previewHari !== null
       ? pecahPerTahun(form.tanggalMulai, form.tanggalSelesai)
-          .map((seg) => ({ tahun: seg.tahun, hari: hitungHariKerja(seg.tanggalMulai, seg.tanggalSelesai, hariKerja) }))
+          .map((seg) => ({ tahun: seg.tahun, hari: hitungHariKerja(seg.tanggalMulai, seg.tanggalSelesai, hariKerja, libur) }))
           .filter((seg) => seg.hari > 0)
       : [];
 
@@ -327,7 +337,7 @@ export default function LeaveRequestPage() {
     <div className="max-w-[700px] mx-auto px-6 py-10">
       <div className="mb-6">
         <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Ajukan Cuti</h1>
-        <p className="text-sm text-[#6B6B6B] mt-1">Isi form di bawah untuk mengajukan cuti. Atasan akan meninjau pengajuanmu. Sabtu/Minggu dan hari libur di jadwal kerjamu tidak dihitung sebagai hari cuti. Pengajuan bisa untuk tahun berjalan dan tahun depan; pengajuan lintas tahun otomatis dipecah per tahun, dan bagian tahun depan baru bisa disetujui mulai 1 Januari tahun itu. Cuti tahunan tidak boleh melebihi sisa kuota; sakit dan izin tidak memotong kuota.</p>
+        <p className="text-sm text-[#6B6B6B] mt-1">Isi form di bawah untuk mengajukan cuti. Atasan akan meninjau pengajuanmu. Sabtu/Minggu, hari libur di jadwal kerjamu, serta hari libur nasional dan cuti bersama tidak dihitung sebagai hari cuti. Pengajuan bisa untuk tahun berjalan dan tahun depan; pengajuan lintas tahun otomatis dipecah per tahun, dan bagian tahun depan baru bisa disetujui mulai 1 Januari tahun itu. Cuti tahunan tidak boleh melebihi sisa kuota; sakit dan izin tidak memotong kuota.</p>
       </div>
 
       <div className="bg-white border border-[#E0E0E0] p-5 mb-8">
@@ -481,7 +491,7 @@ export default function LeaveRequestPage() {
                   <td className="px-4 py-3 text-black whitespace-nowrap">
                     {formatTanggal(r.tanggal_mulai)} — {formatTanggal(r.tanggal_selesai)}
                   </td>
-                  <td className="px-4 py-3 text-[#6B6B6B]">{hitungHariKerja(r.tanggal_mulai, r.tanggal_selesai, hariKerja)}</td>
+                  <td className="px-4 py-3 text-[#6B6B6B]">{hariCutiBaris(r, hariKerja, libur)}</td>
                   <td className="px-4 py-3 text-[#6B6B6B] max-w-[220px] truncate" title={r.alasan}>{r.alasan}</td>
                   <td className="px-4 py-3">
                     <StatusBadge status={r.status} />

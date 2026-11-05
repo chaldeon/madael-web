@@ -24,6 +24,7 @@ import ExportCsvButton from '@/components/ExportCsvButton';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { getBreakState, durasiIstirahatMenit, durasiKerjaMenit, formatDurasi } from '@/lib/attendanceBreak';
 import { summarizeMonth, currentMonthValue, shiftMonth, monthBounds, formatBulan } from '@/lib/attendanceSummary';
+import { ambilLibur, liburUntukJadwal } from '@/lib/publicHolidays';
 import { todayWib, yesterdayWib, dayIndexWib, isoToWibTime } from '@/lib/wibTime';
 import { getAttendanceStatus } from '@/lib/attendanceStatus';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
@@ -70,6 +71,7 @@ export default function AbsensiPage() {
   const [monthValue, setMonthValue] = useState(() => currentMonthValue());
   const [monthData, setMonthData] = useState(() => ({ month: currentMonthValue(), rows: [] }));
   const [monthLeaves, setMonthLeaves] = useState([]); // cuti approved yang beririsan dengan bulan terpilih
+  const [monthLibur, setMonthLibur] = useState(() => new Map()); // hari libur nasional/cuti bersama di bulan terpilih
   const [monthLoading, setMonthLoading] = useState(true);
   const [monthError, setMonthError] = useState(null);
   const monthReqRef = useRef(0); // abaikan respon lama kalau pengguna keburu ganti bulan
@@ -158,7 +160,7 @@ export default function AbsensiPage() {
     setMonthError(null);
 
     const { firstDay, lastDay } = monthBounds(monthValue);
-    const [attRes, leaveRes] = await Promise.all([
+    const [attRes, leaveRes, liburRes] = await Promise.all([
       supabase
         .from('attendance')
         .select('*')
@@ -172,11 +174,14 @@ export default function AbsensiPage() {
         .eq('status', 'approved')
         .lte('tanggal_mulai', lastDay)
         .gte('tanggal_selesai', firstDay),
+      ambilLibur(supabase, { dari: firstDay, sampai: lastDay }),
     ]);
 
     if (reqId !== monthReqRef.current) return; // sudah ada request bulan yang lebih baru
 
-    const firstError = attRes.error || leaveRes.error;
+    // Tanpa data libur, tanggal merah salah tampil "Tanpa Kehadiran", jadi gagal
+    // memuat libur diperlakukan sama seperti gagal memuat cuti.
+    const firstError = attRes.error || leaveRes.error || liburRes.error;
     if (firstError) {
       setMonthError(friendlyError(firstError, 'Gagal memuat riwayat absensi. Periksa koneksi internet kamu.'));
       setMonthLoading(false);
@@ -185,6 +190,7 @@ export default function AbsensiPage() {
 
     setMonthData({ month: monthValue, rows: attRes.data || [] });
     setMonthLeaves(leaveRes.data || []);
+    setMonthLibur(liburRes.libur);
     setMonthLoading(false);
   }, [supabase, employee, monthValue]);
 
@@ -204,8 +210,9 @@ export default function AbsensiPage() {
       leaves: monthLeaves,
       hariKerja: schedule?.hari_kerja,
       today: todayStr(),
+      libur: liburUntukJadwal(monthLibur, schedule),
     });
-  }, [monthLoading, monthError, monthValue, monthData, monthLeaves, schedule]);
+  }, [monthLoading, monthError, monthValue, monthData, monthLeaves, monthLibur, schedule]);
 
   // Baris ekspor CSV riwayat bulan terpilih, urut tanggal naik (kebalikan tampilan layar).
   const csvRows = useMemo(() => {
