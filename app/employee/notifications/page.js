@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Bell, CheckCheck } from 'lucide-react';
@@ -20,9 +20,23 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import NotificationEmailPreferences from '@/components/NotificationEmailPreferences';
 
-// Jumlah notifikasi yang ditampilkan per "halaman" — seluruh data dimuat sekali
-// (fetchAllRows), lalu ditampilkan bertahap lewat tombol "Tampilkan lebih banyak".
+// Jumlah notifikasi yang ditampilkan per "halaman" di layar; data yang sudah
+// dimuat ditampilkan bertahap lewat tombol "Tampilkan lebih banyak".
 const PAGE_SIZE = 30;
+
+// Retensi tampilan: yang dimuat dari database hanya notifikasi dalam 90 hari
+// terakhir. Riwayat yang lebih lama dimuat per jendela 90 hari lewat tombol
+// "Muat riwayat lebih lama". Tidak ada data yang dihapus — ini hanya batas muat.
+const WINDOW_DAYS = 90;
+const WINDOW_MS = WINDOW_DAYS * 24 * 60 * 60 * 1000;
+// Pengaman: jendela kosong berturut-turut dilewati otomatis, tetapi dibatasi.
+const MAX_EMPTY_WINDOWS = 20;
+
+function formatTanggal(value) {
+  return new Date(value).toLocaleDateString('id-ID', {
+    day: 'numeric', month: 'short', year: 'numeric',
+  });
+}
 
 function formatWaktu(value) {
   return new Date(value).toLocaleString('id-ID', {
@@ -41,36 +55,140 @@ export default function NotificationsPage() {
   const [actionError, setActionError] = useState(null);
   const [markingAll, setMarkingAll] = useState(false);
 
+  // Batas bawah (created_at) dari data yang sudah dimuat; bergeser mundur tiap
+  // "Muat riwayat lebih lama". Ref dipakai supaya callback muat ulang (event
+  // lonceng) selalu memakai batas terbaru tanpa jadi dependency efek.
+  const [loadedSince, setLoadedSince] = useState(null);
+  const loadedSinceRef = useRef(null);
+  // Jumlah notifikasi di luar jendela yang termuat (null = belum diketahui).
+  const [olderCount, setOlderCount] = useState(0);
+  // Belum dibaca di SELURUH riwayat (sama dengan angka di lonceng), bukan hanya
+  // yang termuat.
+  const [unreadTotal, setUnreadTotal] = useState(0);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+
   const [readFilter, setReadFilter] = useState('all'); // 'all' | 'unread'
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  // Muat seluruh notifikasi milik satu employee. Tidak ada setState sinkron di
-  // awal fungsi (state awal sudah `loading`); pemanggil yang mengatur ulang
-  // loading/error bila perlu (tombol "Coba Lagi").
-  const loadNotifications = useCallback(async (empId) => {
-    const { data, error } = await fetchAllRows(() =>
+  // Hitung cadangan: jumlah belum dibaca (seluruh riwayat) dan jumlah notifikasi
+  // yang lebih lama dari `since`. Gagal hitung tidak menggagalkan halaman.
+  const loadCounts = useCallback(async (empId, since) => {
+    const [unreadRes, olderRes] = await Promise.all([
       supabase
         .from('notifications')
-        .select('id, tipe, pesan, is_read, link, created_at')
+        .select('id', { count: 'exact', head: true })
         .eq('user_id', empId)
-        .order('created_at', { ascending: false })
-    );
+        .eq('is_read', false),
+      supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', empId)
+        .lt('created_at', since),
+    ]);
+    return {
+      unread: !unreadRes.error && typeof unreadRes.count === 'number' ? unreadRes.count : null,
+      older: !olderRes.error && typeof olderRes.count === 'number' ? olderRes.count : null,
+    };
+  }, [supabase]);
 
-    if (error) {
-      setLoadError(friendlyError(error, 'Gagal memuat notifikasi.'));
+  // Muat notifikasi milik satu employee dalam jendela [since, sekarang]. Default
+  // `since` = batas yang sedang termuat (awal: 90 hari terakhir). Tidak ada
+  // setState sinkron di awal fungsi (state awal sudah `loading`); pemanggil yang
+  // mengatur ulang loading/error bila perlu (tombol "Coba Lagi").
+  const loadNotifications = useCallback(async (empId) => {
+    const since = loadedSinceRef.current || new Date(Date.now() - WINDOW_MS).toISOString();
+
+    const [rowsRes, counts] = await Promise.all([
+      fetchAllRows(() =>
+        supabase
+          .from('notifications')
+          .select('id, tipe, pesan, is_read, link, created_at')
+          .eq('user_id', empId)
+          .gte('created_at', since)
+          .order('created_at', { ascending: false })
+      ),
+      loadCounts(empId, since),
+    ]);
+
+    if (rowsRes.error) {
+      setLoadError(friendlyError(rowsRes.error, 'Gagal memuat notifikasi.'));
       setLoading(false);
       return;
     }
 
+    loadedSinceRef.current = since;
+    setLoadedSince(since);
+    setOlderCount(counts.older);
     // fetchAllRows menambahkan urutan `id` di belakang urutan kita; urutkan ulang
     // di client supaya yang terbaru tetap di atas.
-    setLoadError(null);
-    setItems(
-      [...data].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    const sorted = [...rowsRes.data].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
+    setLoadError(null);
+    setItems(sorted);
+    setUnreadTotal(counts.unread ?? sorted.filter((n) => !n.is_read).length);
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, loadCounts]);
+
+  // Muat jendela 90 hari berikutnya yang lebih lama dan tambahkan ke daftar.
+  // Jendela kosong (tanpa baris) dilewati otomatis selama masih ada yang lebih
+  // lama, supaya satu klik selalu menghasilkan sesuatu atau menandai habis.
+  const loadOlder = async () => {
+    if (!employeeId || !loadedSinceRef.current || loadingOlder) return;
+    setActionError(null);
+    setLoadingOlder(true);
+
+    let upper = loadedSinceRef.current;
+    let lower = upper;
+    let added = [];
+    let remaining = olderCount;
+
+    for (let i = 0; i < MAX_EMPTY_WINDOWS; i += 1) {
+      lower = new Date(new Date(upper).getTime() - WINDOW_MS).toISOString();
+      const { data, error } = await fetchAllRows(() =>
+        supabase
+          .from('notifications')
+          .select('id, tipe, pesan, is_read, link, created_at')
+          .eq('user_id', employeeId)
+          .gte('created_at', lower)
+          .lt('created_at', upper)
+          .order('created_at', { ascending: false })
+      );
+
+      if (error) {
+        setActionError(friendlyError(error, 'Gagal memuat riwayat notifikasi yang lebih lama.'));
+        setLoadingOlder(false);
+        return;
+      }
+
+      const counts = await loadCounts(employeeId, lower);
+      remaining = counts.older;
+      upper = lower;
+
+      if (data.length > 0) {
+        added = data;
+        break;
+      }
+      if (remaining === 0) break;
+    }
+
+    loadedSinceRef.current = lower;
+    setLoadedSince(lower);
+    setOlderCount(remaining);
+    if (added.length > 0) {
+      setItems((prev) => {
+        const known = new Set(prev.map((n) => n.id));
+        const merged = [...prev, ...added.filter((n) => !known.has(n.id))];
+        return merged.sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+      });
+      // Data yang baru dimuat langsung ditampilkan, bukan menunggu klik kedua.
+      setVisibleCount((c) => c + added.length);
+    }
+    setLoadingOlder(false);
+  };
 
   // Cari employee dari auth user (pola sama seperti NotificationBell), lalu muat
   // notifikasinya.
@@ -124,7 +242,11 @@ export default function NotificationsPage() {
     window.dispatchEvent(new CustomEvent(NOTIFICATIONS_CHANGED_EVENT, { detail: { source: 'page' } }));
   };
 
-  const unreadCount = useMemo(() => items.filter((n) => !n.is_read).length, [items]);
+  // Angka belum dibaca = seluruh riwayat (selaras dengan lonceng). Yang termuat
+  // di layar bisa lebih sedikit bila ada yang belum dibaca di luar jendela.
+  const unreadCount = unreadTotal;
+  const loadedUnreadCount = useMemo(() => items.filter((n) => !n.is_read).length, [items]);
+  const hasOlder = olderCount === null || olderCount > 0;
 
   const filtered = useMemo(
     () =>
@@ -153,6 +275,7 @@ export default function NotificationsPage() {
   const markAsRead = async (id) => {
     setActionError(null);
     setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+    setUnreadTotal((c) => Math.max(0, c - 1));
     const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', id);
     if (error) {
       setActionError(friendlyError(error, 'Gagal menandai notifikasi sebagai dibaca.'));
@@ -178,6 +301,7 @@ export default function NotificationsPage() {
       return;
     }
     setItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    setUnreadTotal(0);
     announceChanged();
   };
 
@@ -224,7 +348,9 @@ export default function NotificationsPage() {
         <div>
           <h1 className="font-serif text-[28px] font-normal text-black tracking-[-0.02em]">Pusat Notifikasi</h1>
           <p className="text-sm text-[#6B6B6B] mt-1">
-            Semua notifikasi akunmu, dari yang terbaru.
+            {loadedSince
+              ? `Notifikasi akunmu sejak ${formatTanggal(loadedSince)}, dari yang terbaru.`
+              : 'Notifikasi akunmu, dari yang terbaru.'}
             {unreadCount > 0 ? ` ${unreadCount} belum dibaca.` : ''}
           </p>
         </div>
@@ -343,6 +469,26 @@ export default function NotificationsPage() {
             className="border border-[#E0E0E0] bg-white px-5 py-2 text-xs font-medium text-[#6B6B6B] hover:text-black transition-colors cursor-pointer"
           >
             Tampilkan lebih banyak ({filtered.length - visibleCount} lagi)
+          </button>
+        </div>
+      )}
+
+      {employeeId && hasOlder && filtered.length <= visibleCount && (
+        <div className="flex flex-col items-center gap-2 mt-4">
+          {unreadCount > loadedUnreadCount && (
+            <p className="text-xs text-[#9A9A9A] text-center">
+              Ada {unreadCount - loadedUnreadCount} notifikasi belum dibaca yang lebih lama dan belum dimuat.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={loadOlder}
+            disabled={loadingOlder}
+            className="border border-[#E0E0E0] bg-white px-5 py-2 text-xs font-medium text-[#6B6B6B] hover:text-black transition-colors cursor-pointer disabled:opacity-50"
+          >
+            {loadingOlder
+              ? 'Memuat...'
+              : `Muat riwayat lebih lama${typeof olderCount === 'number' ? ` (${olderCount} notifikasi)` : ''}`}
           </button>
         </div>
       )}
