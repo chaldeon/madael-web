@@ -8,7 +8,7 @@ import { Trash2, PowerOff, Megaphone, Pencil, Pin, PinOff, Users } from 'lucide-
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { dispatchNotification } from '@/lib/notifyClient';
-import { logActivity } from '@/lib/activityLogClient';
+import { callJsonApi } from '@/lib/apiClient';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -43,7 +43,7 @@ function isActive(row) {
 
 export default function AnnouncementsAdminPage() {
   const supabase = createClient();
-  const { status, employee } = useModuleAccess('announcements_admin');
+  const { status } = useModuleAccess('announcements_admin');
 
   const [rows, setRows] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -150,18 +150,14 @@ export default function AnnouncementsAdminPage() {
     // Mode edit: update row yang sedang diedit, tidak broadcast notifikasi
     // ulang (biar tidak spam tiap kali admin cuma benerin typo).
     if (editingId) {
-      const { data, error } = await supabase
-        .from('announcements')
-        .update(payload)
-        .eq('id', editingId)
-        .select()
-        .single();
+      const result = await callJsonApi(`/api/announcements/${editingId}`, 'PATCH', { action: 'edit', ...payload });
 
       setSaving(false);
-      if (error) {
-        setFormError(friendlyError(error, 'Gagal menyimpan perubahan pengumuman.'));
+      if (!result.ok) {
+        setFormError(result.error);
         return;
       }
+      const data = result.data.announcement;
 
       setRows((prev) => sortRows(prev.map((r) => (r.id === data.id ? data : r))));
       setForm(EMPTY_FORM);
@@ -170,28 +166,18 @@ export default function AnnouncementsAdminPage() {
       setUnreadLists({});
       setUnreadOpenId(null);
       loadReadStats();
-
-      logActivity({
-        aksi: 'edit_pengumuman',
-        targetTable: 'announcements',
-        targetId: data.id,
-        detail: { judul: data.judul },
-      });
       return;
     }
 
-    // Mode buat baru.
-    const { data, error } = await supabase
-      .from('announcements')
-      .insert([{ ...payload, created_by: employee.id }])
-      .select()
-      .single();
+    // Mode buat baru. created_by dan jejak audit diisi server dari sesi.
+    const result = await callJsonApi('/api/announcements', 'POST', payload);
 
-    if (error) {
+    if (!result.ok) {
       setSaving(false);
-      setFormError(friendlyError(error, 'Gagal menyimpan pengumuman.'));
+      setFormError(result.error);
       return;
     }
+    const data = result.data.announcement;
 
     setRows((prev) => sortRows([data, ...prev]));
     setForm(EMPTY_FORM);
@@ -201,13 +187,6 @@ export default function AnnouncementsAdminPage() {
     // Broadcast — fire and forget, kegagalan notifikasi tidak menggagalkan
     // pengumuman yang sudah tersimpan.
     dispatchNotification('pengumuman_baru', data.id);
-
-    logActivity({
-      aksi: 'buat_pengumuman',
-      targetTable: 'announcements',
-      targetId: data.id,
-      detail: { judul: data.judul },
-    });
   };
 
   const handleStartEdit = (row) => {
@@ -236,27 +215,15 @@ export default function AnnouncementsAdminPage() {
     setActionError(null);
     setActingId(row.id);
 
-    const nowIso = new Date().toISOString();
-    const { data, error } = await supabase
-      .from('announcements')
-      .update({ expired_at: nowIso })
-      .eq('id', row.id)
-      .select()
-      .single();
+    const result = await callJsonApi(`/api/announcements/${row.id}`, 'PATCH', { action: 'expire' });
 
     setActingId(null);
-    if (error) {
-      setActionError(friendlyError(error, 'Gagal menonaktifkan pengumuman.'));
+    if (!result.ok) {
+      setActionError(result.error);
       return;
     }
+    const data = result.data.announcement;
     setRows((prev) => prev.map((r) => (r.id === data.id ? data : r)));
-
-    logActivity({
-      aksi: 'nonaktifkan_pengumuman',
-      targetTable: 'announcements',
-      targetId: row.id,
-      detail: { judul: row.judul },
-    });
   };
 
   // Pin / lepas pin — tidak broadcast ulang notifikasi, sama seperti edit.
@@ -264,26 +231,18 @@ export default function AnnouncementsAdminPage() {
     setActionError(null);
     setActingId(row.id);
 
-    const { data, error } = await supabase
-      .from('announcements')
-      .update({ pinned: !row.pinned })
-      .eq('id', row.id)
-      .select()
-      .single();
+    const result = await callJsonApi(`/api/announcements/${row.id}`, 'PATCH', {
+      action: 'pin',
+      pinned: !row.pinned,
+    });
 
     setActingId(null);
-    if (error) {
-      setActionError(friendlyError(error, 'Gagal mengubah status pin pengumuman.'));
+    if (!result.ok) {
+      setActionError(result.error);
       return;
     }
+    const data = result.data.announcement;
     setRows((prev) => sortRows(prev.map((r) => (r.id === data.id ? data : r))));
-
-    logActivity({
-      aksi: 'edit_pengumuman',
-      targetTable: 'announcements',
-      targetId: row.id,
-      detail: { judul: row.judul, pinned: data.pinned },
-    });
   };
 
   const handleToggleUnread = async (row) => {
@@ -318,23 +277,16 @@ export default function AnnouncementsAdminPage() {
     setActionError(null);
     setActingId(row.id);
 
-    const { error } = await supabase.from('announcements').delete().eq('id', row.id);
+    const result = await callJsonApi(`/api/announcements/${row.id}`, 'DELETE');
 
     setActingId(null);
     setDeleteTarget(null);
-    if (error) {
-      setActionError(friendlyError(error, 'Gagal menghapus pengumuman.'));
+    if (!result.ok) {
+      setActionError(result.error);
       return;
     }
     setRows((prev) => prev.filter((r) => r.id !== row.id));
     if (editingId === row.id) handleCancelEdit();
-
-    logActivity({
-      aksi: 'hapus_pengumuman',
-      targetTable: 'announcements',
-      targetId: row.id,
-      detail: { judul: row.judul },
-    });
   };
 
   if (status === 'loading') {

@@ -5,11 +5,10 @@ import Link from 'next/link';
 import { ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { formatNumberDisplay } from '@/lib/payrollConfig';
-import { WORK_MODES, EXPERIENCE_LEVELS } from '@/lib/jobListingOptions';
+import { WORK_MODES, EXPERIENCE_LEVELS, MAX_QUESTIONS } from '@/lib/jobListingOptions';
 import { getJobStatus, getDeadlineDate, isPastDeadline } from '@/lib/jobStatus';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { logActivity } from '@/lib/activityLogClient';
-import { revalidateKarir } from '@/lib/revalidateKarirClient';
+import { callJsonApi } from '@/lib/apiClient';
 import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import JobReviewersPanel from '@/components/job-portal/JobReviewersPanel';
 import { friendlyError } from '@/lib/errorMessage';
@@ -46,8 +45,6 @@ const QUESTION_TYPES = [
   { value: 'scale', label: 'Skala 1-5' },
 ];
 
-const MAX_QUESTIONS = 5;
-
 // Badge status efektif: Aktif / Ditutup (lewat deadline) / Nonaktif (manual).
 const STATUS_BADGE = {
   open: { label: 'Aktif', className: 'bg-[#DCFCE7] text-[#166534]' },
@@ -78,19 +75,6 @@ function slugify(text) {
     .replace(/-+/g, '-');
 }
 
-async function findUniqueSlug(supabase, baseSlug, excludeId = null) {
-  let candidate = baseSlug;
-  let n = 2;
-  while (true) {
-    let query = supabase.from('job_listings').select('id').eq('slug', candidate);
-    if (excludeId) query = query.neq('id', excludeId);
-    const { data } = await query.maybeSingle();
-    if (!data) return candidate;
-    candidate = `${baseSlug}-${n}`;
-    n++;
-  }
-}
-
 // Kolom yang bisa disortir — "Pelamar" pakai applicantCounts dari luar,
 // jadi get() menerima ctx berisi map itu. Baris "Umum" (fixed) tidak ikut disortir.
 const SORT_COLUMNS = {
@@ -116,41 +100,6 @@ function SortableHeader({ colKey, label, sortField, sortDir, onSort }) {
   );
 }
 
-// ---- Audit log: perubahan lowongan ----
-// Field pendek dicatat dengan nilai lama -> baru. Deskripsi/persyaratan/pertanyaan
-// hanya ditandai "diubah" supaya detail log tidak membengkak.
-const AUDIT_FIELDS = [
-  'title', 'slug', 'department', 'client_industry', 'location', 'type', 'work_mode',
-  'experience_level', 'num_positions', 'salary_min', 'salary_max', 'show_salary',
-  'closes_at', 'is_active',
-];
-const AUDIT_BOOL_FIELDS = new Set(['show_salary', 'is_active']);
-const AUDIT_LONG_FIELDS = ['description', 'requirements'];
-
-function diffListing(before, after) {
-  const changes = {};
-  if (!before) return changes;
-  for (const f of AUDIT_FIELDS) {
-    const a = AUDIT_BOOL_FIELDS.has(f) ? !!before[f] : String(before[f] ?? '');
-    const b = AUDIT_BOOL_FIELDS.has(f) ? !!after[f] : String(after[f] ?? '');
-    if (a !== b) {
-      changes[f] = {
-        dari: before[f] ?? null,
-        ke: after[f] ?? null,
-      };
-    }
-  }
-  for (const f of AUDIT_LONG_FIELDS) {
-    if ((before[f] || '') !== (after[f] || '')) changes[f] = 'diubah';
-  }
-  const qBefore = Array.isArray(before.questions) ? before.questions : [];
-  const qAfter = Array.isArray(after.questions) ? after.questions : [];
-  if (JSON.stringify(qBefore) !== JSON.stringify(qAfter)) {
-    changes.questions = { jumlah_dari: qBefore.length, jumlah_ke: qAfter.length };
-  }
-  return changes;
-}
-
 export default function JobPortalLowonganPage() {
   const supabase = createClient();
 
@@ -160,13 +109,6 @@ export default function JobPortalLowonganPage() {
   const { status: accessStatus, employee, moduleKeys } = useModuleAccess(JOB_PORTAL_KEYS);
   const scoped = isJobPortalScoped(employee, moduleKeys);
   const employeeId = employee?.id || null;
-
-  // Fire-and-forget (lihat lib/activityLog.js): gagal mencatat log tidak
-  // membatalkan aksi lowongan yang sudah tersimpan.
-  const logJobActivity = (aksi, targetId, detail) => {
-    if (!employeeId) return;
-    logActivity({ aksi, targetTable: 'job_listings', targetId, detail });
-  };
 
   const [listings, setListings] = useState([]);
   const [reviewersByJob, setReviewersByJob] = useState({}); // job_id -> [{ id, nama }]
@@ -423,11 +365,11 @@ export default function JobPortalLowonganPage() {
 
     setSaving(true);
 
-    const uniqueSlug = await findUniqueSlug(supabase, formData.slug, editingId);
-
+    // Slug dibuat unik, divalidasi ulang, dan dicatat di server; cache halaman
+    // publik /karir juga disegarkan di sana.
     const payload = {
       title: formData.title,
-      slug: uniqueSlug,
+      slug: formData.slug,
       department: formData.department || null,
       client_industry: formData.client_industry || null,
       location: formData.location || null,
@@ -445,39 +387,15 @@ export default function JobPortalLowonganPage() {
       questions: cleanedQuestions,
     };
 
-    const listingBefore = editingId ? listings.find((j) => j.id === editingId) : null;
+    const result = editingId
+      ? await callJsonApi(`/api/job-listings/${editingId}`, 'PATCH', { action: 'update', ...payload })
+      : await callJsonApi('/api/job-listings', 'POST', payload);
 
-    let result;
-    if (editingId) {
-      result = await supabase.from('job_listings').update(payload).eq('id', editingId);
-    } else {
-      result = await supabase.from('job_listings').insert([payload]);
-    }
-
-    if (result.error) {
-      setFormError('Gagal menyimpan: ' + friendlyError(result.error, 'terjadi kesalahan.'));
+    if (!result.ok) {
+      setFormError('Gagal menyimpan: ' + result.error);
       setSaving(false);
       return;
     }
-
-    if (editingId) {
-      const perubahan = diffListing(listingBefore, payload);
-      if (Object.keys(perubahan).length > 0) {
-        logJobActivity('ubah_lowongan', editingId, { judul: payload.title, slug: payload.slug, perubahan });
-      }
-    } else {
-      // Tanpa .select() di insert (tidak mengubah perilaku simpan); slug unik,
-      // jadi lowongan tetap bisa dilacak dari detail log.
-      logJobActivity('buat_lowongan', null, {
-        judul: payload.title,
-        slug: payload.slug,
-        aktif: payload.is_active,
-        closes_at: payload.closes_at,
-      });
-    }
-
-    // Segarkan cache halaman publik (slug lama ikut kalau slug diganti).
-    revalidateKarir([payload.slug, listingBefore?.slug]);
 
     setSaving(false);
     closeForm();
@@ -486,19 +404,15 @@ export default function JobPortalLowonganPage() {
 
   const handleToggleActive = async (job) => {
     setTogglingId(job.id);
-    const { error } = await supabase.from('job_listings').update({ is_active: !job.is_active }).eq('id', job.id);
+    const result = await callJsonApi(`/api/job-listings/${job.id}`, 'PATCH', {
+      action: 'set_active',
+      is_active: !job.is_active,
+    });
 
-    if (!error) {
+    if (result.ok) {
       setListings((prev) => prev.map((j) => (j.id === job.id ? { ...j, is_active: !j.is_active } : j)));
-      revalidateKarir([job.slug]);
-      logJobActivity('ubah_status_lowongan', job.id, {
-        judul: job.title,
-        slug: job.slug,
-        dari: job.is_active ? 'aktif' : 'nonaktif',
-        ke: job.is_active ? 'nonaktif' : 'aktif',
-      });
     } else {
-      setToast({ type: 'error', message: 'Gagal mengubah status: ' + friendlyError(error, 'terjadi kesalahan.') });
+      setToast({ type: 'error', message: 'Gagal mengubah status: ' + result.error });
     }
     setTogglingId(null);
   };
@@ -506,42 +420,13 @@ export default function JobPortalLowonganPage() {
   const handleDuplicate = async (job) => {
     setDuplicatingId(job.id);
 
-    const newSlug = await findUniqueSlug(supabase, job.slug + '-copy');
+    // Salinan dibangun di server dari data lowongan sumber (nonaktif, slug unik,
+    // deadline yang sudah lewat tidak ikut disalin).
+    const result = await callJsonApi('/api/job-listings', 'POST', { duplicate_of: job.id });
 
-    const payload = {
-      title: job.title + ' (Copy)',
-      slug: newSlug,
-      department: job.department,
-      client_industry: job.client_industry,
-      location: job.location,
-      type: job.type,
-      work_mode: job.work_mode,
-      experience_level: job.experience_level,
-      num_positions: job.num_positions ?? 1,
-      salary_min: job.salary_min,
-      salary_max: job.salary_max,
-      show_salary: !!job.show_salary,
-      description: job.description,
-      requirements: job.requirements,
-      // Deadline yang sudah lewat tidak ikut disalin — salinannya akan langsung
-      // tertutup otomatis begitu diaktifkan.
-      closes_at: isPastDeadline(job) ? null : job.closes_at,
-      is_active: false,
-      questions: Array.isArray(job.questions) ? job.questions : [],
-    };
-
-    const { error } = await supabase.from('job_listings').insert([payload]);
-
-    if (error) {
-      setToast({ type: 'error', message: 'Gagal menduplikat lowongan: ' + friendlyError(error, 'terjadi kesalahan.') });
+    if (!result.ok) {
+      setToast({ type: 'error', message: 'Gagal menduplikat lowongan: ' + result.error });
     } else {
-      logJobActivity('duplikat_lowongan', null, {
-        judul: payload.title,
-        slug: payload.slug,
-        sumber_id: job.id,
-        sumber_judul: job.title,
-      });
-      revalidateKarir([payload.slug]);
       fetchData();
     }
     setDuplicatingId(null);
