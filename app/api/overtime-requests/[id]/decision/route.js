@@ -6,12 +6,15 @@ import { notifyEmployee } from '@/lib/notify';
 import { SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN } from '@/lib/leave';
 import { formatTanggal } from '@/lib/leaveServer';
 import { jenisHariValid, MAKS_ALASAN_LEMBUR } from '@/lib/overtimeRules';
+import { cocokkanLemburDenganAbsensi } from '@/lib/overtimeServer';
 
 // POST /api/overtime-requests/[id]/decision
 //   body: { decision: 'approved' | 'rejected', jam_disetujui?, jenis_hari?, rejection_reason? }
 //   approved : pending -> approved. jam_disetujui (opsional, > 0 dan <= durasi
 //              pengajuan; default = durasi pengajuan) dan jenis_hari (opsional,
-//              untuk menimpa jenis hari, mis. hari libur nasional).
+//              untuk menimpa jenis hari, mis. hari libur nasional). Hasil
+//              pencocokan dengan absensi dicatat di activity log, tetapi TIDAK
+//              memblokir persetujuan (HR yang memutuskan).
 //   rejected : pending -> rejected. rejection_reason WAJIB.
 //
 // Hanya akun aktif dengan modul overtime_admin (superadmin lolos otomatis lewat
@@ -121,6 +124,22 @@ export async function POST(request, { params }) {
       );
     }
 
+    // Jejak audit: seperti apa absensi karyawan saat lembur ini disetujui.
+    // Gagal membaca absensi tidak mengubah hasil persetujuan.
+    let absensiLog = null;
+    if (decision === 'approved') {
+      const cocok = await cocokkanLemburDenganAbsensi(admin, [row]);
+      const hasilAbsen = cocok.hasil.get(row.id);
+      absensiLog = cocok.error || !hasilAbsen
+        ? { status: 'gagal_dimuat' }
+        : {
+            status: hasilAbsen.status,
+            clock_in: hasilAbsen.clock_in,
+            clock_out: hasilAbsen.clock_out,
+            menit_dalam_jam_hadir: hasilAbsen.menit_dalam_jam_hadir,
+          };
+    }
+
     await logActivity(admin, {
       userId: emp.id,
       aksi: decision === 'approved' ? 'approve_lembur' : 'reject_lembur',
@@ -134,6 +153,7 @@ export async function POST(request, { params }) {
         jenis_hari_sebelum: row.jenis_hari,
         jenis_hari_sesudah: decision === 'approved' ? jenisHari : row.jenis_hari,
         rejection_reason: decision === 'rejected' ? patch.rejection_reason : null,
+        ...(absensiLog ? { absensi: absensiLog } : {}),
       },
     });
 
