@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { requireModuleAccess } from '@/lib/moduleAccessServer';
 import { batasPeriode } from '@/lib/overtimeRules';
+import { cocokkanLemburDenganAbsensi } from '@/lib/overtimeServer';
 import { parsePageParams, isRangeNotSatisfiable } from '@/lib/pagination';
 
 const STATUS_VALID = ['pending', 'approved', 'rejected', 'cancelled'];
@@ -11,6 +12,8 @@ const STATUS_VALID = ['pending', 'approved', 'rejected', 'cancelled'];
 // = semua status; periode kosong = semua periode (berdasarkan tanggal lembur).
 // Dulu dibatasi 500 baris tanpa halaman berikutnya, sehingga riwayat lama tidak
 // bisa dibuka; sekarang dimuat per halaman (range + count).
+// Setiap pengajuan menunggu/disetujui membawa `absensi`: perbandingan jam lembur
+// dengan clock-in/clock-out pada tanggal itu (lib/overtimeAttendance.js).
 // Hak modul overtime_admin dicek manual karena memakai service role.
 export async function GET(request) {
   try {
@@ -69,12 +72,20 @@ export async function GET(request) {
       namaById = Object.fromEntries((emps || []).map((e) => [e.id, e.nama]));
     }
 
+    // Pencocokan dengan absensi hanya untuk pengajuan yang masih relevan untuk
+    // ditinjau (menunggu / disetujui). Gagal memuat absensi tidak menggagalkan
+    // daftar: baris dikirim tanpa `absensi` dan `absensi_gagal: true`.
+    const untukDicocokkan = (rows || []).filter((r) => r.status === 'pending' || r.status === 'approved');
+    const absensi = await cocokkanLemburDenganAbsensi(admin, untukDicocokkan);
+
     return NextResponse.json({
       requests: (rows || []).map((r) => ({
         ...r,
         employee_nama: namaById[r.employee_id] || '—',
         approved_by_nama: r.approved_by ? (namaById[r.approved_by] || '—') : null,
+        absensi: absensi.hasil.get(r.id) || null,
       })),
+      absensi_gagal: Boolean(absensi.error),
       total: count ?? 0,
       page,
       pageSize,

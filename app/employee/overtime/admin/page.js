@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Check, X as XIcon } from 'lucide-react';
+import { Check, X as XIcon, TriangleAlert } from 'lucide-react';
 import { useModuleAccess } from '@/lib/useModuleAccess';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN } from '@/lib/leave';
@@ -19,6 +19,7 @@ import { LEMBUR_CSV_HEADERS, ambilBarisEkspor, tanggalUntukNamaFile } from '@/li
 import {
   JENIS_HARI_LEMBUR, JENIS_HARI_LABEL, STATUS_LEMBUR_LABEL, MAKS_ALASAN_LEMBUR,
 } from '@/lib/overtimeRules';
+import { STATUS_ABSENSI_LEMBUR, perluPerhatianAbsensi } from '@/lib/overtimeAttendance';
 
 function formatTanggal(value) {
   if (!value) return '—';
@@ -47,6 +48,47 @@ function StatusBadge({ status }) {
   );
 }
 
+// Perbandingan jam lembur dengan absen (clock-in/out) pada tanggal itu. Hanya
+// informasi untuk HR — tidak memblokir persetujuan. `absensi` null = tidak ada
+// perbandingan (status selain menunggu/disetujui, atau absensi gagal dimuat).
+function AbsensiInfo({ absensi, gagal = false, ringkas = false }) {
+  if (!absensi) {
+    if (!gagal) return null;
+    return <p className="text-[11px] text-[#9A9A9A] mt-1">Data absensi tidak dapat dimuat.</p>;
+  }
+  const perhatian = perluPerhatianAbsensi(absensi);
+  const adaJam = absensi.clock_in && absensi.status !== STATUS_ABSENSI_LEMBUR.janggal;
+  const rentang = adaJam
+    ? `${absensi.clock_in}–${absensi.clock_out ? `${absensi.clock_out}${absensi.clock_out_hari_berikut ? ' (+1)' : ''}` : '…'}`
+    : null;
+
+  return (
+    <div className={`mt-1 text-[11px] ${perhatian ? 'text-amber-700' : 'text-green-700'}`}>
+      {rentang && <p className="whitespace-nowrap">Absen {rentang}</p>}
+      {perhatian ? (
+        <p className="flex items-start gap-1 max-w-[220px]">
+          <TriangleAlert size={11} className="mt-[2px] shrink-0" />
+          <span>{ringkas ? ringkasPeringatan(absensi) : absensi.pesan}</span>
+        </p>
+      ) : (
+        <p>Sesuai jam hadir</p>
+      )}
+    </div>
+  );
+}
+
+// Versi pendek untuk sel tabel (pesan lengkap tampil di dialog persetujuan).
+function ringkasPeringatan(absensi) {
+  switch (absensi.status) {
+    case STATUS_ABSENSI_LEMBUR.tanpaAbsen: return 'Tidak ada clock-in di tanggal ini';
+    case STATUS_ABSENSI_LEMBUR.belumPulang: return 'Belum clock-out';
+    case STATUS_ABSENSI_LEMBUR.diLuar: return 'Di luar jam hadir';
+    case STATUS_ABSENSI_LEMBUR.sebagian:
+      return `${jamTeks(absensi.menit_di_luar_jam_hadir)} jam di luar jam hadir`;
+    default: return 'Data absensi perlu diperiksa';
+  }
+}
+
 const inputClass =
   'border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors w-full';
 
@@ -68,6 +110,27 @@ function ApproveDialog({ row, saving, error, onSubmit, onClose }) {
           {row.employee_nama} · {formatTanggal(row.tanggal)} · {formatJam(row.jam_mulai)}–{formatJam(row.jam_selesai)} ({jamTeks(row.durasi_menit)} jam diajukan)
         </p>
         <p className="text-xs text-[#6B6B6B] mb-4 break-words">Alasan: {row.alasan}</p>
+
+        {row.absensi && (
+          <div className={`border px-3 py-2 mb-4 ${perluPerhatianAbsensi(row.absensi) ? 'border-amber-200 bg-amber-50' : 'border-green-200 bg-green-50'}`}>
+            <p className="text-xs font-medium text-black">Cek absensi</p>
+            <AbsensiInfo absensi={row.absensi} />
+            {perluPerhatianAbsensi(row.absensi) && (
+              <p className="text-[11px] text-[#6B6B6B] mt-1">
+                Peringatan ini hanya informasi — Anda tetap bisa menyetujui. Cek koreksi absensi bila data absen dirasa kurang tepat.
+              </p>
+            )}
+            {row.absensi.jam_saran !== null && row.absensi.jam_saran < jamAjuan && (
+              <button
+                type="button"
+                onClick={() => setJam(String(row.absensi.jam_saran))}
+                className="mt-2 text-xs text-madael-red hover:text-madael-dark font-medium"
+              >
+                Pakai jam hadir ({String(row.absensi.jam_saran).replace('.', ',')} jam)
+              </button>
+            )}
+          </div>
+        )}
 
         <label className="flex flex-col gap-1 mb-4">
           <span className="text-xs text-[#6B6B6B]">Jam disetujui (maks {String(jamAjuan).replace('.', ',')})</span>
@@ -175,6 +238,7 @@ export default function OvertimeAdminPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(ADMIN_PAGE_SIZE_DEFAULT);
   const [totalCount, setTotalCount] = useState(0);
+  const [absensiGagal, setAbsensiGagal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -208,6 +272,7 @@ export default function OvertimeAdminPage() {
         return;
       }
       setRequests(json.requests || []);
+      setAbsensiGagal(Boolean(json.absensi_gagal));
       setTotalCount(total);
     } catch (err) {
       console.error('Muat data kelola lembur error:', err);
@@ -379,7 +444,12 @@ export default function OvertimeAdminPage() {
                     <tr key={row.id} className="border-b border-[#E0E0E0] last:border-0 align-top">
                       <td className="px-4 py-3 text-black whitespace-nowrap">{row.employee_nama}</td>
                       <td className="px-4 py-3 text-[#6B6B6B] whitespace-nowrap">{formatTanggal(row.tanggal)}</td>
-                      <td className="px-4 py-3 text-[#6B6B6B] whitespace-nowrap">{formatJam(row.jam_mulai)} – {formatJam(row.jam_selesai)}</td>
+                      <td className="px-4 py-3 text-[#6B6B6B]">
+                        <span className="whitespace-nowrap">{formatJam(row.jam_mulai)} – {formatJam(row.jam_selesai)}</span>
+                        {(row.status === 'pending' || row.status === 'approved') && (
+                          <AbsensiInfo absensi={row.absensi} gagal={absensiGagal} ringkas />
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-black whitespace-nowrap">
                         {jamTeks(row.durasi_menit)} jam
                         {row.status === 'approved' && row.jam_disetujui !== null && Number(row.jam_disetujui) * 60 !== row.durasi_menit && (
