@@ -11,6 +11,7 @@ import { useModuleAccess } from '@/lib/useModuleAccess';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import RunItemsTable from '@/components/payroll-run/RunItemsTable';
 import { STATUS_STYLE, SORT_COLUMNS, periodeLabel, downloadTransferCsv } from '@/lib/payrollRunConfig';
 import { statusOptionsFor } from '@/lib/payrollRun';
@@ -38,6 +39,7 @@ export default function PayrollRunDetailPage() {
   const [syncNote, setSyncNote] = useState(null);
   const [lemburLoading, setLemburLoading] = useState(false);
   const [lemburNote, setLemburNote] = useState(null);
+  const [lemburConfirm, setLemburConfirm] = useState(null); // { timpa, berubah } bila perlu konfirmasi timpa
   const [sortField, setSortField] = useState('nama');
   const [sortDir, setSortDir] = useState('asc');
 
@@ -120,46 +122,72 @@ export default function PayrollRunDetailPage() {
     setEditValues((prev) => ({ ...prev, [itemId]: { ...prev[itemId], [field]: val } }));
   };
 
-  // Isi kolom Overtime di layar dari lembur yang sudah disetujui pada periode
-  // run ini (saran dihitung server: /api/payroll/overtime-suggestion). Hanya
-  // mengubah nilai edit di layar — TIDAK menyimpan. Admin tetap menekan
-  // "Hitung Ulang" per baris (alur simpan yang sudah ada) untuk menyimpannya.
-  const handleIsiDariLembur = async () => {
+  // Isi Overtime SEMUA item dari lembur yang sudah disetujui pada periode run
+  // ini, langsung tersimpan. Server (PATCH /api/payroll/runs/[runId]/items)
+  // menghitung nominalnya sendiri, menyimpan, dan menghitung ulang PPh21/THP
+  // tiap item dengan rumus yang sama dengan "Hitung Ulang". Bila ada baris yang
+  // Overtime-nya sudah terisi dan akan diganti, server menolak dulu (409) dan
+  // admin diminta konfirmasi — baru dikirim ulang dengan konfirmasiTimpa.
+  const handleIsiDariLembur = async (konfirmasiTimpa = false) => {
     setLemburLoading(true);
     setLemburNote(null);
     try {
-      const res = await fetch(`/api/payroll/overtime-suggestion?periode=${encodeURIComponent(run.periode)}`);
+      const res = await fetch(`/api/payroll/runs/${run.id}/items`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sumber: 'lembur_disetujui', konfirmasiTimpa }),
+      });
       const json = await res.json().catch(() => ({}));
+
+      if (res.status === 409 && json.code === 'NEEDS_CONFIRM_OVERWRITE') {
+        setLemburConfirm({ timpa: json.timpa, berubah: json.berubah });
+        setLemburLoading(false);
+        return;
+      }
+      setLemburConfirm(null);
+
       if (!res.ok) {
-        setLemburNote({ error: true, text: json.error || 'Gagal mengambil saran lembur.' });
+        setLemburNote({ error: true, text: json.error || 'Gagal menyimpan Overtime dari lembur.' });
+        // 409 selain konfirmasi = run sudah Approved: sinkronkan tampilan.
+        if (res.status === 409) await loadData();
         setLemburLoading(false);
         return;
       }
 
-      const itemByMasterId = new Map(items.map((i) => [i.employee_master_id, i]));
-      let terisi = 0;
-      let tanpaItem = 0;
-      (json.suggestions || []).forEach((sug) => {
-        const item = itemByMasterId.get(sug.employee_master_id);
-        if (!item) { tanpaItem += 1; return; }
-        setEditValue(item.id, 'overtime', String(sug.nominal));
-        terisi += 1;
-      });
+      const hasil = new Map((json.items || []).map((i) => [i.id, i]));
+      if (hasil.size > 0) {
+        setItems((prev) => prev.map((i) => (hasil.has(i.id) ? { ...i, ...hasil.get(i.id) } : i)));
+        // Draf Overtime di layar untuk baris yang baru disimpan tidak berlaku lagi.
+        setEditValues((prev) => {
+          const next = { ...prev };
+          hasil.forEach((_, id) => {
+            if (next[id]) {
+              const { overtime: _overtime, ...sisa } = next[id];
+              next[id] = sisa;
+            }
+          });
+          return next;
+        });
+      }
 
       const tidakTerhubung = json.tidak_terhubung || [];
-      if (terisi === 0 && tanpaItem === 0 && tidakTerhubung.length === 0) {
+      if (json.diterapkan === 0 && json.tidak_berubah === 0 && json.tanpa_item === 0 && tidakTerhubung.length === 0) {
         setLemburNote({ text: `Tidak ada lembur yang disetujui pada periode ${periodeLabel(run.periode)}.` });
       } else {
-        let text = `${terisi} employee diisi dari lembur disetujui. Nilai belum tersimpan — klik "Hitung Ulang" di tiap baris untuk menyimpan.`;
-        if (tanpaItem > 0) text += ` ${tanpaItem} employee punya lembur disetujui tetapi tidak ada di run ini (coba "Sync Employee Baru").`;
+        let text = json.diterapkan > 0
+          ? `Overtime ${json.diterapkan} employee disimpan dari lembur disetujui; PPh21 dan THP sudah dihitung ulang.`
+          : 'Tidak ada Overtime yang perlu diubah — semuanya sudah sesuai dengan lembur disetujui.';
+        if (json.diterapkan > 0 && json.tidak_berubah > 0) text += ` ${json.tidak_berubah} employee sudah sesuai.`;
+        if (json.tanpa_item > 0) text += ` ${json.tanpa_item} employee klien ini punya lembur disetujui tetapi tidak ada di run ini (coba "Sync Employee Baru").`;
         if (tidakTerhubung.length > 0) {
           text += ` ${tidakTerhubung.length} karyawan punya lembur disetujui tetapi belum terhubung ke Payroll Manager: ${tidakTerhubung.map((t) => t.nama).join(', ')}.`;
         }
-        setLemburNote({ text });
+        if (json.gagal > 0) text += ` ${json.gagal} employee gagal disimpan — klik tombol ini lagi untuk mengulang.`;
+        setLemburNote({ error: json.gagal > 0, text });
       }
     } catch (err) {
       console.error('Isi dari lembur error:', err);
-      setLemburNote({ error: true, text: 'Gagal mengambil saran lembur. Periksa koneksi lalu coba lagi.' });
+      setLemburNote({ error: true, text: 'Gagal menyimpan Overtime dari lembur. Periksa koneksi lalu coba lagi.' });
     }
     setLemburLoading(false);
   };
@@ -371,11 +399,11 @@ export default function PayrollRunDetailPage() {
         )}
         {run.status !== 'Approved' && (
           <button
-            onClick={handleIsiDariLembur}
+            onClick={() => handleIsiDariLembur(false)}
             disabled={lemburLoading || statusDraft === 'Approved'}
             className="border border-[#E0E0E0] text-black px-5 py-2 text-sm font-medium tracking-[0.02em] hover:border-madael-red transition-colors disabled:opacity-40"
           >
-            {lemburLoading ? 'Mengambil...' : 'Isi dari lembur disetujui'}
+            {lemburLoading ? 'Menyimpan...' : 'Isi dari lembur disetujui'}
           </button>
         )}
         {run.status === 'Approved' && (
@@ -485,6 +513,16 @@ export default function PayrollRunDetailPage() {
           onRecalc={recalcAndSaveItem}
         />
       )}
+
+      <ConfirmDialog
+        open={!!lemburConfirm}
+        title="Ganti Nilai Overtime"
+        message={`${lemburConfirm?.timpa ?? 0} employee sudah punya nilai Overtime yang akan diganti dengan hasil dari lembur disetujui (${lemburConfirm?.berubah ?? 0} employee berubah). Nilai lama tercatat di activity log. Lanjutkan?`}
+        confirmLabel="Ganti & Simpan"
+        busy={lemburLoading}
+        onConfirm={() => handleIsiDariLembur(true)}
+        onCancel={() => setLemburConfirm(null)}
+      />
 
       {items.some((i) => i.incomplete) && (
         <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mt-6">
