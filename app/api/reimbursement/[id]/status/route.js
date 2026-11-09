@@ -18,6 +18,10 @@ import {
 //   'reject'  : pending  -> rejected   (reason = alasan penolakan, opsional)
 //   'pay'     : approved -> paid       (note = catatan pembayaran, opsional)
 //
+// Ketiga aksi memberi tahu pemilik klaim lewat notifikasi in-app (dan email bila
+// preferensinya aktif). Aksi 'pay' memakai tipe `reimbursement_paid`; catatan
+// pembayaran sengaja TIDAK disertakan karena tidak ditampilkan ke karyawan.
+//
 // Hanya akun aktif dengan modul reimbursement_admin (superadmin lolos
 // otomatis lewat isModuleGranted). Dulu keputusan dikirim langsung dari
 // browser tanpa syarat status, sehingga klaim yang sudah paid/rejected bisa
@@ -116,6 +120,15 @@ export async function PATCH(request, { params }) {
     }
 
     if (action === 'pay') {
+      // Transisi approved -> paid hanya bisa terjadi sekali (update bersyarat di atas),
+      // jadi tidak perlu dedupeKey. Gagal mengirim notifikasi tidak membatalkan
+      // pembayaran yang sudah tersimpan (notifyEmployee fire-and-forget).
+      await notifyEmployee(admin, {
+        userId: row.employee_id,
+        tipe: 'reimbursement_paid',
+        pesan: `Klaim reimbursement kamu (${formatRupiah(row.jumlah)}, ${row.kategori}) sudah dibayar.`,
+        link: '/employee/reimbursement',
+      });
       await logActivity(admin, {
         userId: emp.id,
         aksi: 'tandai_dibayar_reimbursement',
