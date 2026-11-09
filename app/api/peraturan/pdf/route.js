@@ -32,8 +32,9 @@ function bersihkanNama(raw) {
 // POST /api/peraturan/pdf  (multipart/form-data, field `file`)
 // Mengunggah PDF ke Shared Drive Peraturan dan mengembalikan
 // { fileId, nama, ukuran }. Route ini TIDAK menulis ke tabel peraturan: klien
-// menyimpan fileId lewat sesinya sendiri (RLS + trigger updated_by tetap
-// berlaku) dan memanggil DELETE di bawah kalau penyimpanan itu gagal.
+// meneruskan fileId ke POST /api/peraturan atau PATCH /api/peraturan/[id]
+// (RLS + trigger updated_by tetap berlaku) dan memanggil DELETE di bawah kalau
+// penyimpanan itu gagal.
 export async function POST(request) {
   try {
     const admin = createAdminClient();

@@ -13,7 +13,8 @@ export default function PeraturanLayout({ children }) {
   const supabase = createClient();
   // Explicit-only (lihat EXPLICIT_ONLY_MODULES): superadmin pun harus di-assign
   // lewat Kelola Akses. Layout ini cuma menyembunyikan halaman; penjaga
-  // sebenarnya adalah RLS di tabel peraturan.
+  // sebenarnya adalah RLS di tabel peraturan (baca) dan route /api/peraturan
+  // (tulis: superadmin pemegang flag, divalidasi dan dicatat di server).
   const { status } = useModuleAccess(PERATURAN_MODULE_KEY);
 
   const handleLogout = async () => {
