@@ -15,7 +15,7 @@ import {
 //   body: salah satu/semua kolom form Payroll Manager — nama, client_id, posisi,
 //         status, gaji_pokok, tunjangan, komponen_lain, linked_employee_id,
 //         status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan,
-//         no_bpjs_ketenagakerjaan, nama_rekening, no_rekening,
+//         no_bpjs_ketenagakerjaan, nama_rekening, no_rekening, nama_bank,
 //         jatah_cuti_tahunan, cuti_carry_over, tanggal_bergabung,
 //         jenis_hubungan_kerja, kontrak_berakhir. Parsial: hanya key yang
 //         dikirim yang diubah (halaman detail Employee List hanya mengirim

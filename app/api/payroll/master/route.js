@@ -22,7 +22,7 @@ import {
 // bisa kekurangan karyawan tanpa tanda apa pun.
 // Respons: { data: [...] } — urut created_at terbaru dulu.
 const MASTER_COLUMNS =
-  'id, nama, client_id, posisi, status, tanggal_bergabung, jenis_hubungan_kerja, kontrak_berakhir, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan, nama_rekening, no_rekening, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, cuti_carry_over, cuti_carry_over_tahun, created_at, drive_file_id, drive_file_name, drive_file_link, employees:linked_employee_id ( nama )';
+  'id, nama, client_id, posisi, status, tanggal_bergabung, jenis_hubungan_kerja, kontrak_berakhir, gaji_pokok, tunjangan, komponen_lain, linked_employee_id, status_ptkp, npwp_status, npwp, jkk_rate, no_bpjs_kesehatan, no_bpjs_ketenagakerjaan, nama_rekening, no_rekening, nama_bank, jatah_cuti_tahunan, cuti_terpakai, cuti_terpakai_tahun, cuti_carry_over, cuti_carry_over_tahun, created_at, drive_file_id, drive_file_name, drive_file_link, employees:linked_employee_id ( nama )';
 
 export async function GET() {
   try {

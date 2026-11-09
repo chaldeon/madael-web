@@ -165,6 +165,7 @@ export default function EmployeeDetailPage() {
           <Field label="Jatah Cuti Tahunan">{empMaster.jatah_cuti_tahunan ?? 12} hari</Field>
           <Field label="Nama Rekening">{empMaster.nama_rekening || '-'}</Field>
           <Field label="No Rekening">{empMaster.no_rekening || '-'}</Field>
+          <Field label="Nama Bank">{empMaster.nama_bank || '-'}</Field>
         </div>
         <p className="text-[11px] text-[#9A9A9A] mt-5">
           Untuk edit struktur gaji, PTKP, NPWP, dsb — pakai tombol Edit di tabel Payroll.
