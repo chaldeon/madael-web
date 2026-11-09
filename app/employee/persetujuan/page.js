@@ -38,6 +38,7 @@ export default function PersetujuanPage() {
   const [groups, setGroups] = useState([]);
   const [items, setItems] = useState([]);
   const [failed, setFailed] = useState([]);
+  const [nonaktif, setNonaktif] = useState({ total: 0, rincian: [] });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(null);
@@ -53,6 +54,8 @@ export default function PersetujuanPage() {
   const [alasanError, setAlasanError] = useState('');
   const [processing, setProcessing] = useState(false);
   const [hasil, setHasil] = useState(null); // { gagal: [{ item, error }], catatan: [string] }
+  const [tutupNonaktifOpen, setTutupNonaktifOpen] = useState(false);
+  const [menutup, setMenutup] = useState(false);
   const [toast, setToast] = useState(null);
   const dismissToast = useCallback(() => setToast(null), []);
 
@@ -67,6 +70,7 @@ export default function PersetujuanPage() {
       setGroups(json.groups || []);
       setItems(json.items || []);
       setFailed(json.failed || []);
+      setNonaktif(json.nonaktif || { total: 0, rincian: [] });
       setLoadError(null);
     } catch {
       setLoadError('Gagal memuat antrean persetujuan. Periksa koneksi internet kamu.');
@@ -227,6 +231,35 @@ export default function PersetujuanPage() {
     loadInbox();
   };
 
+  // Tutup massal pengajuan pending milik karyawan nonaktif. Server menentukan
+  // sendiri barisnya (bukan daftar dari browser) dan mencatat Activity Log.
+  const jalankanTutupNonaktif = async () => {
+    if (menutup) return;
+    setMenutup(true);
+    try {
+      const res = await fetch('/api/approvals/tutup-nonaktif', { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast({ type: 'error', message: json.error || 'Gagal menutup pengajuan karyawan nonaktif.' });
+      } else {
+        const gagal = json.gagal || [];
+        setToast({
+          type: gagal.length > 0 ? 'error' : 'success',
+          message:
+            gagal.length > 0
+              ? `${json.total} pengajuan ditutup, tetapi ${gagal.join(', ')} gagal. Coba lagi.`
+              : `${json.total} pengajuan karyawan nonaktif ditutup.`,
+        });
+      }
+    } catch {
+      setToast({ type: 'error', message: 'Gagal terhubung ke server. Periksa koneksi internet kamu.' });
+    } finally {
+      setMenutup(false);
+      setTutupNonaktifOpen(false);
+      loadInbox();
+    }
+  };
+
   if (loading) {
     return (
       <div className="max-w-[860px] mx-auto px-6 py-10">
@@ -294,6 +327,26 @@ export default function PersetujuanPage() {
         <p className="text-xs text-red-600 mb-3">
           Antrean {failed.join(', ')} gagal dimuat, jadi belum tampil di sini. Coba muat ulang atau buka halaman modulnya langsung.
         </p>
+      )}
+
+      {nonaktif.total > 0 && (
+        <div className="mb-3 border border-[#E0E0E0] border-l-4 border-l-[#9A9A9A] bg-white px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <p className="min-w-0 flex-1 text-xs text-[#4A4A4A]">
+            <span className="font-medium text-black">
+              {nonaktif.total} pengajuan milik karyawan nonaktif
+            </span>{' '}
+            ({nonaktif.rincian.map((r) => `${r.jenis} ${r.jumlah}`).join(', ')}) tidak ditampilkan di antrean
+            dan tidak dihitung di badge. Tutup supaya tidak menggantung.
+          </p>
+          <button
+            type="button"
+            onClick={() => setTutupNonaktifOpen(true)}
+            disabled={menutup}
+            className={`${aksiTolakClass} disabled:opacity-50`}
+          >
+            Tutup semua
+          </button>
+        </div>
       )}
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3">
@@ -526,6 +579,25 @@ export default function PersetujuanPage() {
               onChange: (v) => { setAlasan(v); if (alasanError) setAlasanError(''); },
             }
           : {})}
+      />
+      <ConfirmDialog
+        open={tutupNonaktifOpen}
+        title="Tutup Pengajuan Karyawan Nonaktif"
+        message={
+          <>
+            Tutup <strong>{nonaktif.total} pengajuan</strong> (
+            {nonaktif.rincian.map((r) => `${r.jenis} ${r.jumlah}`).join(', ')}) milik karyawan yang sudah
+            nonaktif? Cuti, lembur, reimbursement, dan koreksi absensi menjadi <strong>Dibatalkan</strong>;
+            perubahan profil menjadi <strong>Ditolak</strong> dengan catatan. Tidak ada data yang dihapus,
+            karyawan tidak diberi notifikasi, dan tiap baris tercatat di Activity Log. Langkah ini tidak
+            bisa diurungkan.
+          </>
+        }
+        confirmLabel="Tutup Semua"
+        busy={menutup}
+        busyLabel="Menutup..."
+        onConfirm={jalankanTutupNonaktif}
+        onCancel={() => setTutupNonaktifOpen(false)}
       />
     </div>
   );

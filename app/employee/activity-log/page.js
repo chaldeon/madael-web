@@ -31,6 +31,7 @@ const AKSI_LABEL = {
   approve_lembur: 'Approve Lembur',
   reject_lembur: 'Reject Lembur',
   cancel_koreksi_absensi: 'Batalkan Koreksi Absensi (Karyawan)',
+  tutup_pengajuan_nonaktif: 'Tutup Pengajuan Karyawan Nonaktif (Massal)',
   daftar_foto_referensi: 'Daftar Foto Referensi Wajah (Karyawan)',
   ganti_foto_referensi: 'Ganti Foto Referensi Wajah (Karyawan)',
   ubah_status_invoice: 'Ubah Status Invoice',

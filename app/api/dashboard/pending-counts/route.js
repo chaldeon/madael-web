@@ -2,13 +2,15 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { PENDING_QUERIES, applyPendingFilters } from '@/lib/pendingQueue';
 import { getApproverContext } from '@/lib/pendingQueueServer';
+import { muatIdKaryawanNonaktif } from '@/lib/pendingNonaktifServer';
 
 // GET /api/dashboard/pending-counts
 // Jumlah pengajuan berstatus 'pending' untuk modul approval yang boleh diakses
 // user (dicek per modul lewat isModuleGranted — superadmin tetap tidak
 // bypass EXPLICIT_ONLY_MODULES, dan absensi_admin khusus superadmin).
 // Definisi antrean (tabel, filter pemilik-sendiri) ada di lib/pendingQueue.js,
-// dipakai bersama Inbox Persetujuan supaya badge dan isi inbox selalu sama.
+// dipakai bersama Inbox Persetujuan supaya badge dan isi inbox selalu sama
+// (termasuk: pengajuan milik karyawan nonaktif tidak dihitung).
 // Respons: { counts: { <module_key>: number } } — hanya key yang dia punya
 // aksesnya. User tanpa modul approval mendapat { counts: {} }, bukan 403,
 // karena dashboard memanggil ini untuk semua karyawan yang punya modul HRIS.
@@ -21,13 +23,21 @@ export async function GET() {
     if (ctx.error) return NextResponse.json({ error: ctx.error }, { status: ctx.status });
     const { emp, keys, excludeOwn } = ctx;
 
+    let nonaktifIds;
+    try {
+      nonaktifIds = await muatIdKaryawanNonaktif(admin);
+    } catch (nonaktifError) {
+      console.error('Muat karyawan nonaktif badge error:', nonaktifError);
+      return NextResponse.json({ error: 'Gagal memuat.' }, { status: 500 });
+    }
+
     const results = await Promise.all(
       keys.map(async (key) => {
         const config = PENDING_QUERIES[key];
         const query = applyPendingFilters(
           admin.from(config.table).select('id', { count: 'exact', head: true }),
           config,
-          { empId: emp.id, excludeOwn }
+          { empId: emp.id, excludeOwn, nonaktifIds }
         );
 
         const { count, error } = await query;
