@@ -8,7 +8,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ExternalLink, FileText, Pencil, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { logActivity } from '@/lib/activityLogClient';
+import { callJsonApi } from '@/lib/apiClient';
 import { friendlyError } from '@/lib/errorMessage';
 import {
   PERATURAN_MODULE_KEY, DETAIL_COLUMNS, RELASI_LABEL, RELASI_PENGGANTI, labelPeraturan, formatTanggal,
@@ -133,30 +133,20 @@ export default function PeraturanDetailPage() {
   const handleDelete = async () => {
     setDeleting(true);
     setDeleteError('');
-    // .select() supaya terlihat kalau RLS menolak (delete diam-diam 0 baris).
-    const { data, error: err } = await supabase.from('peraturan').delete().eq('id', row.id).select('id');
+    // Hapus + log dikerjakan route server. Relasi dan pasal ikut terhapus, dan
+    // semuanya bisa dipulihkan dari "Peraturan terhapus" (riwayat revisi).
+    const res = await callJsonApi(`/api/peraturan/${row.id}`, 'DELETE');
     setDeleting(false);
 
-    if (err) {
-      setDeleteError(friendlyError(err, 'Gagal menghapus peraturan.', { context: 'Hapus peraturan' }));
-      setConfirmDelete(false);
-      return;
-    }
-    if (!data || data.length === 0) {
-      setDeleteError('Peraturan tidak terhapus: kamu tidak punya izin, atau datanya sudah tidak ada.');
+    if (!res.ok) {
+      setDeleteError(res.error);
       setConfirmDelete(false);
       return;
     }
 
-    logActivity({
-      aksi: 'hapus_peraturan',
-      targetTable: 'peraturan',
-      targetId: row.id,
-      detail: { peraturan: labelPeraturan(row), judul: row.judul, ...(row.pdf_nama ? { pdf: row.pdf_nama } : {}) },
-    });
     // Baris sudah terhapus, jadi PDF-nya di Drive tidak dirujuk lagi. Best effort:
     // gagal di sini hanya meninggalkan berkas yatim di Drive.
-    if (row.pdf_drive_id) await hapusPdfPeraturan(row.pdf_drive_id);
+    if (res.data?.pdf_drive_id) await hapusPdfPeraturan(res.data.pdf_drive_id);
     router.push('/employee/peraturan');
   };
 

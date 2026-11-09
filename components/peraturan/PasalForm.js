@@ -1,24 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLogClient';
-import { friendlyError } from '@/lib/errorMessage';
+import { callJsonApi } from '@/lib/apiClient';
 import {
-  LIMITS, PASAL_DETAIL_COLUMNS, EMPTY_PASAL_FORM, pasalFormFromRow, buildPasalPayload,
-  normalizeNomorPasal,
+  LIMITS, EMPTY_PASAL_FORM, pasalFormFromRow, buildPasalPayload,
 } from '@/lib/peraturanConfig';
 import { inputClass, labelClass } from '@/components/peraturan/PeraturanParts';
 
-// Form tambah (initialRow kosong) dan ubah pasal. Hak tulis ditegakkan RLS
-// (superadmin pemegang flag); PasalList hanya menyembunyikan tombolnya.
+// Form tambah (initialRow kosong) dan ubah pasal. Simpan lewat
+// /api/peraturan/[id]/pasal (superadmin pemegang flag; validasi ulang dan log di
+// server); PasalList hanya menyembunyikan tombolnya.
 //
 // onSaved(row, { again }) — row = baris lengkap hasil simpan; again = true bila
 // pengguna memilih "Simpan & tambah lagi".
 export default function PasalForm({
   peraturanId, peraturanLabel, initialRow = null, nextUrutan, employee, onSaved, onCancel,
 }) {
-  const supabase = createClient();
   const editing = !!initialRow;
 
   const [form, setForm] = useState(() =>
@@ -33,76 +30,24 @@ export default function PasalForm({
     if (saving) return;
     setError('');
 
-    const { payload, error: validationError } = buildPasalPayload(form);
+    const { error: validationError } = buildPasalPayload(form);
     if (validationError) {
       setError(validationError);
       return;
     }
 
     setSaving(true);
-
-    if (editing) {
-      const { data, error: err } = await supabase
-        .from('peraturan_pasal')
-        .update(payload)
-        .eq('id', initialRow.id)
-        .select(PASAL_DETAIL_COLUMNS);
-      setSaving(false);
-
-      if (err) {
-        setError(mapSaveError(err, 'Gagal menyimpan perubahan pasal.', 'Ubah pasal'));
-        return;
-      }
-      if (!data || data.length === 0) {
-        // RLS menolak diam-diam (0 baris) atau pasal sudah dihapus.
-        setError('Perubahan tidak tersimpan: kamu tidak punya izin, atau pasal ini sudah dihapus.');
-        return;
-      }
-
-      const changed = Object.keys(payload).filter(
-        (k) => JSON.stringify(payload[k]) !== JSON.stringify(initialRow[k] ?? null)
-      );
-      logActivity({
-        aksi: 'ubah_pasal_peraturan',
-        targetTable: 'peraturan_pasal',
-        targetId: initialRow.id,
-        detail: {
-          peraturan: peraturanLabel, peraturan_id: peraturanId,
-          pasal: payload.nomor_pasal, kolom_berubah: changed,
-        },
-      });
-      onSaved(data[0], { again: false });
-      return;
-    }
-
-    const { data, error: err } = await supabase
-      .from('peraturan_pasal')
-      .insert([{ peraturan_id: peraturanId, ...payload }])
-      .select(PASAL_DETAIL_COLUMNS)
-      .single();
+    const res = editing
+      ? await callJsonApi(`/api/peraturan/${peraturanId}/pasal/${initialRow.id}`, 'PATCH', { form })
+      : await callJsonApi(`/api/peraturan/${peraturanId}/pasal`, 'POST', { form });
     setSaving(false);
 
-    if (err) {
-      setError(mapSaveError(err, 'Gagal menyimpan pasal.', 'Tambah pasal'));
+    if (!res.ok) {
+      setError(res.error);
       return;
     }
-
-    logActivity({
-      aksi: 'tambah_pasal_peraturan',
-      targetTable: 'peraturan_pasal',
-      targetId: data.id,
-      detail: { peraturan: peraturanLabel, peraturan_id: peraturanId, pasal: data.nomor_pasal },
-    });
-    onSaved(data, { again });
+    onSaved(res.data.pasal, { again: editing ? false : again });
   };
-
-  // Unique (peraturan_id, lower(nomor_pasal)) ditegakkan database; di sini pesan ramah.
-  function mapSaveError(err, fallback, context) {
-    if (err.code === '23505') {
-      return `Pasal ${normalizeNomorPasal(form.nomor_pasal)} sudah ada di peraturan ini.`;
-    }
-    return friendlyError(err, fallback, { context });
-  }
 
   return (
     <div className="border border-[#E0E0E0] border-l-4 border-l-madael-red bg-[#FAFAFA] p-4 md:p-5 mb-4">

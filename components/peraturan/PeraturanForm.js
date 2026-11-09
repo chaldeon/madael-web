@@ -4,18 +4,18 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLogClient';
-import { friendlyError } from '@/lib/errorMessage';
+import { callJsonApi } from '@/lib/apiClient';
 import {
   JENIS_OPTIONS, STATUS_OPTIONS, TOPIK_OPTIONS, LIMITS, MIN_TAHUN, MAX_TAHUN,
-  EMPTY_FORM, formFromRow, buildPayload, parseKeywords, labelPeraturan, formatUkuranBerkas,
+  EMPTY_FORM, formFromRow, buildPayload, parseKeywords, formatUkuranBerkas,
 } from '@/lib/peraturanConfig';
 import { validasiPdf, unggahPdfPeraturan, hapusPdfPeraturan } from '@/lib/peraturanPdf';
 import { Chip, inputClass, labelClass } from '@/components/peraturan/PeraturanParts';
 
 // Form tambah (initialRow kosong) dan ubah (initialRow = baris peraturan).
-// Hak tulis ditegakkan RLS (superadmin pemegang flag); halaman pembungkusnya
-// hanya menyembunyikan form dari akun lain.
+// Simpan lewat /api/peraturan (superadmin pemegang flag; validasi ulang dan log
+// di server); halaman pembungkusnya hanya menyembunyikan form dari akun lain.
+// `supabase` di sini hanya untuk membaca (mencari duplikat).
 export default function PeraturanForm({ initialRow = null, employee }) {
   const supabase = createClient();
   const router = useRouter();
@@ -84,7 +84,7 @@ export default function PeraturanForm({ initialRow = null, employee }) {
     setError('');
     setDuplicateId(null);
 
-    const { payload, error: validationError } = buildPayload(form);
+    const { error: validationError } = buildPayload(form);
     if (validationError) {
       setError(validationError);
       return;
@@ -108,86 +108,47 @@ export default function PeraturanForm({ initialRow = null, employee }) {
     }
     const bersihPdfBaru = () => (pdfBaru ? hapusPdfPeraturan(pdfBaru.fileId) : null);
 
-    let pdfColumns = {};
-    if (pdfBaru) {
-      pdfColumns = { pdf_drive_id: pdfBaru.fileId, pdf_nama: pdfBaru.nama, pdf_ukuran: pdfBaru.ukuran };
-    } else if (editing && hapusPdf && pdfLama) {
-      pdfColumns = { pdf_drive_id: null, pdf_nama: null, pdf_ukuran: null };
+    // Penyimpanan baris (validasi ulang, RLS, log) dikerjakan route server. PDF lama
+    // (diganti/dihapus) dibersihkan SETELAH route sukses, memakai id yang
+    // dikembalikan route (pdf_lama_id).
+    const body = {
+      form,
+      ...(pdfBaru ? { pdf: pdfBaru } : {}),
+      ...(editing && hapusPdf && pdfLama && !pdfBaru ? { hapus_pdf: true } : {}),
+    };
+
+    const res = editing
+      ? await callJsonApi(`/api/peraturan/${initialRow.id}`, 'PATCH', { action: 'edit', ...body })
+      : await callJsonApi('/api/peraturan', 'POST', body);
+
+    if (!res.ok) {
+      await bersihPdfBaru();
+      setSaving(false);
+      await handleSaveError(res, editing ? 'Gagal menyimpan perubahan peraturan.' : 'Gagal menyimpan peraturan.');
+      return;
     }
 
     if (editing) {
-      const { data, error: err } = await supabase
-        .from('peraturan')
-        .update({ ...payload, ...pdfColumns })
-        .eq('id', initialRow.id)
-        .select('id');
-
-      if (err) {
-        await bersihPdfBaru();
-        setSaving(false);
-        await handleSaveError(err, 'Gagal menyimpan perubahan peraturan.');
-        return;
-      }
-      if (!data || data.length === 0) {
-        // RLS menolak diam-diam (0 baris) atau data sudah dihapus.
-        await bersihPdfBaru();
-        setSaving(false);
-        setError('Perubahan tidak tersimpan: kamu tidak punya izin, atau peraturan ini sudah dihapus.');
-        return;
-      }
-
-      // Baris sudah tersimpan: PDF lama (diganti/dihapus) tidak dirujuk lagi.
-      if (pdfLama && 'pdf_drive_id' in pdfColumns) await hapusPdfPeraturan(pdfLama.id);
-
-      // Daftar (topik, keywords) dibandingkan tanpa memedulikan urutan.
-      const bentuk = (v) => (Array.isArray(v) ? JSON.stringify([...v].sort()) : JSON.stringify(v));
-      const changed = Object.keys(payload).filter(
-        (k) => bentuk(payload[k]) !== bentuk(initialRow[k] ?? (Array.isArray(payload[k]) ? [] : null))
-      );
-      if ('pdf_drive_id' in pdfColumns) changed.push('pdf_drive_id');
-      logActivity({
-        aksi: 'ubah_peraturan',
-        targetTable: 'peraturan',
-        targetId: initialRow.id,
-        detail: { peraturan: labelPeraturan(payload), judul: payload.judul, kolom_berubah: changed },
-      });
+      if (res.data?.pdf_lama_id) await hapusPdfPeraturan(res.data.pdf_lama_id);
       router.push(`/employee/peraturan/${initialRow.id}`);
       return;
     }
-
-    const { data, error: err } = await supabase.from('peraturan').insert([{ ...payload, ...pdfColumns }]).select('id').single();
-    if (err) {
-      await bersihPdfBaru();
-      setSaving(false);
-      await handleSaveError(err, 'Gagal menyimpan peraturan.');
-      return;
-    }
-
-    logActivity({
-      aksi: 'tambah_peraturan',
-      targetTable: 'peraturan',
-      targetId: data.id,
-      detail: { peraturan: labelPeraturan(payload), judul: payload.judul, ...(pdfBaru ? { pdf: pdfBaru.nama } : {}) },
-    });
-    router.push(`/employee/peraturan/${data.id}`);
+    router.push(`/employee/peraturan/${res.data.peraturan.id}`);
   };
 
-  // Duplikat (jenis + nomor + tahun) ditegakkan unique index di database;
-  // di sini cuma pesan yang ramah + tautan ke peraturan yang sudah ada.
-  async function handleSaveError(err, fallback) {
-    if (err.code === '23505') {
-      setError('Peraturan dengan jenis, nomor, dan tahun yang sama sudah ada.');
-      const { data } = await supabase
-        .from('peraturan')
-        .select('id')
-        .eq('jenis', form.jenis)
-        .eq('tahun', Number(form.tahun))
-        .eq('nomor', form.nomor.trim())
-        .maybeSingle();
-      if (data?.id && data.id !== initialRow?.id) setDuplicateId(data.id);
-      return;
-    }
-    setError(friendlyError(err, fallback, { context: editing ? 'Ubah peraturan' : 'Tambah peraturan' }));
+  // Duplikat (jenis + nomor + tahun) ditegakkan unique index di database dan
+  // dijawab route dengan 409; di sini tautan ke peraturan yang sudah ada.
+  async function handleSaveError(res, fallback) {
+    setError(res.error || fallback);
+    if (res.status !== 409) return;
+    const { data } = await supabase
+      .from('peraturan')
+      .select('id')
+      .eq('jenis', form.jenis)
+      .eq('tahun', Number(form.tahun))
+      .eq('nomor', form.nomor.trim())
+      .maybeSingle();
+    if (data?.id && data.id !== initialRow?.id) setDuplicateId(data.id);
   }
 
   return (

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, History, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLogClient';
+import { callJsonApi } from '@/lib/apiClient';
 import { friendlyError } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import {
@@ -52,7 +52,7 @@ const headerOf = (row) => ({ id: row.id, nomor_pasal: row.nomor_pasal, urutan: r
 
 // Bagian "Pasal" di halaman detail peraturan. Daftar hanya memuat header
 // (nomor + bab/bagian); isi dimuat saat sebuah pasal dibuka, jadi UU dengan
-// ratusan pasal tetap ringan. Hak tulis ditegakkan RLS; `canEdit` kosmetik.
+// ratusan pasal tetap ringan. Tulis lewat /api/peraturan/[id]/pasal (superadmin pemegang flag); `canEdit` kosmetik.
 export default function PasalList({ peraturanId, peraturanLabel, canEdit, employee }) {
   const supabase = createClient();
 
@@ -266,58 +266,30 @@ export default function PasalList({ peraturanId, peraturanLabel, canEdit, employ
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    const target = deleteTarget;
     setDeleting(true);
     setActionError('');
 
-    // Hapus bersifat permanen: simpan isi lengkap ke log aktivitas sebagai cadangan.
-    const snapshot = await fetchDetail(deleteTarget.id, { force: true });
-    if (!snapshot) {
-      setDeleting(false);
-      setDeleteTarget(null);
-      setActionError('Pasal tidak dihapus: isinya gagal dimuat untuk dicadangkan ke log. Coba lagi.');
-      return;
-    }
-
-    const { data, error: err } = await supabase
-      .from('peraturan_pasal')
-      .delete()
-      .eq('id', deleteTarget.id)
-      .select('id');
+    // Server memuat isi lengkap pasal untuk dicadangkan ke log aktivitas lalu
+    // menghapusnya (lihat /api/peraturan/[id]/pasal/[pasalId]).
+    const res = await callJsonApi(`/api/peraturan/${peraturanId}/pasal/${target.id}`, 'DELETE');
     setDeleting(false);
     setDeleteTarget(null);
 
-    if (err) {
-      setActionError(friendlyError(err, 'Gagal menghapus pasal.', { context: 'Hapus pasal' }));
-      return;
-    }
-    if (!data || data.length === 0) {
-      setActionError('Pasal tidak terhapus: kamu tidak punya izin, atau pasalnya sudah tidak ada.');
+    if (!res.ok) {
+      setActionError(res.error);
       return;
     }
 
-    logActivity({
-      aksi: 'hapus_pasal_peraturan',
-      targetTable: 'peraturan_pasal',
-      targetId: snapshot.id,
-      detail: {
-        peraturan: peraturanLabel,
-        peraturan_id: peraturanId,
-        pasal: snapshot.nomor_pasal,
-        urutan: snapshot.urutan,
-        judul: snapshot.judul,
-        isi: snapshot.isi,
-        catatan: snapshot.catatan,
-      },
-    });
-    setItems((prev) => prev.filter((it) => it.id !== snapshot.id));
+    setItems((prev) => prev.filter((it) => it.id !== target.id));
     setExpanded((prev) => {
       const next = new Set(prev);
-      next.delete(snapshot.id);
+      next.delete(target.id);
       return next;
     });
     setRiwayat((prev) => {
       const next = new Set(prev);
-      next.delete(snapshot.id);
+      next.delete(target.id);
       return next;
     });
     setTerhapusToken((n) => n + 1);

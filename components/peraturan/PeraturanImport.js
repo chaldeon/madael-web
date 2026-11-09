@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Download, Upload } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLogClient';
+import { callJsonApi } from '@/lib/apiClient';
 import { friendlyError } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import {
@@ -21,12 +21,6 @@ const BARIS_STYLE = {
   error: 'bg-red-100 text-red-700',
 };
 const BARIS_LABEL = { siap: 'Siap', duplikat: 'Duplikat', error: 'Error' };
-
-// Kode error yang membuat sisa impor tidak ada gunanya dilanjutkan
-// (tidak punya izin, sesi habis, atau koneksi putus -> error tanpa kode).
-function isFatal(err) {
-  return !err?.code || ['42501', 'PGRST301', 'PGRST303'].includes(String(err.code));
-}
 
 function isEmptyRow(cells) {
   return (cells || []).every((c) => c == null || String(c).trim() === '');
@@ -242,36 +236,40 @@ export default function PeraturanImport({ employee }) {
     const gagal = rows
       .filter((r) => r.status === 'error')
       .map((r) => ({ rowNo: r.rowNo, label: r.label, pesan: r.notes.join(' ') }));
+    const labelPerBaris = new Map(todo.map((r) => [r.rowNo, r.label]));
     const diproses = new Set();
     let berhenti = false;
+    const totalBatch = Math.ceil(todo.length / IMPORT_LIMITS.batchSize);
 
+    // Tiap batch dikirim ke /api/peraturan/impor: server memvalidasi ulang,
+    // memasukkan baris (batch ditolak seluruhnya -> diulang per baris untuk
+    // memisahkan duplikat dari yang gagal), dan mencatat Activity Log per batch.
     for (let i = 0; i < todo.length && !berhenti; i += IMPORT_LIMITS.batchSize) {
       const batch = todo.slice(i, i + IMPORT_LIMITS.batchSize);
-      const { error: batchErr } = await supabase.from('peraturan').insert(batch.map((r) => r.payload));
+      const res = await callJsonApi('/api/peraturan/impor', 'POST', {
+        nama_file: fileName,
+        batch_ke: i / IMPORT_LIMITS.batchSize + 1,
+        batch_total: totalBatch,
+        total_baris: rows.length,
+        items: batch.map((r) => ({ rowNo: r.rowNo, payload: r.payload })),
+      });
 
-      if (!batchErr) {
-        berhasil += batch.length;
-        batch.forEach((r) => diproses.add(r.rowNo));
-      } else {
-        // Batch ditolak seluruhnya (satu statement): ulangi per baris untuk
-        // memisahkan duplikat (23505) dari baris yang benar-benar gagal.
-        for (const r of batch) {
-          if (berhenti) break;
-          const { error: rowErr } = await supabase.from('peraturan').insert([r.payload]);
+      if (!res.ok) {
+        // Seluruh permintaan ditolak (tidak punya izin, sesi habis, koneksi putus,
+        // atau server error): batch ini gagal dan sisa impor dihentikan.
+        batch.forEach((r) => {
           diproses.add(r.rowNo);
-          if (!rowErr) {
-            berhasil += 1;
-          } else if (rowErr.code === '23505') {
-            dilewati += 1;
-          } else {
-            gagal.push({
-              rowNo: r.rowNo,
-              label: r.label,
-              pesan: friendlyError(rowErr, 'Gagal menyimpan baris ini.', { context: 'Impor peraturan' }),
-            });
-            if (isFatal(rowErr)) berhenti = true;
-          }
-        }
+          gagal.push({ rowNo: r.rowNo, label: r.label, pesan: res.error });
+        });
+        berhenti = true;
+      } else {
+        berhasil += res.data.berhasil || 0;
+        dilewati += res.data.dilewati || 0;
+        (res.data.gagal || []).forEach((g) => {
+          gagal.push({ rowNo: g.rowNo, label: labelPerBaris.get(g.rowNo) || '', pesan: g.pesan });
+        });
+        batch.forEach((r) => diproses.add(r.rowNo));
+        if (res.data.berhenti) berhenti = true;
       }
       setProgress({ done: Math.min(i + batch.length, todo.length), total: todo.length });
     }
@@ -280,14 +278,6 @@ export default function PeraturanImport({ employee }) {
       gagal.push({ rowNo: r.rowNo, label: r.label, pesan: 'Tidak diproses karena impor dihentikan (izin, sesi, atau koneksi bermasalah).' });
     });
     gagal.sort((a, b) => a.rowNo - b.rowNo);
-
-    // Satu entri log per impor (bukan per baris) supaya Activity Log tidak banjir.
-    logActivity({
-      aksi: 'impor_peraturan_massal',
-      targetTable: 'peraturan',
-      targetId: null,
-      detail: { nama_file: fileName, total: rows.length, berhasil, dilewati, gagal: gagal.length },
-    });
 
     setResult({ berhasil, dilewati, gagal });
     setStage('selesai');

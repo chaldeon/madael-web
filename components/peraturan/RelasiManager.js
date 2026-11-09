@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Plus, Search, Trash2, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { logActivity } from '@/lib/activityLogClient';
+import { callJsonApi } from '@/lib/apiClient';
 import { friendlyError } from '@/lib/errorMessage';
 import {
   RELASI_LABEL, RELASI_OPTIONS, RELASI_STATUS_TARGET, LIMITS, labelPeraturan, perluNaikStatus,
@@ -50,8 +50,8 @@ function cariInkonsistensi(peraturan, groups) {
   return [...perTarget.values()];
 }
 
-// Panel kelola relasi (hanya dirender untuk superadmin pemegang flag; RLS tetap
-// penegak akhirnya). Menggantikan daftar relasi read-only di halaman detail.
+// Panel kelola relasi (hanya dirender untuk superadmin pemegang flag; tulis lewat
+// /api/peraturan/[id]/relasi dan /api/peraturan/[id], yang menegakkan hak tulis). Menggantikan daftar relasi read-only di halaman detail.
 //
 // Props:
 // - peraturan : baris peraturan yang sedang dibuka ({ id, jenis, nomor, tahun })
@@ -159,44 +159,29 @@ export default function RelasiManager({ peraturan, groups, loadError = '', onRet
 
   const inkonsistensi = loadError ? [] : cariInkonsistensi(peraturan, groups);
 
-  // Menaikkan status satu peraturan. Dikunci ke status yang terakhir terlihat
-  // (.eq('status', ...)) supaya tidak menimpa perubahan orang lain; .select()
-  // supaya terlihat kalau RLS menolak (0 baris). Mengembalikan true bila berhasil.
+  // Menaikkan status satu peraturan lewat route server. Dikunci ke status yang
+  // terakhir terlihat (status_sebelumnya) supaya tidak menimpa perubahan orang
+  // lain; route menjawab 409 kalau status sudah berubah. Mengembalikan true bila
+  // berhasil.
   const ubahStatus = async ({ ref, statusBaru }, via) => {
     setStatusBusy(true);
     setStatusError('');
     setStatusNotice('');
-    const { data, error: err } = await supabase
-      .from('peraturan')
-      .update({ status: statusBaru })
-      .eq('id', ref.id)
-      .eq('status', ref.status)
-      .select('id');
+    const res = await callJsonApi(`/api/peraturan/${ref.id}`, 'PATCH', {
+      action: 'ubah_status',
+      status_baru: statusBaru,
+      status_sebelumnya: ref.status,
+      via,
+    });
     setStatusBusy(false);
 
-    if (err) {
-      setStatusError(friendlyError(err, 'Gagal mengubah status peraturan.', { context: 'Sinkron status peraturan' }));
-      return false;
-    }
-    if (!data || data.length === 0) {
-      setStatusError('Status tidak berubah: statusnya sudah diubah orang lain, kamu tidak punya izin, atau peraturannya sudah dihapus.');
-      onChanged?.();
+    if (!res.ok) {
+      setStatusError(res.error);
+      // 409/404: data di layar sudah basi, muat ulang.
+      if (res.status === 409 || res.status === 404) onChanged?.();
       return false;
     }
 
-    logActivity({
-      aksi: 'ubah_peraturan',
-      targetTable: 'peraturan',
-      targetId: ref.id,
-      detail: {
-        peraturan: labelPeraturan(ref),
-        judul: ref.judul,
-        kolom_berubah: ['status'],
-        status_dari: ref.status,
-        status_ke: statusBaru,
-        via,
-      },
-    });
     setStatusNotice(`Status ${labelPeraturan(ref)} diubah menjadi ${statusBaru}.`);
     onChanged?.();
     return true;
@@ -232,40 +217,17 @@ export default function RelasiManager({ peraturan, groups, loadError = '', onRet
     }
 
     setSaving(true);
-    const { data, error: err } = await supabase
-      .from('peraturan_relasi')
-      .insert([{
-        peraturan_id: peraturan.id,
-        terkait_id: target.id,
-        jenis_relasi: jenis,
-        catatan: catatanBersih || null,
-      }])
-      .select('id')
-      .single();
+    const res = await callJsonApi(`/api/peraturan/${peraturan.id}/relasi`, 'POST', {
+      terkait_id: target.id,
+      jenis_relasi: jenis,
+      catatan: catatanBersih || null,
+    });
     setSaving(false);
 
-    if (err) {
-      if (err.code === '23505') {
-        setFormError('Relasi ini sudah ada.');
-      } else if (err.code === '23514' && /bukan_diri/.test(err.message || '')) {
-        setFormError('Peraturan tidak bisa berelasi dengan dirinya sendiri.');
-      } else {
-        setFormError(friendlyError(err, 'Gagal menyimpan relasi.', { context: 'Tambah relasi peraturan' }));
-      }
+    if (!res.ok) {
+      setFormError(res.error);
       return;
     }
-
-    logActivity({
-      aksi: 'tambah_relasi_peraturan',
-      targetTable: 'peraturan_relasi',
-      targetId: data.id,
-      detail: {
-        dari: labelPeraturan(peraturan),
-        jenis_relasi: jenis,
-        ke: labelPeraturan(target),
-        ...(catatanBersih ? { catatan: catatanBersih } : {}),
-      },
-    });
 
     // Relasi mencabut/mengubah tidak otomatis mengubah status targetnya: tawarkan
     // lewat dialog (hanya bila status target memang perlu naik).
@@ -282,43 +244,21 @@ export default function RelasiManager({ peraturan, groups, loadError = '', onRet
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    const { group, item } = deleteTarget;
+    const { item } = deleteTarget;
     setDeleting(true);
     setDeleteError('');
     setNotice('');
 
-    // .select() supaya terlihat kalau RLS menolak (delete diam-diam 0 baris).
-    const { data, error: err } = await supabase
-      .from('peraturan_relasi')
-      .delete()
-      .eq('id', item.id)
-      .select('id');
+    const res = await callJsonApi(`/api/peraturan/${peraturan.id}/relasi/${item.id}`, 'DELETE');
     setDeleting(false);
     setDeleteTarget(null);
 
-    if (err) {
-      setDeleteError(friendlyError(err, 'Gagal menghapus relasi.', { context: 'Hapus relasi peraturan' }));
-      return;
-    }
-    if (!data || data.length === 0) {
-      setDeleteError('Relasi tidak terhapus: kamu tidak punya izin, atau relasinya sudah tidak ada.');
-      onChanged?.();
+    if (!res.ok) {
+      setDeleteError(res.error);
+      if (res.status === 404) onChanged?.();
       return;
     }
 
-    const labelIni = labelPeraturan(peraturan);
-    const labelLain = labelPeraturan(item.ref);
-    logActivity({
-      aksi: 'hapus_relasi_peraturan',
-      targetTable: 'peraturan_relasi',
-      targetId: item.id,
-      detail: {
-        dari: group.arah === 'keluar' ? labelIni : labelLain,
-        jenis_relasi: group.jenisRelasi,
-        ke: group.arah === 'keluar' ? labelLain : labelIni,
-        ...(item.catatan ? { catatan: item.catatan } : {}),
-      },
-    });
     onChanged?.();
   };
 
