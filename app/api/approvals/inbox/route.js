@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase-admin';
 import { MODULE_REGISTRY } from '@/lib/employeeModules';
 import { PENDING_QUERIES, applyPendingFilters } from '@/lib/pendingQueue';
 import { getApproverContext } from '@/lib/pendingQueueServer';
+import { muatIdKaryawanNonaktif, ringkasPengajuanNonaktif } from '@/lib/pendingNonaktifServer';
 
 // Maksimum baris per modul. Yang ditampilkan adalah yang PALING LAMA menunggu;
 // sisanya tetap bisa dibuka di halaman modul (total sebenarnya ada di `total`).
@@ -17,8 +18,12 @@ const HREF_BY_KEY = Object.fromEntries(MODULE_REGISTRY.map((m) => [m.key, m.href
 // (lib/pendingQueue.js + lib/pendingQueueServer.js). Route ini hanya MEMBACA —
 // keputusan (approve/reject) tetap lewat route keputusan tiap modul.
 // Respons: { groups: [{ key, jenis, href, total, shown }], items: [{ id, module,
-// jenis, pemohon, ringkasan, diajukan, href, aksiLangsung }] }. Modul yang gagal dimuat masuk
-// `failed` (nama jenis) dan tidak mematikan modul lain.
+// jenis, pemohon, ringkasan, diajukan, href, aksiLangsung }], nonaktif: { total,
+// rincian: [{ key, jenis, jumlah }] } }. Modul yang gagal dimuat masuk `failed`
+// (nama jenis) dan tidak mematikan modul lain.
+// Pengajuan milik karyawan NONAKTIF tidak masuk groups/items; jumlahnya (hanya
+// status pending, hanya modul yang boleh diakses user) dikirim di `nonaktif`
+// untuk banner "tutup massal" di Inbox (aksinya: /api/approvals/tutup-nonaktif).
 export async function GET() {
   try {
     const admin = createAdminClient();
@@ -30,6 +35,14 @@ export async function GET() {
       return NextResponse.json({ error: 'Anda tidak punya akses ke fitur ini.' }, { status: 403 });
     }
 
+    let nonaktifIds;
+    try {
+      nonaktifIds = await muatIdKaryawanNonaktif(admin);
+    } catch (nonaktifError) {
+      console.error('Muat karyawan nonaktif inbox error:', nonaktifError);
+      return NextResponse.json({ error: 'Gagal memuat.' }, { status: 500 });
+    }
+
     const results = await Promise.all(
       keys.map(async (key) => {
         const config = PENDING_QUERIES[key];
@@ -38,7 +51,7 @@ export async function GET() {
             .from(config.table)
             .select(`id, employee_id, created_at, ${config.select}`, { count: 'exact' }),
           config,
-          { empId: emp.id, excludeOwn }
+          { empId: emp.id, excludeOwn, nonaktifIds }
         )
           .order('created_at', { ascending: true })
           .limit(MAKS_BARIS_PER_MODUL);
@@ -93,8 +106,12 @@ export async function GET() {
 
     const failed = results.filter((r) => r.error).map((r) => r.config.jenis);
 
+    const ringkasNonaktif = await ringkasPengajuanNonaktif(admin, keys, nonaktifIds);
+    failed.push(...ringkasNonaktif.gagal.filter((jenis) => !failed.includes(jenis)));
+    const nonaktif = { total: ringkasNonaktif.total, rincian: ringkasNonaktif.rincian };
+
     return NextResponse.json(
-      { groups, items, failed },
+      { groups, items, failed, nonaktif },
       { headers: { 'Cache-Control': 'no-store' } }
     );
   } catch (err) {
