@@ -183,6 +183,7 @@ export default function PayrollManagerPage() {
       no_bpjs_ketenagakerjaan: row.no_bpjs_ketenagakerjaan || '',
       nama_rekening: row.nama_rekening || '',
       no_rekening: row.no_rekening || '',
+      nama_bank: row.nama_bank || '',
       jatah_cuti_tahunan: row.jatah_cuti_tahunan ?? 12,
       // Hanya carry-over yang tercatat untuk tahun ini; selain itu 0 (otomatis).
       cuti_carry_over: row.cuti_carry_over_tahun === tahunSekarang() ? (row.cuti_carry_over || 0) : 0,
@@ -228,6 +229,7 @@ export default function PayrollManagerPage() {
       no_bpjs_ketenagakerjaan: form.no_bpjs_ketenagakerjaan.trim() || null,
       nama_rekening: form.nama_rekening.trim() || null,
       no_rekening: form.no_rekening.trim() || null,
+      nama_bank: form.nama_bank.trim() || null,
       jatah_cuti_tahunan: jatahCuti.value,
       // Carry-over dikirim hanya kalau HR mengubahnya, supaya hitungan otomatis tidak
       // terkunci; tahun carry-over diisi server.

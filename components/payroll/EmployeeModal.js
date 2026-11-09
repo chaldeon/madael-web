@@ -104,6 +104,7 @@ export default function EmployeeModal({ clients, linkableEmployees, form, setFor
           <TextField label="Nomor BPJS Ketenagakerjaan" value={form.no_bpjs_ketenagakerjaan} onChange={set('no_bpjs_ketenagakerjaan')} />
           <TextField label="Nama Rekening" value={form.nama_rekening} onChange={set('nama_rekening')} />
           <TextField label="No Rekening" value={form.no_rekening} onChange={set('no_rekening')} />
+          <TextField label="Nama Bank" value={form.nama_bank} onChange={set('nama_bank')} />
           <NumberField label="Jatah Cuti Tahunan (hari)" value={form.jatah_cuti_tahunan} onChange={set('jatah_cuti_tahunan')} />
           <NumberField
             label="Carry-over Cuti Tahun Ini (hari)"

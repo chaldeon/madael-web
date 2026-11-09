@@ -13,7 +13,7 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import RunItemsTable from '@/components/payroll-run/RunItemsTable';
-import { STATUS_STYLE, SORT_COLUMNS, periodeLabel, downloadTransferCsv } from '@/lib/payrollRunConfig';
+import { STATUS_STYLE, SORT_COLUMNS, periodeLabel, siapkanTransfer, downloadTransferCsv } from '@/lib/payrollRunConfig';
 import { statusOptionsFor } from '@/lib/payrollRun';
 import { formatRupiah } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
@@ -40,6 +40,8 @@ export default function PayrollRunDetailPage() {
   const [lemburLoading, setLemburLoading] = useState(false);
   const [lemburNote, setLemburNote] = useState(null);
   const [lemburConfirm, setLemburConfirm] = useState(null); // { timpa, berubah } bila perlu konfirmasi timpa
+  const [sertakanTotal, setSertakanTotal] = useState(true);
+  const [exportNote, setExportNote] = useState(null);
   const [sortField, setSortField] = useState('nama');
   const [sortDir, setSortDir] = useState('asc');
 
@@ -65,7 +67,7 @@ export default function PayrollRunDetailPage() {
 
     const { data: itemsData, error: itemsError } = await supabase
       .from('payroll_run_items')
-      .select('*, employees_master ( id, nama, posisi, linked_employee_id, nama_rekening, no_rekening, jkk_rate, status_ptkp )')
+      .select('*, employees_master ( id, nama, posisi, linked_employee_id, nama_rekening, no_rekening, nama_bank, jkk_rate, status_ptkp )')
       .eq('payroll_run_id', runId);
 
     if (itemsError) {
@@ -222,11 +224,22 @@ export default function PayrollRunDetailPage() {
     }
   };
 
+  const handleExportTransfer = () => {
+    const hasil = downloadTransferCsv(items, run.periode, { sertakanTotal });
+    if (hasil.jumlah === 0) {
+      setExportNote({ error: true, text: 'Tidak ada baris yang layak ditransfer, file tidak dibuat. Lengkapi data rekening di Payroll Manager.' });
+      return;
+    }
+    const lewat = hasil.dilewati.length;
+    setExportNote({
+      error: false,
+      text: `File transfer dibuat: ${hasil.jumlah} penerima, total ${formatRupiah(hasil.total)}.${lewat > 0 ? ` ${lewat} karyawan tidak ikut diekspor — lihat daftar peringatan di bawah.` : ''}`,
+    });
+  };
+
   const totalThp = useMemo(() => items.reduce((sum, i) => sum + (Number(i.take_home_pay) || 0), 0), [items]);
-  const missingRekening = useMemo(
-    () => items.filter((i) => !i.employees_master?.nama_rekening || !i.employees_master?.no_rekening),
-    [items]
-  );
+  const periodeRun = run?.periode;
+  const transfer = useMemo(() => siapkanTransfer(items, periodeRun), [items, periodeRun]);
   const unlinkedCount = useMemo(
     () => items.filter((i) => !i.employees_master?.linked_employee_id).length,
     [items]
@@ -268,7 +281,7 @@ export default function PayrollRunDetailPage() {
   const reloadItems = async () => {
     const { data: refreshedItems } = await supabase
       .from('payroll_run_items')
-      .select('*, employees_master ( id, nama, posisi, linked_employee_id, nama_rekening, no_rekening, jkk_rate, status_ptkp )')
+      .select('*, employees_master ( id, nama, posisi, linked_employee_id, nama_rekening, no_rekening, nama_bank, jkk_rate, status_ptkp )')
       .eq('payroll_run_id', runId);
     setItems(refreshedItems || []);
   };
@@ -417,11 +430,21 @@ export default function PayrollRunDetailPage() {
         )}
         {run.status === 'Approved' && (
           <button
-            onClick={() => downloadTransferCsv(items, run.periode)}
+            onClick={handleExportTransfer}
             className="bg-[#111827] text-white px-5 py-2 text-sm font-medium tracking-[0.02em] hover:bg-black transition-colors"
           >
             Export Transfer
           </button>
+        )}
+        {run.status === 'Approved' && (
+          <label className="flex items-center gap-2 text-xs text-[#6B6B6B] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={sertakanTotal}
+              onChange={(e) => setSertakanTotal(e.target.checked)}
+            />
+            Sertakan baris total
+          </label>
         )}
         <div className="ml-auto text-sm text-[#6B6B6B]">
           Total THP: <span className="text-black font-medium">{formatRupiah(totalThp)}</span>
@@ -459,6 +482,13 @@ export default function PayrollRunDetailPage() {
         </div>
       )}
 
+      {exportNote && (
+        <div className={`flex items-start gap-2 border text-xs px-4 py-3 mb-6 ${exportNote.error ? 'bg-red-50 border-red-200 text-red-700' : 'bg-[#F4F4F4] border-[#E0E0E0] text-[#3D3D3D]'}`}>
+          <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-madael-red" />
+          {exportNote.text}
+        </div>
+      )}
+
       {syncNote && (
         <div className="flex items-start gap-2 bg-[#F4F4F4] border border-[#E0E0E0] text-[#3D3D3D] text-xs px-4 py-3 mb-6">
           <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-madael-red" />
@@ -489,11 +519,36 @@ export default function PayrollRunDetailPage() {
         </div>
       )}
 
-      {missingRekening.length > 0 && (
+      {transfer.dilewati.length > 0 && (
         <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mb-6">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          {missingRekening.length} employee belum ada data rekening (Nama/No Rekening) — akan tetap muncul di Export Transfer dengan kolom kosong. Format kolom CSV ini masih generik, perlu dikonfirmasi Daniel sebelum dipakai transfer sungguhan.
+          <div>
+            <p>
+              {transfer.dilewati.length} karyawan TIDAK ikut Export Transfer — lengkapi datanya di Payroll Manager atau bayar manual:
+            </p>
+            <ul className="list-disc pl-4 mt-1 space-y-0.5">
+              {transfer.dilewati.map((d, idx) => (
+                <li key={`${d.nama}-${idx}`}>
+                  {d.nama}: {d.alasan}
+                  {d.nominal > 0 ? ` (${formatRupiah(d.nominal)})` : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
+      )}
+
+      {transfer.tanpaBank.length > 0 && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mb-6">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          {transfer.tanpaBank.length} karyawan belum ada Nama Bank — tetap ikut Export Transfer dengan kolom Nama Bank kosong. Isi lewat Payroll Manager (field Nama Bank).
+        </div>
+      )}
+
+      {run.status === 'Approved' && (
+        <p className="text-xs text-[#6B6B6B] mb-6">
+          Export Transfer: {transfer.baris.length} penerima, total {formatRupiah(transfer.total)}. Format CSV masih generik (belum mengikuti template bank tertentu) — cocokkan kolomnya dengan template bank sebelum diunggah; matikan &quot;Sertakan baris total&quot; bila bank menolak baris tambahan.
+        </p>
       )}
 
       {items.length === 0 ? (
