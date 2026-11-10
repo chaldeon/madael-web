@@ -63,6 +63,7 @@ const AKSI_LABEL = {
   ubah_status_lowongan: 'Aktifkan/Nonaktifkan Lowongan',
   duplikat_lowongan: 'Duplikat Lowongan',
   tambah_employee: 'Tambah Employee',
+  perbaiki_setup_employee: 'Perbaiki Setup Akun Employee',
   impor_employee_massal: 'Impor Employee Massal',
   tambah_peraturan: 'Tambah Peraturan',
   ubah_peraturan: 'Ubah Peraturan',
