@@ -14,6 +14,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import { formatRupiah } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 const MADAEL_RED = '#C1272D';
 const STATUS_COLOR = { Draft: '#9CA3AF', Review: '#F59E0B', Approved: '#16A34A' };
@@ -88,10 +89,18 @@ export default function ReportsDashboardPage() {
         .select('id', { count: 'exact', head: true })
         .eq('periode', monthValue)
         .eq('status', 'Approved'),
-      supabase
-        .from('invoices')
-        .select('nominal', { count: 'exact' })
-        .neq('status', 'lunas'),
+      // Outstanding = invoice yang sudah ditagihkan (status 'terkirim') tapi belum
+      // lunas. Draft belum menjadi piutang, jadi tidak ikut dihitung. Dipakai
+      // `not in (draft, lunas)`, bukan `eq terkirim`, supaya status lain di luar
+      // daftar tetap dihitung sebagai outstanding seperti sebelumnya.
+      // fetchAllRows: tanpa itu PostgREST memotong respons di 1.000 baris tanpa
+      // error, sehingga total rupiah kurang dari yang sebenarnya.
+      fetchAllRows(() =>
+        supabase
+          .from('invoices')
+          .select('id, nominal')
+          .not('status', 'in', '(draft,lunas)')
+      ),
       supabase
         .from('applications')
         .select('id', { count: 'exact', head: true })
@@ -105,16 +114,24 @@ export default function ReportsDashboardPage() {
       return;
     }
 
-    const invoiceCount = invoicesRes.error ? null : invoicesRes.count || 0;
-    const invoiceTotal = invoicesRes.error
-      ? 0
-      : (invoicesRes.data || []).reduce((sum, i) => sum + (Number(i.nominal) || 0), 0);
+    // Tiga kemungkinan: 'ok', 'unavailable' (tabel belum ada), 'error' (gagal muat,
+    // termasuk data melebihi batas pengambilan). Total tidak pernah ditampilkan
+    // dari data yang terpotong.
+    let invoiceState = 'ok';
+    if (invoicesRes.error) {
+      const code = invoicesRes.error.code;
+      invoiceState = code === '42P01' || code === 'PGRST205' ? 'unavailable' : 'error';
+    }
+    const invoiceRows = invoiceState === 'ok' ? invoicesRes.data || [] : [];
+    const invoiceCount = invoiceState === 'ok' ? invoiceRows.length : null;
+    const invoiceTotal = invoiceRows.reduce((sum, i) => sum + (Number(i.nominal) || 0), 0);
 
     setStats({
       totalKehadiran: attendanceRes.count || 0,
       payrollApproved: payrollRes.count || 0,
       invoiceOutstandingCount: invoiceCount,
       invoiceOutstandingTotal: invoiceTotal,
+      invoiceState,
       kandidatAktif: applicationsRes.count || 0,
       monthLabel: new Date(`${monthValue}-01T00:00:00`).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }),
     });
@@ -214,7 +231,7 @@ export default function ReportsDashboardPage() {
               { metrik: 'Total Kehadiran Bulan Ini', nilai: stats.totalKehadiran },
               { metrik: 'Payroll Approved Bulan Ini', nilai: stats.payrollApproved },
               { metrik: 'Invoice Outstanding (Jumlah)', nilai: stats.invoiceOutstandingCount ?? '—' },
-              { metrik: 'Invoice Outstanding (Total)', nilai: formatRupiah(stats.invoiceOutstandingTotal) },
+              { metrik: 'Invoice Outstanding (Total)', nilai: stats.invoiceOutstandingCount === null ? '—' : formatRupiah(stats.invoiceOutstandingTotal) },
               { metrik: 'Kandidat Aktif — Job Portal', nilai: stats.kandidatAktif },
             ]}
           />
@@ -245,9 +262,11 @@ export default function ReportsDashboardPage() {
           label="Invoice Outstanding"
           value={stats.invoiceOutstandingCount === null ? '—' : stats.invoiceOutstandingCount}
           subtext={
-            stats.invoiceOutstandingCount === null
+            stats.invoiceState === 'unavailable'
               ? 'Tabel invoices belum tersedia (Task 16 belum jalan di environment ini)'
-              : `Total nominal: ${formatRupiah(stats.invoiceOutstandingTotal)}`
+              : stats.invoiceState === 'error'
+                ? 'Gagal memuat data invoice. Muat ulang halaman untuk mencoba lagi.'
+                : `Total nominal: ${formatRupiah(stats.invoiceOutstandingTotal)} · Terkirim, belum lunas (draft tidak dihitung)`
           }
         />
         <StatCard
