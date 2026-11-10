@@ -4,18 +4,21 @@ import { requireModuleAccess } from '@/lib/moduleAccessServer';
 import { logActivity } from '@/lib/activityLog';
 import { friendlyError } from '@/lib/errorMessage';
 import { normalizeAnnouncementInput, periksaPerusahaanTarget } from '@/lib/announcementsServer';
+import { siarkanPengumuman } from '@/lib/announcementBroadcast';
 
 // POST /api/announcements
 //   body: { judul, isi, expired_at?, target_company_id?, pinned? }
-//   -> 201 { announcement }
+//   -> 201 { announcement, notifikasi: { status, inserted? } }
 //
 // Hanya akun aktif dengan modul announcements_admin (superadmin lolos otomatis).
 // Dulu browser menulis langsung ke tabel announcements: created_by dikirim
 // client dan jejak audit-nya fire-and-forget dari browser. Sekarang created_by
 // diambil dari sesi dan log dicatat di server.
 //
-// Notifikasi broadcast tetap dipicu terpisah lewat /api/notifications/dispatch
-// (event pengumuman_baru) oleh halaman admin setelah pengumuman tersimpan.
+// Notifikasi broadcast (event pengumuman_baru) disiarkan di sini juga, setelah
+// pengumuman tersimpan, bukan lagi dipicu browser. Kegagalan siaran tidak
+// membatalkan pengumuman: respons tetap 201 dengan notifikasi.status 'gagal',
+// dan admin bisa mengulang lewat POST /api/announcements/[id]/broadcast.
 export async function POST(request) {
   try {
     const admin = createAdminClient();
@@ -52,7 +55,9 @@ export async function POST(request) {
       detail: { judul: data.judul },
     });
 
-    return NextResponse.json({ announcement: data }, { status: 201 });
+    const notifikasi = await siarkanPengumuman(admin, data.id);
+
+    return NextResponse.json({ announcement: data, notifikasi }, { status: 201 });
   } catch (err) {
     console.error('Buat pengumuman:', err);
     return NextResponse.json({ error: 'Gagal menyimpan pengumuman.' }, { status: 500 });
