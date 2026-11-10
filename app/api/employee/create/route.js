@@ -2,11 +2,10 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { DEFAULT_MODULE_ACCESS } from '@/lib/employeeModules';
 import { nextEmployeeId } from '@/lib/employeeId';
 import { logActivity } from '@/lib/activityLog';
 import { friendlyError, friendlyAuthError } from '@/lib/errorMessage';
-import { ambilKebijakanCuti } from '@/lib/leaveServer';
+import { lengkapiSetupKaryawan } from '@/lib/employeeSetup';
 
 export async function POST(request) {
   try {
@@ -111,47 +110,14 @@ export async function POST(request) {
       );
     }
 
-    // Grant akses default (DEFAULT_MODULE_ACCESS: modul Dashboard Saya + Kalkulator) untuk
-    // employee non-superadmin. Superadmin sudah otomatis punya akses ke semua
-    // modul jadi tidak perlu row di employee_modules.
-    // Kegagalan di sini tidak fatal — employee tetap berhasil dibuat, superadmin
-    // tinggal assign manual lewat "Kelola Akses" kalau ada yang gagal.
-    if (!empRow.is_superadmin) {
-      const defaultRows = DEFAULT_MODULE_ACCESS.map((module_name) => ({
-        employee_id: empRow.id,
-        module_name,
-      }));
-      const { error: accessError } = await admin.from('employee_modules').insert(defaultRows);
-      if (accessError) {
-        console.error('Gagal insert akses default:', accessError.message);
-      }
-    }
-
-    // Fase 3.1 — otomatis buat 1 baris employees_master kosong dan langsung
-    // ter-link ke akun baru ini, supaya admin tidak perlu lagi pilih dari
-    // dropdown "Nama" di Payroll Manager (baris payroll sudah ada & sudah
-    // ter-link sejak titik penciptaan akun). Ini menutup akar masalah #1/#2/#3
-    // di TODO alur data karyawan. Kegagalan di sini tidak fatal — employee
-    // tetap berhasil dibuat, superadmin tinggal tambah manual lewat Payroll
-    // Manager kalau baris draft ini gagal dibuat.
-    // Jatah awal mengikuti kebijakan kuota cuti (gagal baca -> default 12).
-    const kebijakanCuti = await ambilKebijakanCuti(admin);
-    const { error: masterError } = await admin.from('employees_master').insert([
-      {
-        nama: empRow.nama,
-        client_id: empRow.client_id,
-        posisi: '',
-        status: 'PHL',
-        gaji_pokok: 0,
-        tunjangan: 0,
-        komponen_lain: {},
-        linked_employee_id: empRow.id,
-        jatah_cuti_tahunan: kebijakanCuti.kebijakan.jatah_default,
-      },
-    ]);
-    if (masterError) {
-      console.error('Gagal buat draft employees_master:', masterError.message);
-    }
+    // Setup akun: akses modul default (employee non-superadmin; superadmin sudah
+    // otomatis punya semua modul) + satu baris employees_master draft yang
+    // langsung ter-link, supaya admin tidak perlu lagi pilih dari dropdown
+    // "Nama" di Payroll Manager (Fase 3.1). Kegagalan di sini tidak fatal —
+    // employee tetap berhasil dibuat — tapi DILAPORKAN ke HR lewat `warnings`
+    // (ditampilkan di Employee List, lengkap dengan aksi "Perbaiki Setup Akun"),
+    // bukan cuma console.error. Lihat lib/employeeSetup.js.
+    const setup = await lengkapiSetupKaryawan(admin, empRow, { baru: true });
 
     // Fire-and-forget — kegagalan mencatat log tidak boleh menggagalkan
     // pembuatan employee yang sudah berhasil.
@@ -160,11 +126,16 @@ export async function POST(request) {
       aksi: 'tambah_employee',
       targetTable: 'employees',
       targetId: empRow.id,
-      detail: { nama: empRow.nama, email: empRow.email, is_superadmin: empRow.is_superadmin },
+      detail: {
+        nama: empRow.nama,
+        email: empRow.email,
+        is_superadmin: empRow.is_superadmin,
+        ...(setup.warnings.length > 0 ? { setup_gagal: setup.warnings.map((w) => w.kode) } : {}),
+      },
     });
 
     return NextResponse.json(
-      { success: true, employee: empRow, invited: true },
+      { success: true, employee: empRow, invited: true, warnings: setup.warnings },
       { status: 200 }
     );
   } catch (err) {

@@ -13,7 +13,7 @@ import CompanySelect from '@/components/employee-list/CompanySelect';
 import SkeletonRows from '@/components/employee-list/SkeletonRows';
 import CompletenessBadge from '@/components/employee-list/CompletenessBadge';
 import SortableHeader from '@/components/SortableHeader';
-import { emptyForm, TEMPLATE_URL, MODULE_GROUPS, PAGE_SIZE_OPTIONS, SORT_COLUMNS, MAKS_ID_FILTER_KONTRAK } from '@/lib/employeeListConfig';
+import { emptyForm, TEMPLATE_URL, MODULE_GROUPS, PAGE_SIZE_OPTIONS, SORT_COLUMNS, MAKS_ID_FILTER_KONTRAK, LABEL_SETUP_SINGKAT } from '@/lib/employeeListConfig';
 import KontrakBadge from '@/components/KontrakBadge';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { KONTRAK_FILTER_OPTIONS, isKontrakFilterValid, applyKontrakFilter, formatTanggalKepegawaian } from '@/lib/kepegawaian';
@@ -55,7 +55,8 @@ export default function EmployeeListPage() {
   const formBaselineRef = useRef(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
-  const [createdInfo, setCreatedInfo] = useState(null); // { email }
+  const [createdInfo, setCreatedInfo] = useState(null); // { email, id, nama, warnings }
+  const [repairingId, setRepairingId] = useState(null); // employee.id yang sedang diperbaiki setup-nya
 
   // Notifikasi non-blocking (pengganti alert()) — { type: 'error'|'success', message }
   const [toast, setToast] = useState(null);
@@ -351,12 +352,76 @@ export default function EmployeeListPage() {
         return;
       }
 
-      setCreatedInfo({ email: form.email });
+      // Akun & undangan sudah jadi, tapi setup-nya (akses default / draft payroll)
+      // bisa saja gagal — server melaporkannya di `warnings`. Jangan diam-diam sukses.
+      const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+      setCreatedInfo({
+        email: form.email,
+        id: data.employee?.id || null,
+        nama: data.employee?.nama || form.nama,
+        warnings,
+      });
+      if (warnings.length > 0) {
+        setToast({
+          type: 'error',
+          message: 'Akun dibuat, tetapi setup akun belum lengkap. Lihat detail di jendela Tambah Employee.',
+        });
+      }
       fetchEmployees();
     } catch (err) {
       setFormError('Terjadi kesalahan. Coba lagi.');
     }
     setSubmitting(false);
+  };
+
+  // ---- Perbaiki Setup Akun ----
+  // Melengkapi akses modul default + draft payroll (employees_master) yang
+  // belum ada untuk satu karyawan. Idempotent di server (POST
+  // /api/employee/[id]/setup), jadi aman diklik ulang. Return data respons
+  // (atau null kalau request gagal) supaya jendela Tambah Employee bisa
+  // memperbarui daftar peringatannya.
+  const handleRepairSetup = async (target) => {
+    if (!target?.id || repairingId) return null;
+    setRepairingId(target.id);
+    try {
+      const res = await fetch(`/api/employee/${target.id}/setup`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setToast({ type: 'error', message: data.error || 'Gagal memperbaiki setup akun.' });
+        return null;
+      }
+      const dibuat = [];
+      if (data.dibuat?.akses_default > 0) dibuat.push('akses modul default');
+      if (data.dibuat?.draft_master) dibuat.push('draft data payroll');
+      if (Array.isArray(data.warnings) && data.warnings.length > 0) {
+        setToast({
+          type: 'error',
+          message: `Setup akun ${target.nama} masih belum lengkap: ${data.warnings.map((w) => w.pesan).join(' ')}`,
+        });
+      } else {
+        setToast({
+          type: 'success',
+          message: dibuat.length > 0
+            ? `Setup akun ${target.nama} diperbaiki: ${dibuat.join(' dan ')} dibuat.`
+            : `Setup akun ${target.nama} sudah lengkap, tidak ada yang perlu diperbaiki.`,
+        });
+      }
+      if (dibuat.length > 0) fetchEmployees();
+      return data;
+    } catch (err) {
+      setToast({ type: 'error', message: friendlyCaught(err, 'Terjadi kesalahan.') + ' Coba lagi.' });
+      return null;
+    } finally {
+      setRepairingId(null);
+    }
+  };
+
+  const handleRepairCreated = async () => {
+    if (!createdInfo?.id) return;
+    const data = await handleRepairSetup({ id: createdInfo.id, nama: createdInfo.nama });
+    if (data) {
+      setCreatedInfo((prev) => (prev ? { ...prev, warnings: Array.isArray(data.warnings) ? data.warnings : [] } : prev));
+    }
   };
 
   // ---- Nonaktifkan / Aktifkan ----
@@ -749,10 +814,13 @@ export default function EmployeeListPage() {
                       <RowActionsMenu
                         emp={emp}
                         canDelete={viewer?.is_superadmin && viewer.id !== emp.id}
+                        canRepairSetup={!!viewer?.is_superadmin}
                         onManageAccess={openAccessModal}
                         onToggleStatus={openStatusConfirm}
+                        onRepairSetup={handleRepairSetup}
                         onDelete={openDeleteModal}
                         togglingThis={togglingId === emp.id}
+                        repairingThis={repairingId === emp.id}
                       />
                     </div>
                   </td>
@@ -821,6 +889,26 @@ export default function EmployeeListPage() {
                 <p className="text-sm text-black mb-6">
                   Akun berhasil dibuat untuk <strong>{createdInfo.email}</strong>. Email undangan berisi link set password sudah dikirim ke alamat tersebut — employee tinggal membuka email itu untuk mengaktifkan akunnya.
                 </p>
+                {createdInfo.warnings?.length > 0 && (
+                  <div role="alert" className="mb-6 border border-[#E0E0E0] border-l-4 border-l-madael-red bg-white px-4 py-3">
+                    <p className="text-sm font-medium text-black mb-2">Setup akun belum lengkap:</p>
+                    <ul className="list-disc pl-5 space-y-1 text-sm text-[#3D3D3D]">
+                      {createdInfo.warnings.map((w) => (
+                        <li key={w.kode}>{w.pesan}</li>
+                      ))}
+                    </ul>
+                    {createdInfo.id && (
+                      <button
+                        type="button"
+                        onClick={handleRepairCreated}
+                        disabled={repairingId === createdInfo.id}
+                        className="mt-3 text-sm font-medium text-madael-red hover:text-madael-dark transition-colors disabled:opacity-50"
+                      >
+                        {repairingId === createdInfo.id ? 'Memperbaiki...' : 'Perbaiki sekarang'}
+                      </button>
+                    )}
+                  </div>
+                )}
                 <button
                   onClick={() => setShowAddModal(false)}
                   className="w-full bg-madael-red text-white px-8 py-3 text-sm font-medium tracking-[0.04em] hover:bg-madael-dark transition-colors"
@@ -1117,6 +1205,12 @@ export default function EmployeeListPage() {
                   </p>
                 )}
 
+                {bulkResult.results.some((r) => r.status === 'success' && r.warnings?.length > 0) && (
+                  <p className="text-sm text-madael-red mb-4">
+                    {bulkResult.results.filter((r) => r.status === 'success' && r.warnings?.length > 0).length} employee berhasil dibuat tetapi setup akunnya belum lengkap (lihat kolom Keterangan). Lengkapi lewat menu ⋯ → Perbaiki Setup Akun di baris employee tersebut.
+                  </p>
+                )}
+
                 <div className="border border-[#E0E0E0] max-h-[280px] overflow-y-auto mb-6">
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-[#F4F4F4]">
@@ -1138,7 +1232,16 @@ export default function EmployeeListPage() {
                             </span>
                           </td>
                           <td className="px-3 py-2 text-[#6B6B6B]">
-                            {r.status === 'success' ? r.employee_id : r.error}
+                            {r.status === 'success' ? (
+                              <>
+                                {r.employee_id}
+                                {r.warnings?.length > 0 && (
+                                  <span className="block text-madael-red mt-0.5">
+                                    Setup belum lengkap: {r.warnings.map((w) => LABEL_SETUP_SINGKAT[w.kode] || w.kode).join(', ')}
+                                  </span>
+                                )}
+                              </>
+                            ) : r.error}
                           </td>
                         </tr>
                       ))}

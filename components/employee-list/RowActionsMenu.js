@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { MoreVertical, ShieldCheck, Power, Trash2, FileText } from 'lucide-react';
+import { MoreVertical, ShieldCheck, Power, Trash2, FileText, Wrench } from 'lucide-react';
 
 // Menu aksi per baris ("⋯") — pengganti 3 icon polos yang cuma punya title
 // tooltip (tidak kebaca di layar sentuh). Klik di luar / Esc menutup menu.
-export default function RowActionsMenu({ emp, canDelete, onManageAccess, onToggleStatus, onDelete, togglingThis }) {
+export default function RowActionsMenu({ emp, canDelete, canRepairSetup, onManageAccess, onToggleStatus, onRepairSetup, onDelete, togglingThis, repairingThis }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -50,7 +50,7 @@ export default function RowActionsMenu({ emp, canDelete, onManageAccess, onToggl
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Aksi untuk ${emp.nama}`}
-        disabled={togglingThis}
+        disabled={togglingThis || repairingThis}
         className="inline-flex p-1.5 text-[#6B6B6B] hover:text-black hover:bg-[#F4F4F4] transition-colors disabled:opacity-40"
       >
         <MoreVertical size={16} />
@@ -70,6 +70,9 @@ export default function RowActionsMenu({ emp, canDelete, onManageAccess, onToggl
             Lihat Dokumen
           </Link>
           {item('Kelola Akses', ShieldCheck, () => onManageAccess(emp), 'text-black')}
+          {/* Idempotent: hanya melengkapi akses default + draft payroll yang belum
+              ada. Server (POST /api/employee/[id]/setup) tetap superadmin-only. */}
+          {canRepairSetup && item('Perbaiki Setup Akun', Wrench, () => onRepairSetup(emp), 'text-black')}
           {item(
             emp.status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan',
             Power,

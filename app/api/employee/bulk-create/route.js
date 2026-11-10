@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { DEFAULT_MODULE_ACCESS } from '@/lib/employeeModules';
+import { lengkapiSetupKaryawan } from '@/lib/employeeSetup';
 import { highestEmployeeNumber, formatEmployeeId } from '@/lib/employeeId';
 import { logActivities } from '@/lib/activityLog';
 import { friendlyError, friendlyAuthError } from '@/lib/errorMessage';
@@ -193,36 +193,14 @@ export async function POST(request) {
         continue;
       }
 
-      if (!isSuperadmin) {
-        const defaultRows = DEFAULT_MODULE_ACCESS.map((module_name) => ({
-          employee_id: empRow.id,
-          module_name,
-        }));
-        await admin.from('employee_modules').insert(defaultRows);
-      }
-
-      // Fase 3.1 — sama seperti create/route.js: satu baris employees_master
-      // draft per employee baru, langsung ter-link. Diproses satu-satu di
-      // dalam loop yang sudah sequential ini (lihat komentar di atas fungsi),
-      // jadi tidak ada risiko dobel-jalan per baris Excel. Kegagalan di sini
-      // tidak menggagalkan baris employee-nya sendiri — hanya dicatat, admin
-      // bisa tambah manual lewat Payroll Manager kalau perlu.
-      const { error: masterError } = await admin.from('employees_master').insert([
-        {
-          nama,
-          client_id: clientId,
-          posisi: '',
-          status: 'PHL',
-          gaji_pokok: 0,
-          tunjangan: 0,
-          komponen_lain: {},
-          linked_employee_id: empRow.id,
-          jatah_cuti_tahunan: kebijakanCuti.kebijakan.jatah_default,
-        },
-      ]);
-      if (masterError) {
-        console.error(`Gagal buat draft employees_master untuk baris ${rowNum}:`, masterError.message);
-      }
+      // Setup akun (akses modul default + employees_master draft yang ter-link),
+      // sama seperti create/route.js — lihat lib/employeeSetup.js. Diproses
+      // satu-satu di dalam loop yang sudah sequential ini (lihat komentar di atas
+      // fungsi), jadi tidak ada risiko dobel-jalan per baris Excel. Kegagalan di
+      // sini tidak menggagalkan baris employee-nya, tapi dilaporkan per baris
+      // lewat `warnings` (dan dicatat di audit log), bukan cuma console.error.
+      const setup = await lengkapiSetupKaryawan(admin, empRow, { baru: true, kebijakanCuti });
+      const setupGagal = setup.warnings.map((w) => w.kode);
 
       auditEntries.push({
         userId: requester.id,
@@ -235,7 +213,8 @@ export async function POST(request) {
           is_superadmin: empRow.is_superadmin,
           sumber: 'impor_massal',
           baris: rowNum,
-          ...(masterError ? { employees_master_gagal: true } : {}),
+          ...(setupGagal.includes('draft_master') ? { employees_master_gagal: true } : {}),
+          ...(setupGagal.includes('akses_default') ? { akses_default_gagal: true } : {}),
         },
       });
 
@@ -245,6 +224,7 @@ export async function POST(request) {
         status: 'success',
         nama,
         employee_id: employeeId,
+        warnings: setup.warnings,
       });
     }
 
