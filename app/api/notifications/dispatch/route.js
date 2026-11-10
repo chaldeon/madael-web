@@ -1,13 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { requireModuleAccess } from '@/lib/moduleAccessServer';
-import {
-  notifyEmployee,
-  notifyEmployees,
-  notifySuperadmins,
-  notifyByModule,
-  notifyAllActive,
-} from '@/lib/notify';
+import { kirimKePenerima } from '@/lib/notificationDispatch';
 import {
   NOTIFICATION_EVENTS,
   MAKS_PESAN,
@@ -68,20 +62,9 @@ export async function POST(request) {
     }
 
     const payload = { tipe: result.tipe, pesan, link: result.link, dedupeKey };
-    const to = result.to;
     let outcome = null;
     try {
-      if (to === 'superadmins') {
-        outcome = await notifySuperadmins(admin, payload);
-      } else if (to === 'all_active') {
-        outcome = await notifyAllActive(admin, payload);
-      } else if (typeof to?.module === 'string') {
-        outcome = await notifyByModule(admin, { moduleKey: to.module, ...payload });
-      } else if (to?.userId) {
-        outcome = await notifyEmployee(admin, { userId: to.userId, ...payload });
-      } else if (Array.isArray(to?.userIds)) {
-        outcome = await notifyEmployees(admin, { userIds: to.userIds, ...payload });
-      }
+      outcome = await kirimKePenerima(admin, result.to, payload);
     } catch (err) {
       console.error('Dispatch notifikasi gagal mengirim:', err);
     }

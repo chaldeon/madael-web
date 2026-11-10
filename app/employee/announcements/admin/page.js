@@ -4,10 +4,10 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Trash2, PowerOff, Megaphone, Pencil, Pin, PinOff, Users } from 'lucide-react';
+import { Trash2, PowerOff, Megaphone, Pencil, Pin, PinOff, Users, Bell } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { dispatchNotification } from '@/lib/notifyClient';
+import { bisaKirimUlangNotifikasi } from '@/lib/announcements';
 import { callJsonApi } from '@/lib/apiClient';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -65,6 +65,8 @@ export default function AnnouncementsAdminPage() {
 
   const [actingId, setActingId] = useState(null);
   const [actionError, setActionError] = useState(null);
+  // Hasil siaran notifikasi terakhir: { tone: 'ok' | 'warn', text }.
+  const [notice, setNotice] = useState(null);
   // Pengumuman yang mau dihapus — membuka dialog konfirmasi (pengganti window.confirm()).
   const [deleteTarget, setDeleteTarget] = useState(null);
 
@@ -128,9 +130,28 @@ export default function AnnouncementsAdminPage() {
       return new Date(b.created_at) - new Date(a.created_at);
     });
 
+  // Teks hasil siaran notifikasi saat pengumuman baru dibuat (server yang
+  // menyiarkan, lihat POST /api/announcements). null = tidak ada info.
+  const noticeDariSiaran = (notifikasi) => {
+    switch (notifikasi?.status) {
+      case 'terkirim':
+        return { tone: 'ok', text: 'Pengumuman terbit dan notifikasi sudah dikirim.' };
+      case 'gagal':
+        return {
+          tone: 'warn',
+          text: 'Pengumuman sudah terbit, tetapi notifikasi belum terkirim. Klik "Kirim notifikasi" pada pengumuman tersebut untuk mencoba lagi.',
+        };
+      case 'dilewati':
+        return { tone: 'warn', text: 'Pengumuman sudah terbit, tetapi notifikasi tidak dikirim karena pengumuman tidak aktif.' };
+      default:
+        return null;
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setFormError(null);
+    setNotice(null);
 
     if (!form.judul.trim() || !form.isi.trim()) {
       setFormError('Judul dan isi pengumuman wajib diisi.');
@@ -177,16 +198,38 @@ export default function AnnouncementsAdminPage() {
       setFormError(result.error);
       return;
     }
-    const data = result.data.announcement;
+    const { announcement, notifikasi } = result.data;
+    // Server menyiarkan notifikasi sendiri; tandai lokal bila berhasil supaya
+    // tombol kirim ulang tidak muncul.
+    const data = notifikasi?.status === 'terkirim'
+      ? { ...announcement, broadcast_at: new Date().toISOString() }
+      : announcement;
 
     setRows((prev) => sortRows([data, ...prev]));
     setForm(EMPTY_FORM);
     setSaving(false);
+    setNotice(noticeDariSiaran(notifikasi));
     loadReadStats();
+  };
 
-    // Broadcast — fire and forget, kegagalan notifikasi tidak menggagalkan
-    // pengumuman yang sudah tersimpan.
-    dispatchNotification('pengumuman_baru', data.id);
+  // Kirim ulang notifikasi pengumuman yang belum pernah terkirim.
+  const handleKirimNotifikasi = async (row) => {
+    setActionError(null);
+    setNotice(null);
+    setActingId(row.id);
+
+    const result = await callJsonApi(`/api/announcements/${row.id}/broadcast`, 'POST');
+
+    setActingId(null);
+    if (!result.ok) {
+      setActionError(result.error);
+      // 409 = status di server sudah berbeda (sudah terkirim / tidak aktif lagi).
+      if (result.status === 409) loadData();
+      return;
+    }
+    setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, broadcast_at: new Date().toISOString() } : r)));
+    setNotice({ tone: 'ok', text: `Notifikasi pengumuman "${row.judul}" sudah dikirim.` });
+    loadReadStats();
   };
 
   const handleStartEdit = (row) => {
@@ -445,6 +488,9 @@ export default function AnnouncementsAdminPage() {
       </form>
 
       {actionError && <p className="text-xs text-red-600 mb-4">{actionError}</p>}
+      {notice && (
+        <p className={`text-xs mb-4 ${notice.tone === 'ok' ? 'text-green-700' : 'text-amber-700'}`}>{notice.text}</p>
+      )}
 
       <p className="text-sm font-medium text-black mb-4">Riwayat Pengumuman</p>
 
@@ -479,6 +525,19 @@ export default function AnnouncementsAdminPage() {
                       {row.expired_at && ` · Berlaku sampai ${formatTanggalWaktu(row.expired_at)}`}
                       {` · Untuk: ${row.target_company_id ? companyName(row.target_company_id) : 'Semua karyawan'}`}
                     </p>
+                    {bisaKirimUlangNotifikasi(row) && (
+                      <div className="mt-2 flex items-center gap-3 flex-wrap">
+                        <span className="text-[11px] text-amber-700">Notifikasi belum terkirim.</span>
+                        <button
+                          type="button"
+                          onClick={() => handleKirimNotifikasi(row)}
+                          disabled={actingId === row.id}
+                          className="inline-flex items-center gap-1 text-[11px] text-madael-red hover:text-madael-dark font-medium disabled:opacity-50"
+                        >
+                          <Bell size={11} /> {actingId === row.id ? 'Mengirim...' : 'Kirim notifikasi'}
+                        </button>
+                      </div>
+                    )}
                     {renderReaders(row)}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
