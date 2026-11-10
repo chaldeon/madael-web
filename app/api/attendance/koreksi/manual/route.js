@@ -121,7 +121,10 @@ export async function POST(request) {
           clock_in: clockIn,
           clock_out: clockOut,
           status_telat: statusTelat,
-          wajah_terverifikasi: false,
+          // Dibuat admin, tidak ada verifikasi wajah -> null (tidak dicek). Dulu
+          // false, yang memunculkan penanda "WAJAH TIDAK COCOK" palsu di panel
+          // review. Record yang sudah ada tidak menyentuh kolom ini (lihat di bawah).
+          wajah_terverifikasi: null,
         }])
         .select()
         .single();
