@@ -37,6 +37,13 @@ const PESAN_BUKAN_PENDING =
 // browser tidak dipakai, jadi klien tidak bisa menyisipkan data absensi sendiri.
 // Hanya akun aktif dengan modul absensi_admin DAN superadmin (sama seperti
 // halaman Kelola Absensi Tim dan /api/attendance/justify).
+//
+// wajah_terverifikasi: koreksi TIDAK menjalankan verifikasi wajah, jadi route ini
+// tidak boleh menyatakan hasilnya. Baris absensi yang sudah ada dibiarkan apa
+// adanya (hasil asli clock-in/out: true / false / null tetap utuh, termasuk
+// penanda "wajah tidak cocok" di panel review). Baris baru yang dibuat dari
+// koreksi diisi null (= tidak dicek). Aturan yang sama dipakai
+// app/api/attendance/koreksi/manual/route.js.
 export async function POST(request, { params }) {
   try {
     const { id } = await params;
@@ -193,7 +200,6 @@ export async function POST(request, { params }) {
       clock_out: row.after_clock_out,
       status_telat: statusTelat,
       toleransi_menit: toleransiMenit,
-      wajah_terverifikasi: true,
     };
 
     let tulis;
@@ -207,7 +213,8 @@ export async function POST(request, { params }) {
     } else {
       tulis = await admin
         .from('attendance')
-        .insert([{ employee_id: row.employee_id, tanggal: row.tanggal, ...nilai }])
+        // Baris baru: tidak ada verifikasi wajah -> null eksplisit (bukan default DB).
+        .insert([{ employee_id: row.employee_id, tanggal: row.tanggal, ...nilai, wajah_terverifikasi: null }])
         .select('id')
         .maybeSingle();
     }
