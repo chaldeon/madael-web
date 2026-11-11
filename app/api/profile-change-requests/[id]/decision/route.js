@@ -3,7 +3,10 @@ import { createAdminClient } from '@/lib/supabase-admin';
 import { requireModuleAccess } from '@/lib/moduleAccessServer';
 import { logActivity } from '@/lib/activityLog';
 import { notifyEmployee } from '@/lib/notify';
-import { PROFILE_EDITABLE_FIELDS, fieldLabel, isAllowedProfileField } from '@/lib/profileFields';
+import {
+  PROFILE_EDITABLE_FIELDS, fieldLabel, isAllowedProfileField, labelFieldDaftar,
+} from '@/lib/profileFields';
+import { muatPengajuanPending, temukanBersinggungan } from '@/lib/profileChangeServer';
 
 // POST /api/profile-change-requests/[id]/decision   body: { decision, catatan? }
 //   'approved' : pending -> approved, field_changes diterapkan ke employees_master
@@ -15,6 +18,12 @@ import { PROFILE_EDITABLE_FIELDS, fieldLabel, isAllowedProfileField } from '@/li
 // (PROFILE_EDITABLE_FIELDS), baris master diturunkan dari pemohon di server
 // (linked_employee_id), dan statusnya diklaim lebih dulu lewat
 // compare-and-swap supaya dua admin tidak bisa memproses request yang sama.
+//
+// Approve ditolak (409) selama masih ada pengajuan LEBIH LAMA milik karyawan
+// yang sama, masih pending, dan menyentuh field yang sama: nilai `after` yang
+// lama akan menimpa yang baru. Setujui atau tolak yang lebih lama dulu. Reject
+// tidak dibatasi. Pengajuan ganda baru sudah dicegah di POST; guard ini
+// melindungi pengajuan ganda yang sudah ada sebelumnya.
 
 const SELECT_REQUEST = '*, employees:employee_id ( nama, employee_id )';
 const MAKS_ALAMAT = 500;
@@ -127,6 +136,24 @@ export async function POST(request, { params }) {
             tidak_diizinkan: tidakDiizinkan,
           },
           { status: 400 }
+        );
+      }
+
+      // Guard urutan: jangan setujui kalau ada pengajuan lebih lama yang
+      // bersinggungan dan masih pending.
+      const pending = await muatPengajuanPending(admin, row.employee_id);
+      if (pending.error) {
+        console.error('Cek pengajuan profil pending lain error:', pending.error);
+        return NextResponse.json({ error: 'Gagal memeriksa pengajuan lain milik karyawan ini. Coba lagi.' }, { status: 500 });
+      }
+      const bentrok = temukanBersinggungan(pending.rows, keys, { kecualiId: row.id, pembanding: row });
+      if (bentrok.length > 0) {
+        return NextResponse.json(
+          {
+            error: `Ada pengajuan lebih lama dari karyawan ini yang masih menunggu untuk field yang sama (${labelFieldDaftar(bentrok)}). Proses pengajuan yang lebih lama lebih dulu (setujui atau tolak) supaya nilai yang lebih baru tidak tertimpa.`,
+            field_bentrok: bentrok,
+          },
+          { status: 409 }
         );
       }
 

@@ -5,8 +5,9 @@ import { notifyByModule } from '@/lib/notify';
 import { friendlyError } from '@/lib/errorMessage';
 import {
   PROFILE_EDITABLE_FIELDS, fieldLabel, isAllowedProfileField,
-  bersihkanNilaiProfil, MAKS_CATATAN_KARYAWAN_PROFIL,
+  bersihkanNilaiProfil, MAKS_CATATAN_KARYAWAN_PROFIL, labelFieldDaftar,
 } from '@/lib/profileFields';
+import { muatPengajuanPending, temukanBersinggungan } from '@/lib/profileChangeServer';
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -24,6 +25,13 @@ const KOLOM_MASTER = ['id', ...PROFILE_EDITABLE_FIELDS.map((f) => f.key)].join('
 // - nilai `before` dibaca dari database; field yang nilainya tidak berubah
 //   dibuang, dan pengajuan tanpa perubahan sama sekali ditolak
 // - panjang & opsi select divalidasi dengan aturan yang sama seperti saat approve
+// - field yang masih punya pengajuan pending ditolak (409): `before` dibaca saat
+//   pengajuan dibuat, jadi dua pengajuan pending untuk field yang sama bisa
+//   saling menimpa kalau disetujui tidak berurutan. Field lain tetap bisa
+//   diajukan. Dua pengiriman yang benar-benar bersamaan masih bisa lolos
+//   bersama (tanpa unique index di database); guard urutan di route decision
+//   tetap mencegah nilai lama menimpa nilai baru, dan tidak ada baris yang
+//   dihapus.
 // Body hanya membawa nilai baru; klien tidak bisa menentukan `before`.
 export async function POST(request) {
   try {
@@ -92,6 +100,27 @@ export async function POST(request) {
     }
     if (Object.keys(fieldChanges).length === 0) {
       return NextResponse.json({ error: 'Tidak ada perubahan untuk diajukan.' }, { status: 400 });
+    }
+
+    // Tolak field yang masih punya pengajuan pending (belum diproses HR).
+    const keysDiajukan = Object.keys(fieldChanges);
+    const pendingAwal = await muatPengajuanPending(admin, emp.id);
+    if (pendingAwal.error) {
+      console.error('Ajukan perubahan profil — baca pengajuan pending error:', pendingAwal.error);
+      return NextResponse.json(
+        { error: `Gagal memeriksa pengajuan yang sedang berjalan: ${friendlyError(pendingAwal.error, 'terjadi kesalahan pada server.', { context: 'Periksa pengajuan profil pending' })}` },
+        { status: 500 }
+      );
+    }
+    const bentrokAwal = temukanBersinggungan(pendingAwal.rows, keysDiajukan);
+    if (bentrokAwal.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Kamu masih punya pengajuan yang menunggu persetujuan untuk: ${labelFieldDaftar(bentrokAwal)}. Tunggu hingga diproses HR, lalu ajukan lagi bila perlu.`,
+          field_bentrok: bentrokAwal,
+        },
+        { status: 409 }
+      );
     }
 
     const { data, error: insertError } = await admin

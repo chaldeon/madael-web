@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from 'react';
 import { UserCircle, Camera, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
-import { PROFILE_EDITABLE_FIELDS, fieldLabel } from '@/lib/profileFields';
+import { PROFILE_EDITABLE_FIELDS, fieldLabel, kunciPengajuan } from '@/lib/profileFields';
 import { missingFieldsForEmployee } from '@/lib/dataCompleteness';
 import { getFaceDescriptor } from '@/lib/faceVerification';
 import LoadingState from '@/components/LoadingState';
@@ -238,6 +238,11 @@ export default function ProfilePage() {
   // tampil — tapi diberi catatan supaya karyawan tidak mengajukan dobel.
   const missingFields = missingFieldsForEmployee(master);
   const pendingCount = requests.filter((r) => r.status === 'pending').length;
+  // Field yang masih menunggu persetujuan tidak bisa diajukan lagi (ditolak
+  // server, lihat POST /api/profile-change-requests); form mengunci field itu.
+  const pendingKeys = new Set(
+    requests.filter((r) => r.status === 'pending').flatMap((r) => kunciPengajuan(r.field_changes))
+  );
 
   return (
     <div className="max-w-[800px] mx-auto px-6 py-10">
@@ -357,21 +362,33 @@ export default function ProfilePage() {
         <form id="form-pengajuan" onSubmit={handleSubmit} className="bg-white border border-[#E0E0E0] p-6 mb-10">
           <p className="text-xs font-semibold text-black tracking-[0.02em] mb-4">Ajukan Perubahan</p>
           <div className="grid grid-cols-2 gap-4 mb-4">
-            {PROFILE_EDITABLE_FIELDS.map((f) => (
+            {PROFILE_EDITABLE_FIELDS.map((f) => {
+              const terkunci = pendingKeys.has(f.key);
+              const kelasKunci = terkunci ? ' opacity-60 cursor-not-allowed bg-[#F4F4F4]' : '';
+              return (
               <label key={f.key} className={`flex flex-col gap-1 ${f.type === 'textarea' ? 'col-span-2' : ''}`}>
-                <span className={labelClass}>{f.label}</span>
+                <span className={labelClass}>
+                  {f.label}
+                  {terkunci && (
+                    <span className="ml-2 text-[10px] font-medium tracking-[0.04em] px-1.5 py-0.5 bg-amber-100 text-amber-800">
+                      MENUNGGU PERSETUJUAN
+                    </span>
+                  )}
+                </span>
                 {f.type === 'textarea' ? (
                   <textarea
                     rows={2}
                     value={form[f.key] ?? ''}
                     onChange={(e) => handleFieldChange(f.key, e.target.value)}
-                    className={`${inputClass} resize-none`}
+                    disabled={terkunci}
+                    className={`${inputClass} resize-none${kelasKunci}`}
                   />
                 ) : f.type === 'select' ? (
                   <select
                     value={form[f.key] ?? ''}
                     onChange={(e) => handleFieldChange(f.key, e.target.value)}
-                    className={inputClass}
+                    disabled={terkunci}
+                    className={`${inputClass}${kelasKunci}`}
                   >
                     {f.options.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -382,12 +399,19 @@ export default function ProfilePage() {
                     value={form[f.key] ?? ''}
                     onChange={(e) => handleFieldChange(f.key, e.target.value)}
                     placeholder={f.placeholder}
-                    className={inputClass}
+                    disabled={terkunci}
+                    className={`${inputClass}${kelasKunci}`}
                   />
                 )}
               </label>
-            ))}
+              );
+            })}
           </div>
+          {pendingKeys.size > 0 && (
+            <p className="text-xs text-[#6B6B6B] mb-4">
+              Field yang masih menunggu persetujuan dikunci sampai HR memprosesnya, supaya pengajuan tidak saling menimpa.
+            </p>
+          )}
 
           <label className="flex flex-col gap-1 mb-4">
             <span className={labelClass}>Catatan (opsional)</span>
