@@ -8,7 +8,10 @@ import Link from 'next/link';
 import { Check, X as XIcon, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 import { useModuleAccess } from '@/lib/useModuleAccess';
-import { fieldLabel, isAllowedProfileField } from '@/lib/profileFields';
+import {
+  fieldLabel, isAllowedProfileField, kunciPengajuan, kunciBersinggunganDenganDaftar,
+  pengajuanLebihLama, labelFieldDaftar,
+} from '@/lib/profileFields';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
@@ -42,6 +45,20 @@ function getBlockedKeys(row) {
 
 function canApprove(row) {
   return getChangeEntries(row).length > 0 && getBlockedKeys(row).length === 0;
+}
+
+// Pengajuan pending lain milik karyawan yang sama dan field yang bersinggungan
+// dengan `row`. `lebihLama` = pengajuan yang harus diproses lebih dulu (server
+// menolak approve selama masih ada); `lebihBaru` = pengajuan yang akan menimpa
+// nilai ini kalau disetujui sesudahnya (hanya peringatan). Dihitung dari
+// daftar yang sedang dimuat; server tetap penentu akhir.
+function cariBersinggungan(row, semua) {
+  const keys = kunciPengajuan(row.field_changes);
+  const lain = semua.filter((r) => r.id !== row.id && r.status === 'pending' && r.employee_id === row.employee_id);
+  return {
+    lebihLama: kunciBersinggunganDenganDaftar(keys, lain.filter((r) => pengajuanLebihLama(r, row))),
+    lebihBaru: kunciBersinggunganDenganDaftar(keys, lain.filter((r) => pengajuanLebihLama(row, r))),
+  };
 }
 
 function tampilNilai(v) {
@@ -182,7 +199,10 @@ export default function ProfileRequestsAdminPage() {
         </div>
       ) : (
         <div className="flex flex-col gap-4">
-          {visibleRequests.map((row) => (
+          {visibleRequests.map((row) => {
+            const bentrok = row.status === 'pending' ? cariBersinggungan(row, requests) : { lebihLama: [], lebihBaru: [] };
+            const tertahan = bentrok.lebihLama.length > 0;
+            return (
             <div key={row.id} className="bg-white border border-[#E0E0E0] p-5">
               <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
                 <div>
@@ -226,6 +246,21 @@ export default function ProfileRequestsAdminPage() {
                 </div>
               )}
 
+              {tertahan && (
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mb-3">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  Ada pengajuan lebih lama dari karyawan ini yang masih menunggu untuk field yang sama ({labelFieldDaftar(bentrok.lebihLama)}).
+                  Proses pengajuan yang lebih lama lebih dulu (setujui atau tolak) sebelum menyetujui yang ini, supaya nilai yang lebih baru tidak tertimpa. Kamu masih bisa menolaknya.
+                </div>
+              )}
+              {bentrok.lebihBaru.length > 0 && (
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-3 mb-3">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  Ada pengajuan yang lebih baru dari karyawan ini untuk field yang sama ({labelFieldDaftar(bentrok.lebihBaru)}).
+                  Proses yang ini lebih dulu; nilai akhir akan mengikuti pengajuan yang lebih baru bila disetujui sesudahnya.
+                </div>
+              )}
+
               {row.status === 'pending' ? (
                 <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
                   <input
@@ -237,7 +272,7 @@ export default function ProfileRequestsAdminPage() {
                   <div className="flex gap-2 shrink-0">
                     <button
                       type="button"
-                      disabled={actingId === row.id || !canApprove(row)}
+                      disabled={actingId === row.id || !canApprove(row) || tertahan}
                       onClick={() => handleDecision(row, 'approved')}
                       className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-green-600 hover:bg-green-700 transition-colors disabled:opacity-50"
                     >
@@ -259,7 +294,8 @@ export default function ProfileRequestsAdminPage() {
                 )
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
