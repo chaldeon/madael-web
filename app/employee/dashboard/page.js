@@ -14,6 +14,7 @@ import EmployeeHeader from '@/components/EmployeeHeader';
 import LoadingState from '@/components/LoadingState';
 import QuickClockInCard from '@/components/QuickClockInCard';
 import { activeAnnouncementsQuery, isActive, isForCompany } from '@/lib/announcements';
+import { friendlyError } from '@/lib/errorMessage';
 
 // Widget banner pengumuman, tampil di atas grid modul. Menampilkan pengumuman
 // yang belum ditandai "sudah dibaca" oleh employee yang sedang login, plus
@@ -22,6 +23,10 @@ function AnnouncementBanner({ supabase, employeeId, clientId }) {
   const [announcements, setAnnouncements] = useState([]);
   const [readIds, setReadIds] = useState([]);
   const [dismissing, setDismissing] = useState(null);
+  // Pesan bila pengumuman gagal dimuat / gagal ditandai dibaca. Tanpa ini banner
+  // hilang begitu saja dan karyawan tidak tahu ada pengumuman yang terlewat.
+  const [loadError, setLoadError] = useState(null);
+  const [actionError, setActionError] = useState(null);
 
   const loadData = useCallback(async () => {
     if (!employeeId) return;
@@ -33,6 +38,16 @@ function AnnouncementBanner({ supabase, employeeId, clientId }) {
       supabase.from('announcement_reads').select('announcement_id').eq('employee_id', employeeId),
     ]);
 
+    // Kalau salah satu gagal, daftar tidak dipakai: tanpa data "sudah dibaca" yang
+    // utuh, pengumuman lama muncul lagi; tanpa data pengumuman, banner kosong palsu.
+    // Daftar yang sudah tampil sebelumnya dibiarkan, dan admin diberi tombol coba lagi.
+    const firstError = annRes.error || readRes.error;
+    if (firstError) {
+      setLoadError(friendlyError(firstError, 'Pengumuman gagal dimuat.', { context: 'Muat banner pengumuman' }));
+      return;
+    }
+
+    setLoadError(null);
     setAnnouncements((annRes.data || []).filter((a) => isActive(a) && isForCompany(a, clientId)));
     setReadIds((readRes.data || []).map((r) => r.announcement_id));
   }, [supabase, employeeId, clientId]);
@@ -41,16 +56,19 @@ function AnnouncementBanner({ supabase, employeeId, clientId }) {
 
   const handleDismiss = async (announcementId) => {
     setDismissing(announcementId);
+    setActionError(null);
     // Optimistic — langsung hilang dari daftar, insert dikirim di belakang.
     setReadIds((prev) => [...prev, announcementId]);
     const { error } = await supabase
       .from('announcement_reads')
       .insert([{ announcement_id: announcementId, employee_id: employeeId }]);
     setDismissing(null);
-    if (error) {
-      // Kegagalan insert bukan hal fatal — pengumuman cuma akan muncul lagi
-      // di reload berikutnya, employee tetap bisa lanjut kerja.
-      console.error('Gagal menandai pengumuman sebagai dibaca:', error.message);
+    // 23505 = sudah pernah ditandai (mis. lewat arsip di tab lain) — hasil akhirnya sama.
+    if (error && error.code !== '23505') {
+      // Gagal tersimpan: kembalikan pengumuman ke banner dan beri tahu karyawan,
+      // supaya tidak mengira sudah ditandai dibaca lalu muncul lagi di reload berikutnya.
+      setReadIds((prev) => prev.filter((id) => id !== announcementId));
+      setActionError(friendlyError(error, 'Gagal menandai pengumuman sebagai dibaca.', { context: 'Tandai pengumuman dibaca' }));
     }
   };
 
@@ -59,10 +77,23 @@ function AnnouncementBanner({ supabase, employeeId, clientId }) {
   const visible = announcements.filter((a) => a.pinned || !readIds.includes(a.id));
   // Pengumuman yang sudah dibaca hilang dari banner, tapi tetap bisa dibuka di
   // halaman arsip — tautannya tetap tampil selama ada pengumuman yang berlaku.
-  if (announcements.length === 0) return null;
+  if (announcements.length === 0 && !loadError) return null;
 
   return (
     <div className="mb-8 space-y-3">
+      {loadError && (
+        <div className="border-l-4 border-madael-red bg-white p-4 flex items-start justify-between gap-3">
+          <p className="text-sm text-madael-red">{loadError} Pengumuman terbaru mungkin belum tampil.</p>
+          <button
+            type="button"
+            onClick={loadData}
+            className="shrink-0 text-xs font-medium text-madael-red hover:text-madael-dark cursor-pointer bg-transparent border-0"
+          >
+            Coba Lagi
+          </button>
+        </div>
+      )}
+      {actionError && <p className="text-xs text-red-600">{actionError}</p>}
       {visible.map((a) => {
         const isRead = readIds.includes(a.id);
         const Icon = a.pinned ? Pin : Megaphone;
@@ -90,12 +121,14 @@ function AnnouncementBanner({ supabase, employeeId, clientId }) {
           </div>
         );
       })}
-      <Link
-        href="/employee/pengumuman"
-        className="inline-block text-xs font-medium text-madael-red hover:text-madael-dark"
-      >
-        Lihat semua pengumuman →
-      </Link>
+      {announcements.length > 0 && (
+        <Link
+          href="/employee/pengumuman"
+          className="inline-block text-xs font-medium text-madael-red hover:text-madael-dark"
+        >
+          Lihat semua pengumuman →
+        </Link>
+      )}
     </div>
   );
 }

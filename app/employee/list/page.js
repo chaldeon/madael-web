@@ -119,10 +119,19 @@ export default function EmployeeListPage() {
   // narik dari `companies`, satu sumber yang sama dipakai Payroll Manager,
   // CRM, Invoice, dst. Employee List sendiri tetap murni data akun login.
   const fetchCompanies = useCallback(async () => {
-    const { data } = await supabase
+    const { data, error: companiesError } = await supabase
       .from('companies')
       .select('id, nama_perusahaan')
       .order('nama_perusahaan', { ascending: true });
+    if (companiesError) {
+      // Dropdown perusahaan kosong karena gagal dimuat tidak boleh terlihat sama
+      // dengan "belum ada perusahaan".
+      setToast({
+        type: 'error',
+        message: friendlyError(companiesError, 'Gagal memuat daftar perusahaan. Muat ulang halaman.', { context: 'Muat daftar perusahaan' }),
+      });
+      return;
+    }
     setCompanies(data || []);
   }, [supabase]);
 
@@ -289,20 +298,64 @@ export default function EmployeeListPage() {
 
   // Tambah perusahaan baru langsung dari sini — nulis ke tabel `companies`
   // yang sama, jadi otomatis muncul juga di Payroll Manager/CRM/dll.
+  //
+  // Mengembalikan id perusahaan, atau null bila gagal (pesan error ditampilkan lewat
+  // Toast; CompanySelect membiarkan input tetap terbuka supaya bisa dicoba lagi).
   const addCompanyInline = async (nama) => {
-    const trimmed = nama.trim();
+    // Normalisasi: spasi ganda dirapikan, supaya "PT  Maju" dan "PT Maju" dianggap sama.
+    const trimmed = nama.trim().replace(/\s+/g, ' ');
     if (!trimmed) return null;
-    const existing = companies.find((c) => c.nama_perusahaan.toLowerCase() === trimmed.toLowerCase());
+    const kunci = trimmed.toLowerCase();
+    const existing = companies.find((c) => (c.nama_perusahaan || '').trim().replace(/\s+/g, ' ').toLowerCase() === kunci);
     if (existing) return existing.id;
 
-    const { data, error } = await supabase
-      .from('companies')
-      .insert([{ nama_perusahaan: trimmed, tipe: ['client'] }])
-      .select('id, nama_perusahaan')
-      .single();
-    if (error) return null;
-    setCompanies((prev) => [...prev, data].sort((a, b) => a.nama_perusahaan.localeCompare(b.nama_perusahaan)));
-    return data.id;
+    try {
+      // Daftar di client bisa basi (perusahaan baru dari tab/orang lain) atau gagal
+      // dimuat, jadi cek duplikat ke database juga (tanpa membedakan huruf besar/kecil).
+      // Karakter khusus LIKE di-escape supaya nama dibandingkan apa adanya.
+      const pola = trimmed.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+      const { data: dupRows, error: dupError } = await supabase
+        .from('companies')
+        .select('id, nama_perusahaan')
+        .ilike('nama_perusahaan', pola)
+        .limit(1);
+      if (dupError) {
+        setToast({
+          type: 'error',
+          message: friendlyError(dupError, 'Gagal memeriksa perusahaan yang sudah ada. Coba lagi.', { context: 'Cek duplikat perusahaan' }),
+        });
+        return null;
+      }
+      if (dupRows && dupRows.length > 0) {
+        // Sudah ada: pakai yang ada (dan masukkan ke dropdown bila belum tampil).
+        const found = dupRows[0];
+        setCompanies((prev) => (prev.some((c) => c.id === found.id)
+          ? prev
+          : [...prev, found].sort((a, b) => a.nama_perusahaan.localeCompare(b.nama_perusahaan))));
+        return found.id;
+      }
+
+      const { data, error: insertError } = await supabase
+        .from('companies')
+        .insert([{ nama_perusahaan: trimmed, tipe: ['client'] }])
+        .select('id, nama_perusahaan')
+        .single();
+      if (insertError) {
+        setToast({
+          type: 'error',
+          message: friendlyError(insertError, 'Gagal menambah perusahaan. Coba lagi.', { context: 'Tambah perusahaan' }),
+        });
+        return null;
+      }
+      setCompanies((prev) => [...prev, data].sort((a, b) => a.nama_perusahaan.localeCompare(b.nama_perusahaan)));
+      return data.id;
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: friendlyCaught(err, 'Gagal menambah perusahaan. Coba lagi.', { context: 'Tambah perusahaan' }),
+      });
+      return null;
+    }
   };
 
   // ---- Tambah Employee ----

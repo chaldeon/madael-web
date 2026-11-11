@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { useModalDismiss } from '@/lib/useModalDismiss';
 import { formatRupiahOrDash } from '@/lib/format';
 import { friendlyError } from '@/lib/errorMessage';
+import ErrorState from '@/components/ErrorState';
 import KontrakBadge from '@/components/KontrakBadge';
 import KontrakRiwayatPanel from '@/components/KontrakRiwayatPanel';
 import {
@@ -48,6 +49,10 @@ export default function EmployeeDetailPage() {
   const [pendingProfileCount, setPendingProfileCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Query pendukung yang gagal dimuat (bukan karyawan tidak ada): { master, schedule,
+  // companies, pending } -> true. Dipakai supaya kartu tidak menampilkan "belum ada
+  // data" untuk data yang sebenarnya cuma gagal dimuat.
+  const [loadIssues, setLoadIssues] = useState({});
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState(null);
@@ -73,10 +78,10 @@ export default function EmployeeDetailPage() {
 
     const [
       { data: empData, error: empError },
-      { data: masterData },
-      { data: schedData },
-      { data: companyData },
-      { count: pendingCount },
+      { data: masterData, error: masterError },
+      { data: schedData, error: schedError },
+      { data: companyData, error: companyError },
+      { count: pendingCount, error: pendingError },
     ] = await Promise.all([
       supabase
         .from('employees')
@@ -90,16 +95,29 @@ export default function EmployeeDetailPage() {
     ]);
 
     if (empError || !empData) {
-      setError(friendlyError(empError, 'Karyawan tidak ditemukan.'));
+      setError(friendlyError(empError, 'Karyawan tidak ditemukan.', { context: 'Muat detail karyawan' }));
       setLoading(false);
       return;
     }
 
+    // Error query pendukung tidak boleh dibaca sebagai "datanya memang kosong".
+    // Dicatat ke console (friendlyError) dan ditandai supaya UI memberi tahu admin.
+    if (masterError) friendlyError(masterError, undefined, { context: 'Muat data master karyawan' });
+    if (schedError) friendlyError(schedError, undefined, { context: 'Muat jadwal kerja karyawan' });
+    if (companyError) friendlyError(companyError, undefined, { context: 'Muat daftar perusahaan' });
+    if (pendingError) friendlyError(pendingError, undefined, { context: 'Muat pengajuan perubahan profil' });
+    setLoadIssues({
+      master: !!masterError,
+      schedule: !!schedError,
+      companies: !!companyError,
+      pending: !!pendingError,
+    });
+
     setEmployee(empData);
-    setMaster(masterData || null);
-    setSchedule(schedData || null);
-    setCompanies(companyData || []);
-    setPendingProfileCount(pendingCount || 0);
+    setMaster(masterError ? null : masterData || null);
+    setSchedule(schedError ? null : schedData || null);
+    setCompanies(companyError ? [] : companyData || []);
+    setPendingProfileCount(pendingError ? 0 : pendingCount || 0);
     setLoading(false);
   }, [supabase, employeeId]);
 
@@ -202,6 +220,17 @@ export default function EmployeeDetailPage() {
     setSavingEdit(false);
   };
 
+  // Edit dinonaktifkan bila master atau daftar perusahaan gagal dimuat: form edit
+  // akan tampil tanpa bagian HR/payroll atau dengan dropdown perusahaan kosong,
+  // seolah-olah datanya memang tidak ada.
+  const editDinonaktifkan = !!loadIssues.master || !!loadIssues.companies;
+  const gagalMuat = [
+    loadIssues.master && 'data HR & Payroll',
+    loadIssues.schedule && 'jadwal kerja',
+    loadIssues.companies && 'daftar perusahaan',
+    loadIssues.pending && 'jumlah pengajuan profil',
+  ].filter(Boolean);
+
   if (loading) {
     return <div className="max-w-[1000px] mx-auto px-6 py-10"><p className="text-sm text-[#6B6B6B]">Memuat data karyawan...</p></div>;
   }
@@ -209,7 +238,9 @@ export default function EmployeeDetailPage() {
   if (error) {
     return (
       <div className="max-w-[1000px] mx-auto px-6 py-10">
-        <p className="text-sm text-red-600 mb-4">{error}</p>
+        <div className="mb-4">
+          <ErrorState message={error} onRetry={loadData} />
+        </div>
         <Link href="/employee/list" className="text-sm text-madael-red hover:text-madael-dark">← Kembali ke Employee List</Link>
       </div>
     );
@@ -235,6 +266,22 @@ export default function EmployeeDetailPage() {
         </div>
       )}
 
+      {gagalMuat.length > 0 && (
+        <div className="mb-6 flex items-start justify-between gap-3 border border-madael-red bg-white px-4 py-3">
+          <p className="text-sm text-madael-red">
+            Sebagian data gagal dimuat: {gagalMuat.join(', ')}. Tampilan di bawah belum lengkap, jadi bukan berarti datanya kosong.
+            {editDinonaktifkan && ' Edit dinonaktifkan sampai data berhasil dimuat.'}
+          </p>
+          <button
+            type="button"
+            onClick={loadData}
+            className="shrink-0 text-xs font-medium text-madael-red hover:text-madael-dark cursor-pointer bg-transparent border-0"
+          >
+            Muat Ulang
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between mb-8 flex-wrap gap-4">
         <div>
@@ -255,7 +302,11 @@ export default function EmployeeDetailPage() {
             {employee.employee_id || '—'} {employee.companies?.nama_perusahaan ? `· ${employee.companies.nama_perusahaan}` : ''} {master?.posisi ? `· ${master.posisi}` : ''}
           </p>
         </div>
-        <button onClick={openEditModal} className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-madael-red hover:bg-madael-dark transition-colors cursor-pointer border-0">
+        <button
+          onClick={openEditModal}
+          disabled={editDinonaktifkan}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-madael-red hover:bg-madael-dark transition-colors cursor-pointer border-0 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
           <Pencil size={14} /> Edit
         </button>
       </div>
@@ -295,11 +346,13 @@ export default function EmployeeDetailPage() {
               <InfoRow label="Gaji Pokok" value={formatRupiahOrDash(master.gaji_pokok)} />
               <InfoRow label="Tunjangan" value={formatRupiahOrDash(master.tunjangan)} />
             </div>
+          ) : loadIssues.master ? (
+            <p className="text-sm text-madael-red">Data HR/payroll gagal dimuat.</p>
           ) : (
             <p className="text-sm text-[#6B6B6B]">Belum ada data HR/payroll untuk karyawan ini.</p>
           )}
           <Link href="/employee/payroll" className="inline-block mt-4 text-xs text-madael-red hover:text-madael-dark font-medium">
-            {master ? 'Kelola di Payroll Manager' : 'Isi di Payroll Manager'}
+            {master || loadIssues.master ? 'Kelola di Payroll Manager' : 'Isi di Payroll Manager'}
           </Link>
         </div>
 
@@ -312,6 +365,8 @@ export default function EmployeeDetailPage() {
               <InfoRow label="Jam Pulang" value={formatJam(schedule.jam_pulang)} />
               <InfoRow label="Hari Kerja" value={schedule.hari_kerja?.length ? schedule.hari_kerja.join(', ') : '-'} />
             </div>
+          ) : loadIssues.schedule ? (
+            <p className="text-sm text-madael-red">Jadwal kerja gagal dimuat.</p>
           ) : (
             <p className="text-sm text-[#6B6B6B]">Belum diatur.</p>
           )}
@@ -333,9 +388,11 @@ export default function EmployeeDetailPage() {
         <div>
           <p className="text-xs font-semibold text-black tracking-[0.02em] mb-1">Perubahan Profil</p>
           <p className="text-sm text-[#6B6B6B]">
-            {pendingProfileCount > 0
-              ? `${pendingProfileCount} pengajuan menunggu review dari karyawan ini.`
-              : 'Tidak ada pengajuan yang menunggu dari karyawan ini.'}
+            {loadIssues.pending
+              ? 'Jumlah pengajuan yang menunggu gagal dimuat.'
+              : pendingProfileCount > 0
+                ? `${pendingProfileCount} pengajuan menunggu review dari karyawan ini.`
+                : 'Tidak ada pengajuan yang menunggu dari karyawan ini.'}
           </p>
         </div>
         <Link
