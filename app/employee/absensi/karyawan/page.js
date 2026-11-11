@@ -24,11 +24,13 @@ import { parseToleransi, currentMonthValue, formatJam, formatTanggal, formatWakt
 import { durasiMenit, formatDurasi, shiftLabel } from '@/lib/shifts';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
+import { SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN } from '@/lib/leave';
 
 export default function SemuaKaryawanPage() {
   const supabase = createClient();
   const { status, employee } = useModuleAccess('absensi_admin');
   const isSuperadmin = !!employee?.is_superadmin;
+  const bolehProsesSendiri = SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN && isSuperadmin;
 
   const [activeTab, setActiveTab] = useState('rekap');
 
@@ -971,7 +973,13 @@ export default function SemuaKaryawanPage() {
                           <span className="text-xs text-[#9A9A9A]">Tidak ada bukti</span>
                         )}
 
-                        {row.status === 'pending' && (
+                        {row.status === 'pending' && row.employee_id === employee?.id && !bolehProsesSendiri && (
+                          <span className="text-xs text-[#9A9A9A]" title="Tidak boleh memproses pengajuan koreksi absensi milik sendiri.">
+                            Pengajuan sendiri
+                          </span>
+                        )}
+
+                        {row.status === 'pending' && !(row.employee_id === employee?.id && !bolehProsesSendiri) && (
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => openReject(row)}

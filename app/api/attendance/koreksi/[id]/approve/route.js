@@ -6,6 +6,7 @@ import { notifyEmployee } from '@/lib/notify';
 import { hitungStatusTelat } from '@/lib/attendanceStatus';
 import { jamJakarta } from '@/lib/serverTime';
 import { friendlyError } from '@/lib/errorMessage';
+import { SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN } from '@/lib/leave';
 
 // Sama dengan formatTanggal di lib/absensiKaryawanConfig.js (dengan nama hari),
 // supaya teks notifikasi tidak berubah dibanding saat approve masih di browser.
@@ -36,7 +37,9 @@ const PESAN_BUKAN_PENDING =
 // Semua nilai (jam, jadwal, toleransi) dibaca ulang dari database; body dari
 // browser tidak dipakai, jadi klien tidak bisa menyisipkan data absensi sendiri.
 // Hanya akun aktif dengan modul absensi_admin DAN superadmin (sama seperti
-// halaman Kelola Absensi Tim dan /api/attendance/justify).
+// halaman Kelola Absensi Tim dan /api/attendance/justify). Koreksi milik
+// sendiri tidak boleh diproses (403), sama dengan cuti/lembur/reimbursement/
+// profil: lihat SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN di lib/leave.js.
 //
 // wajah_terverifikasi: koreksi TIDAK menjalankan verifikasi wajah, jadi route ini
 // tidak boleh menyatakan hasilnya. Baris absensi yang sudah ada dibiarkan apa
@@ -75,6 +78,12 @@ export async function POST(request, { params }) {
     }
     if (!row) {
       return NextResponse.json({ error: 'Pengajuan koreksi tidak ditemukan.' }, { status: 404 });
+    }
+    if (row.employee_id === emp.id && !(SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN && emp.is_superadmin)) {
+      return NextResponse.json(
+        { error: 'Tidak boleh memproses pengajuan koreksi absensi milik sendiri.' },
+        { status: 403 }
+      );
     }
     if (row.status !== 'pending') {
       return NextResponse.json({ error: PESAN_BUKAN_PENDING, status: row.status }, { status: 409 });

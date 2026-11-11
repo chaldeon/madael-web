@@ -4,6 +4,7 @@ import { requireModuleAccess } from '@/lib/moduleAccessServer';
 import { logActivity } from '@/lib/activityLog';
 import { notifyEmployee } from '@/lib/notify';
 import { friendlyError } from '@/lib/errorMessage';
+import { SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN } from '@/lib/leave';
 
 const MAKS_CATATAN = 1000;
 
@@ -28,7 +29,9 @@ const PESAN_BUKAN_PENDING =
 // pending -> rejected (compare-and-swap; pembatalan karyawan memakai syarat
 // 'pending' yang sama, jadi hanya satu yang menang), reviewed_by diambil dari
 // sesi, lalu log aktivitas dan notifikasi ditulis server-side.
-// Penolakan tidak menyentuh tabel attendance.
+// Penolakan tidak menyentuh tabel attendance. Koreksi milik sendiri tidak boleh
+// diproses (403), sama dengan route approve (SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN
+// di lib/leave.js).
 export async function POST(request, { params }) {
   try {
     const { id } = await params;
@@ -78,6 +81,12 @@ export async function POST(request, { params }) {
     }
     if (!row) {
       return NextResponse.json({ error: 'Pengajuan koreksi tidak ditemukan.' }, { status: 404 });
+    }
+    if (row.employee_id === emp.id && !(SELF_APPROVAL_ALLOWED_FOR_SUPERADMIN && emp.is_superadmin)) {
+      return NextResponse.json(
+        { error: 'Tidak boleh memproses pengajuan koreksi absensi milik sendiri.' },
+        { status: 403 }
+      );
     }
     if (row.status !== 'pending') {
       return NextResponse.json({ error: PESAN_BUKAN_PENDING, status: row.status }, { status: 409 });
