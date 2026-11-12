@@ -160,6 +160,21 @@ export default function EmployeeDashboardPage() {
       .eq('email', user.email)
       .maybeSingle();
 
+    // Akun Freelancer login lewat halaman yang sama tapi tidak punya baris di
+    // `employees` (tabel terpisah) — arahkan ke dashboard Freelancer. Best-effort:
+    // kalau query gagal, pesan lama di bawah tetap tampil.
+    if (!empError && !emp) {
+      const { data: fl } = await supabase
+        .from('freelancers')
+        .select('id')
+        .eq('auth_user_id', user.id)
+        .maybeSingle();
+      if (fl) {
+        router.replace('/employee/freelancer');
+        return;
+      }
+    }
+
     if (empError || !emp) {
       setError('Akun ini belum terdaftar sebagai employee. Hubungi superadmin.');
       setLoading(false);
