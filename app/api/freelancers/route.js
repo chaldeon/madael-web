@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { insertFreelancerWithRetry } from '@/lib/freelancerId';
+import {
+  REFERRAL_MAX_ATTEMPTS,
+  generateReferralCode,
+  isReferralCodeConflict,
+} from '@/lib/freelancerReferral';
 import { DEFAULT_FREELANCER_MODULE_ACCESS, FREELANCER_STATUS } from '@/lib/freelancerModules';
 import {
   FREELANCER_SORT_COLUMNS,
@@ -75,10 +80,24 @@ export async function GET(request) {
   }
 }
 
+// Sisipkan baris Freelancer beserta kode referral acak. Bentrok FL-ID diulang di
+// dalam insertFreelancerWithRetry; bentrok kode referral (nyaris mustahil, tetapi
+// dijaga indeks UNIQUE) diulang di sini dengan kode baru.
+async function insertFreelancerDenganReferral(admin, row) {
+  let lastError = null;
+  for (let attempt = 0; attempt < REFERRAL_MAX_ATTEMPTS; attempt += 1) {
+    const result = await insertFreelancerWithRetry(admin, { ...row, referral_code: generateReferralCode() });
+    if (!result.error) return result;
+    if (!isReferralCodeConflict(result.error)) return result;
+    lastError = result.error;
+  }
+  return { error: lastError };
+}
+
 // POST /api/freelancers
 // Buat akun Freelancer: validasi -> cek email unik lintas employees+freelancers ->
 // undangan email (inviteUserByEmail, pola /api/employee/create) -> baris
-// freelancers dengan FL-ID otomatis -> modul default. Gagal setelah undangan =
+// freelancers dengan FL-ID otomatis + kode referral acak -> modul default. Gagal setelah undangan =
 // rollback (hapus baris + akun Auth) supaya tidak ada akun yatim.
 // Body JSON: { nama_lengkap, email, no_whatsapp?, alamat?, tanggal_bergabung? }
 // CV diunggah terpisah lewat POST /api/freelancers/[id]/cv (multipart).
@@ -139,10 +158,13 @@ export async function POST(request) {
     // Kosong = default database (current_date).
     if (values.tanggal_bergabung) row.tanggal_bergabung = values.tanggal_bergabung;
 
-    const { data: created, error: insertError } = await insertFreelancerWithRetry(admin, row);
+    const { data: created, error: insertError } = await insertFreelancerDenganReferral(admin, row);
     if (insertError || !created) {
       const authDihapus = await hapusAkunAuth();
       const catatan = authDihapus ? '' : ' Akun login yang sempat dibuat gagal dihapus otomatis; hapus manual dari Supabase Dashboard > Authentication.';
+      if (isReferralCodeConflict(insertError)) {
+        return jsonError('Gagal membuat kode referral unik. Silakan coba lagi.' + catatan, 500);
+      }
       if (insertError?.code === '23505') {
         return jsonError('Email atau akun ini sudah terdaftar sebagai Freelancer/karyawan.' + catatan, 409);
       }
