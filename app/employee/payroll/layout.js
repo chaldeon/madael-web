@@ -11,7 +11,7 @@ export default function PayrollLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
-  const { status } = useModuleAccess('payroll');
+  const { status, hasModule } = useModuleAccess('payroll');
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -44,6 +44,7 @@ export default function PayrollLayout({ children }) {
   }
 
   const isRun = pathname.startsWith('/employee/payroll/run');
+  const isBpa1 = pathname.startsWith('/employee/payroll/bpa1');
   const tabClass = (active) =>
     `text-sm tracking-[0.02em] transition-colors ${
       active ? 'text-black font-medium' : 'text-[#6B6B6B] hover:text-black'
@@ -59,12 +60,17 @@ export default function PayrollLayout({ children }) {
               ← Dashboard
             </Link>
             <div className="flex items-center gap-6">
-              <Link href="/employee/payroll" className={tabClass(!isRun)}>
+              <Link href="/employee/payroll" className={tabClass(!isRun && !isBpa1)}>
                 Employee Master
               </Link>
               <Link href="/employee/payroll/run" className={tabClass(isRun)}>
                 Payroll Run
               </Link>
+              {hasModule('bpa1') && (
+                <Link href="/employee/payroll/bpa1" className={tabClass(isBpa1)}>
+                  BPA1
+                </Link>
+              )}
             </div>
           </>
         }
