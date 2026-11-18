@@ -12,6 +12,7 @@ import {
   validateFreelancerInput,
 } from '@/lib/freelancerAdminConfig';
 import { FREELANCER_STATUS, FREELANCER_STATUS_OPTIONS, freelancerStatusLabel } from '@/lib/freelancerModules';
+import { buildReferralLink } from '@/lib/freelancerReferral';
 import { UPLOAD_MAX_BYTES, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 import FreelancerForm from '@/components/freelancer-admin/FreelancerForm';
 import FreelancerStatusBadge from '@/components/freelancer-admin/FreelancerStatusBadge';
@@ -255,6 +256,30 @@ export default function DetailFreelancerPage() {
           </button>
         </div>
       </form>
+
+      <div className="bg-white border border-[#E0E0E0] p-6 mt-6">
+        <h2 className="text-sm font-medium text-black mb-1">Kode Referral</h2>
+        {freelancer.referral_code ? (
+          <>
+            <p className="font-mono text-lg tracking-[0.12em] text-black select-all">{freelancer.referral_code}</p>
+            <p className="text-xs text-[#9A9A9A] mt-3 mb-1">
+              Contoh link bagikan (ganti <span className="font-mono">slug-lowongan</span> dengan alamat lowongan):
+            </p>
+            <p className="text-sm text-[#3D3D3D] break-all select-all">
+              {buildReferralLink({
+                slug: 'slug-lowongan',
+                code: freelancer.referral_code,
+                origin: typeof window !== 'undefined' ? window.location.origin : '',
+              })}
+            </p>
+            <p className="text-xs text-[#9A9A9A] mt-3">Kode dibuat otomatis dan tidak bisa diubah.</p>
+          </>
+        ) : (
+          <p className="text-sm text-[#6B6B6B]">
+            Akun ini belum punya kode referral. Hubungi pengembang untuk menjalankan backfill kode.
+          </p>
+        )}
+      </div>
 
       <div className="bg-white border border-[#E0E0E0] p-6 mt-6">
         <h2 className="text-sm font-medium text-black mb-1">CV</h2>
