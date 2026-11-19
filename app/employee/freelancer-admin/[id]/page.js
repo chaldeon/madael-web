@@ -16,6 +16,7 @@ import { buildReferralLink } from '@/lib/freelancerReferral';
 import { UPLOAD_MAX_BYTES, PESAN_UKURAN_UPLOAD, readUploadJson } from '@/lib/uploadLimits';
 import FreelancerForm from '@/components/freelancer-admin/FreelancerForm';
 import FreelancerStatusBadge from '@/components/freelancer-admin/FreelancerStatusBadge';
+import AgreementSection from '@/components/freelancer-admin/AgreementSection';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import ErrorState from '@/components/ErrorState';
 import LoadingState from '@/components/LoadingState';
@@ -313,6 +314,8 @@ export default function DetailFreelancerPage() {
           {uploading ? 'Mengunggah...' : `${FREELANCER_CV_LABEL_JENIS}, maksimal 4MB. CV lama tetap tersimpan di Drive.`}
         </p>
       </div>
+
+      <AgreementSection id={id} nama={freelancer.nama_lengkap} onToast={setToast} />
     </div>
   );
 }
