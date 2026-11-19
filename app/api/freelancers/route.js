@@ -12,7 +12,7 @@ import {
   validateFreelancerInput,
   isValidFreelancerStatus,
 } from '@/lib/freelancerAdminConfig';
-import { gerbangFreelancerAdmin, cekEmailBelumDipakai, jsonError } from '@/lib/freelancerAdminServer';
+import { gerbangFreelancerAdmin, cekEmailBelumDipakai, jsonError, ambilStatusAgreement } from '@/lib/freelancerAdminServer';
 import { parsePageParams, isRangeNotSatisfiable } from '@/lib/pagination';
 import { sanitizeSearchTerm } from '@/lib/searchTerm';
 import { logActivity } from '@/lib/activityLog';
@@ -66,11 +66,23 @@ export async function GET(request) {
       return jsonError(friendlyError(error, 'Gagal memuat daftar Freelancer.', { context: 'Muat daftar Freelancer' }), 500);
     }
 
+    // Status Agreement halaman ini diambil sekaligus (satu query). null = belum
+    // tersedia (tidak ada baris Agreement), sama seperti sebelum fitur Agreement.
+    let statusAgreement;
+    try {
+      statusAgreement = await ambilStatusAgreement(admin, (data || []).map((row) => row.id));
+    } catch (agreementError) {
+      console.error('Status Agreement daftar Freelancer gagal dimuat:', agreementError);
+      return jsonError(
+        friendlyError(agreementError, 'Gagal memuat status Agreement.', { context: 'Muat status Agreement' }),
+        500
+      );
+    }
+
     const freelancers = (data || []).map(({ cv_url, ...row }) => ({
       ...row,
       has_cv: !!cv_url,
-      // Status Agreement diisi di A3 (tabel Agreement belum ada); null = belum tersedia.
-      agreement_status: null,
+      agreement_status: statusAgreement.get(row.id) ?? null,
     }));
 
     return NextResponse.json({ freelancers, totalCount: count || 0, page, pageSize }, { status: 200 });
