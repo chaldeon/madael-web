@@ -7,14 +7,29 @@ import {
   gerbangFreelancerAdmin,
   sinkronBanFreelancer,
   peringatanBan,
+  ambilStatusAgreement,
 } from '@/lib/freelancerAdminServer';
 import { logActivity } from '@/lib/activityLog';
 import { friendlyError } from '@/lib/errorMessage';
 
 // Bentuk baris untuk browser admin: tanpa cv_url mentah dan auth_user_id.
-function untukBrowser(row) {
+// agreementStatus: status baris Agreement; null = belum tersedia (tidak ada baris).
+function untukBrowser(row, agreementStatus = null) {
   const { cv_url, auth_user_id, ...rest } = row;
-  return { ...rest, has_cv: !!cv_url, has_account: !!auth_user_id, agreement_status: null };
+  return { ...rest, has_cv: !!cv_url, has_account: !!auth_user_id, agreement_status: agreementStatus };
+}
+
+// Untuk respons PATCH: perubahan data/status sudah tersimpan, jadi gagal membaca
+// status Agreement di sini tidak boleh membuat respons terlihat gagal. Bila gagal,
+// dicatat di log server dan status dikirim null (tampil "belum tersedia" sampai
+// halaman dimuat ulang).
+async function statusAgreementUntukPatch(admin, id) {
+  try {
+    return (await ambilStatusAgreement(admin, [id])).get(id) ?? null;
+  } catch (err) {
+    console.error('Status Agreement untuk respons PATCH gagal dimuat:', err);
+    return null;
+  }
 }
 
 // GET /api/freelancers/[id] — detail data dasar (tanpa data sensitif; tampilan
@@ -38,7 +53,18 @@ export async function GET(request, { params }) {
     }
     if (!row) return jsonError('Freelancer tidak ditemukan.', 404);
 
-    return NextResponse.json({ freelancer: untukBrowser(row) }, { status: 200 });
+    let statusAgreement;
+    try {
+      statusAgreement = (await ambilStatusAgreement(admin, [row.id])).get(row.id) ?? null;
+    } catch (agreementError) {
+      console.error('Status Agreement Freelancer gagal dimuat:', agreementError);
+      return jsonError(
+        friendlyError(agreementError, 'Gagal memuat status Agreement.', { context: 'Muat status Agreement' }),
+        500
+      );
+    }
+
+    return NextResponse.json({ freelancer: untukBrowser(row, statusAgreement) }, { status: 200 });
   } catch (err) {
     console.error('GET /api/freelancers/[id] error:', err);
     return jsonError('Terjadi kesalahan server.', 500);
@@ -104,7 +130,10 @@ export async function PATCH(request, { params }) {
         .eq('id', id)
         .maybeSingle();
       if (sameError || !same) return jsonError('Gagal memuat data Freelancer.', 500);
-      return NextResponse.json({ success: true, freelancer: untukBrowser(same), tidakBerubah: true }, { status: 200 });
+      return NextResponse.json(
+        { success: true, freelancer: untukBrowser(same, await statusAgreementUntukPatch(admin, id)), tidakBerubah: true },
+        { status: 200 }
+      );
     }
 
     const { data: updated, error: updateError } = await admin
@@ -161,7 +190,11 @@ export async function PATCH(request, { params }) {
     }
 
     return NextResponse.json(
-      { success: true, freelancer: untukBrowser(updated), ...(warning ? { warning } : {}) },
+      {
+        success: true,
+        freelancer: untukBrowser(updated, await statusAgreementUntukPatch(admin, id)),
+        ...(warning ? { warning } : {}),
+      },
       { status: 200 }
     );
   } catch (err) {
