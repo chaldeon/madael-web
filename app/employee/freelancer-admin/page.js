@@ -16,6 +16,7 @@ import ErrorState from '@/components/ErrorState';
 import EmptyState from '@/components/EmptyState';
 import SkeletonRows from '@/components/employee-list/SkeletonRows';
 import FreelancerStatusBadge from '@/components/freelancer-admin/FreelancerStatusBadge';
+import AgreementStatusBadge from '@/components/freelancer-admin/AgreementStatusBadge';
 
 const selectClass =
   'border border-[#E0E0E0] px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-madael-red transition-colors';
@@ -215,9 +216,7 @@ export default function FreelancerAdminListPage() {
                   <td className="px-5 py-3.5 text-[#6B6B6B]">{f.email}</td>
                   <td className="px-5 py-3.5 text-[#6B6B6B] whitespace-nowrap">{f.no_whatsapp || '—'}</td>
                   <td className="px-5 py-3.5"><FreelancerStatusBadge status={f.status} /></td>
-                  <td className="px-5 py-3.5 text-[#9A9A9A]" title="Status Agreement tersedia setelah fitur Agreement dibuat">
-                    {f.agreement_status || '—'}
-                  </td>
+                  <td className="px-5 py-3.5"><AgreementStatusBadge status={f.agreement_status} /></td>
                   <td className="px-5 py-3.5 text-[#6B6B6B] whitespace-nowrap">{formatTanggal(f.tanggal_bergabung)}</td>
                 </tr>
               ))}
