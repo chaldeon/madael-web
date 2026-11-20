@@ -4,7 +4,13 @@ import { requireBpa1Access } from '@/lib/moduleAccessServer';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { logActivity } from '@/lib/activityLog';
 import { friendlyError } from '@/lib/errorMessage';
-import { bacaTahun, TAHUN_MIN, TAHUN_MAX } from '@/lib/bpa1Source';
+import {
+  bacaTahun,
+  loadBpa1Sumber,
+  BPA1_RUN_GANDA,
+  TAHUN_MIN,
+  TAHUN_MAX,
+} from '@/lib/bpa1Source';
 import { pilihDokumenTerbaruPerKlien, susunDaftarBpa1 } from '@/lib/bpa1Daftar';
 import {
   AKSI_BUAT_BPA1,
@@ -13,6 +19,11 @@ import {
   cariKlien,
   cariDokumenKlienTahun,
   buatHeaderDraft,
+  periksaTabelSnapshot,
+  susunSnapshotBpa1,
+  simpanSnapshotBpa1,
+  hapusDokumenBpa1,
+  BPA1_SNAPSHOT_GAGAL,
 } from '@/lib/bpa1Server';
 
 // GET /api/bpa1?tahun=YYYY   (BPA-04)
@@ -137,34 +148,44 @@ export async function GET(request) {
   }
 }
 
-// POST /api/bpa1   body: { client_id, tahun }   (BPA-06)
+// POST /api/bpa1   body: { client_id, tahun }   (BPA-06 + BPA-09)
 //
-// Membuat dokumen BPA1 baru berstatus Draft v1 untuk satu klien + tahun pajak.
-// Pola mengikuti POST /api/payroll/runs: akses dicek di server, masukan
-// divalidasi, duplikat -> 409, pelanggaran unique (23505) -> 409, log dicatat
-// dari server.
+// Membuat dokumen BPA1 baru berstatus Draft v1 untuk satu klien + tahun pajak
+// BESERTA snapshot bulanannya dari Payroll Run. Pola mengikuti
+// POST /api/payroll/runs: akses dicek di server, masukan divalidasi, duplikat
+// -> 409, pelanggaran unique (23505) -> 409, rollback bila penyimpanan gagal,
+// log dicatat dari server.
 //
 //  - 401/403: dari requireBpa1Access (hak modul 'payroll' + 'bpa1').
 //  - 400    : client_id atau tahun tidak valid.
 //  - 404    : klien tidak ada di companies.
-//  - 409    : sudah ada dokumen BPA1 untuk klien + tahun itu (code
-//             BPA1_SUDAH_ADA). Dokumen apa pun yang sudah ada memblokir; versi
-//             berikutnya adalah pembetulan (BPA-26), bukan endpoint ini.
-//  - 201    : { success: true, dokumen, jumlah_item }.
+//  - 409    : sudah ada dokumen BPA1 untuk klien + tahun itu (BPA1_SUDAH_ADA);
+//             ATAU sumber tidak bisa dipakai apa adanya: Payroll Run ganda
+//             pada satu periode (BPA1_RUN_GANDA), item tanpa/ganda karyawan
+//             (BPA1_DATA_SUMBER_TIDAK_VALID), atau tidak ada item sama sekali
+//             (BPA1_TIDAK_ADA_DATA_SUMBER). Tidak ada yang ditulis.
+//  - 500    : penyimpanan gagal (BPA1_SNAPSHOT_GAGAL). Respons menyebut langkah
+//             yang gagal (item/bulan) dan apakah rollback bersih; bila tidak
+//             bersih, `document_id` dikirim agar admin bisa membersihkannya.
+//  - 503    : tabel BPA1 belum ada (belumMigrasi: true).
+//  - 201    : { success: true, dokumen, jumlah_item, jumlah_baris_bulanan, bulan }.
 //
-// `created_by` selalu id karyawan dari sesi; tidak pernah dibaca dari body.
-// Penandatangan (K-16) belum diputuskan: body tidak menerimanya dan tidak ada
-// kolom penandatangan yang ditulis.
+// Urutan tulis: (1) baca sumber + susun rencana [read-only], (2) header,
+// (3) item karyawan, (4) baris bulanan. Gagal di (2)-(4) -> hapus semuanya
+// (anak dulu). Supabase JS tidak punya transaksi multi-statement; kecuali
+// OPS-08 menetapkan RPC, ini pola rollback runs/route.js:150-159.
 //
-// BELUM LENGKAP SAMPAI BPA-09: endpoint ini baru membuat HEADER. Snapshot
-// bulanan dari Payroll Run (dan rollback header bila snapshot gagal) dipasang
-// BPA-09 pada titik bertanda di bawah. Sebelum itu `jumlah_item` selalu 0 dan
-// dokumen yang terbentuk tidak punya item. Jangan dipanggil dari UI/produksi
-// sebelum BPA-09 ikut dirilis.
+// Kebijakan sumber (K-17, USULAN belum dikonfirmasi): semua Payroll Run yang
+// ada disalin apa pun statusnya; status run disimpan per baris bulanan. Hanya
+// menyalin nilai mentah; tidak menafsirkan komponen pajak (BPA-10).
 //
-// ASUMSI / BELUM DIUJI TERHADAP DB NYATA: kolom bpa1_documents yang ditulis
-// (client_id, tahun_pajak, versi, status, created_by) adalah USULAN; lihat
-// catatan di lib/bpa1Server.js.
+// `created_by` selalu id karyawan dari sesi; tidak pernah dari body.
+// Penandatangan (K-16) belum diputuskan: tidak diterima dan tidak ditulis.
+//
+// ASUMSI / BELUM DIUJI TERHADAP DB NYATA: kolom bpa1_documents dan seluruh
+// tabel item/snapshot bulanan adalah USULAN — lihat catatan di
+// lib/bpa1Server.js (nama tabel snapshot bulanan, `bpa1_item_bulan`, adalah
+// tebakan).
 export async function POST(request) {
   try {
     const admin = createAdminClient();
@@ -216,6 +237,27 @@ export async function POST(request) {
     }
     if (existing) return jawabDuplikat(existing);
 
+    // (0) Tabel snapshot terbaca? Cek SEBELUM menulis apa pun.
+    const { error: tabelError } = await periksaTabelSnapshot(admin);
+    if (tabelError) {
+      return jawabGagal(tabelError, 'Periksa tabel snapshot BPA1', 'Gagal memeriksa tabel BPA1');
+    }
+
+    // (1) Baca sumber (read-only) dan susun rencana tulis. Sumber bermasalah
+    // -> berhenti di sini, tidak ada yang tertulis.
+    const { data: sumber, error: sumberError } = await loadBpa1Sumber(admin, clientId, tahun);
+    if (sumberError) {
+      if (sumberError.code === BPA1_RUN_GANDA) {
+        return NextResponse.json({ error: sumberError.message, code: BPA1_RUN_GANDA }, { status: 409 });
+      }
+      return jawabGagal(sumberError, 'Muat sumber Payroll Run untuk BPA1', 'Gagal memuat Payroll Run');
+    }
+    const { data: snapshot, error: snapshotError } = susunSnapshotBpa1(sumber);
+    if (snapshotError) {
+      return NextResponse.json({ error: snapshotError.message, code: snapshotError.code }, { status: 409 });
+    }
+
+    // (2) Header Draft v1.
     const { data: dokumen, error: buatError } = await buatHeaderDraft(admin, {
       clientId,
       tahun,
@@ -230,11 +272,32 @@ export async function POST(request) {
       return jawabGagal(buatError, 'Buat header BPA1', 'Gagal membuat dokumen BPA1');
     }
 
-    // >>> BPA-09: snapshot bulanan dipasang DI SINI (loadBpa1Sumber -> insert
-    // snapshot). Bila gagal, hapus header yang baru dibuat (pola rollback
-    // runs/route.js:150-159) dan jawab 500 — tidak boleh ada dokumen tanpa
-    // snapshot. Sampai itu ada, jumlah item = 0.
-    const jumlahItem = 0;
+    // (3)-(4) Item karyawan lalu baris bulanan. Gagal -> hapus semuanya; tidak
+    // boleh ada dokumen tanpa snapshot (atau dengan snapshot sebagian).
+    const { data: tersimpan, error: simpanError } = await simpanSnapshotBpa1(admin, dokumen.id, snapshot);
+    if (simpanError) {
+      const { error: rollbackError } = await hapusDokumenBpa1(admin, dokumen.id);
+      if (rollbackError) console.error('Rollback dokumen BPA1 gagal:', rollbackError);
+      const langkah = simpanError.tahap === 'item' ? 'item karyawan' : 'snapshot bulanan';
+      const alasan = friendlyError(simpanError, 'terjadi kesalahan pada server.', {
+        context: `Simpan ${langkah} BPA1`,
+      });
+      return NextResponse.json(
+        {
+          error: `Gagal menyimpan ${langkah} BPA1: ${alasan} ${
+            rollbackError
+              ? 'Pembatalan otomatis juga gagal, dokumen setengah jadi tertinggal — hubungi admin sistem.'
+              : 'Tidak ada data yang tersimpan, silakan coba lagi.'
+          }`,
+          code: BPA1_SNAPSHOT_GAGAL,
+          tahap: simpanError.tahap,
+          rollback_berhasil: !rollbackError,
+          document_id: rollbackError ? dokumen.id : null,
+        },
+        { status: tabelBelumAda(simpanError) ? 503 : 500 }
+      );
+    }
+    const jumlahItem = tersimpan.jumlahItem;
 
     // Detail log sengaja minimal: klien, tahun, versi, jumlah item. Tanpa
     // NIK/NPWP/rekening/nama karyawan.
@@ -251,7 +314,16 @@ export async function POST(request) {
       },
     });
 
-    return NextResponse.json({ success: true, dokumen, jumlah_item: jumlahItem }, { status: 201 });
+    return NextResponse.json(
+      {
+        success: true,
+        dokumen,
+        jumlah_item: jumlahItem,
+        jumlah_baris_bulanan: tersimpan.jumlahBaris,
+        bulan: snapshot.bulan,
+      },
+      { status: 201 }
+    );
   } catch (err) {
     console.error('POST /api/bpa1:', err);
     return NextResponse.json({ error: 'Terjadi kesalahan server.' }, { status: 500 });
