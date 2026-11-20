@@ -9,14 +9,23 @@ import {
   peringatanBan,
   ambilStatusAgreement,
 } from '@/lib/freelancerAdminServer';
+import { muatKelengkapanProfil } from '@/lib/freelancerProfile';
 import { logActivity } from '@/lib/activityLog';
 import { friendlyError } from '@/lib/errorMessage';
 
 // Bentuk baris untuk browser admin: tanpa cv_url mentah dan auth_user_id.
 // agreementStatus: status baris Agreement; null = belum tersedia (tidak ada baris).
-function untukBrowser(row, agreementStatus = null) {
+// profileComplete: HANYA indikator profil lengkap (true/false; null = tidak diketahui)
+// dari muatKelengkapanProfil; nilai rekening/NPWP/NIK tidak pernah dikirim ke browser Tim.
+function untukBrowser(row, agreementStatus = null, profileComplete = null) {
   const { cv_url, auth_user_id, ...rest } = row;
-  return { ...rest, has_cv: !!cv_url, has_account: !!auth_user_id, agreement_status: agreementStatus };
+  return {
+    ...rest,
+    has_cv: !!cv_url,
+    has_account: !!auth_user_id,
+    agreement_status: agreementStatus,
+    profile_complete: profileComplete,
+  };
 }
 
 // Untuk respons PATCH: perubahan data/status sudah tersimpan, jadi gagal membaca
@@ -32,8 +41,21 @@ async function statusAgreementUntukPatch(admin, id) {
   }
 }
 
-// GET /api/freelancers/[id] — detail data dasar (tanpa data sensitif; tampilan
-// rekening/NPWP masked untuk tim dikerjakan di A4).
+// Sama seperti statusAgreementUntukPatch, untuk indikator profil lengkap: gagal
+// membacanya tidak boleh membuat PATCH yang sudah tersimpan terlihat gagal; dikirim
+// null (tidak diketahui) sampai halaman dimuat ulang. Tidak mencatat nilai sensitif.
+async function profilLengkapUntukPatch(admin, id) {
+  try {
+    return (await muatKelengkapanProfil(admin, id)).lengkap;
+  } catch {
+    // muatKelengkapanProfil sudah mencatat errornya (tanpa nilai).
+    return null;
+  }
+}
+
+// GET /api/freelancers/[id] — detail data dasar (tanpa data sensitif). Hanya indikator
+// `profile_complete` yang dikirim untuk kolom rekening/NPWP-NIK; tampilan masked
+// nilainya belum diminta.
 export async function GET(request, { params }) {
   try {
     const { id } = await params;
@@ -64,7 +86,14 @@ export async function GET(request, { params }) {
       );
     }
 
-    return NextResponse.json({ freelancer: untukBrowser(row, statusAgreement) }, { status: 200 });
+    let profilLengkap;
+    try {
+      profilLengkap = (await muatKelengkapanProfil(admin, row.id)).lengkap;
+    } catch (profilError) {
+      return jsonError(profilError.message || 'Gagal memuat kelengkapan profil.', 500);
+    }
+
+    return NextResponse.json({ freelancer: untukBrowser(row, statusAgreement, profilLengkap) }, { status: 200 });
   } catch (err) {
     console.error('GET /api/freelancers/[id] error:', err);
     return jsonError('Terjadi kesalahan server.', 500);
@@ -131,7 +160,15 @@ export async function PATCH(request, { params }) {
         .maybeSingle();
       if (sameError || !same) return jsonError('Gagal memuat data Freelancer.', 500);
       return NextResponse.json(
-        { success: true, freelancer: untukBrowser(same, await statusAgreementUntukPatch(admin, id)), tidakBerubah: true },
+        {
+          success: true,
+          freelancer: untukBrowser(
+            same,
+            await statusAgreementUntukPatch(admin, id),
+            await profilLengkapUntukPatch(admin, id)
+          ),
+          tidakBerubah: true,
+        },
         { status: 200 }
       );
     }
@@ -192,7 +229,11 @@ export async function PATCH(request, { params }) {
     return NextResponse.json(
       {
         success: true,
-        freelancer: untukBrowser(updated, await statusAgreementUntukPatch(admin, id)),
+        freelancer: untukBrowser(
+          updated,
+          await statusAgreementUntukPatch(admin, id),
+          await profilLengkapUntukPatch(admin, id)
+        ),
         ...(warning ? { warning } : {}),
       },
       { status: 200 }
