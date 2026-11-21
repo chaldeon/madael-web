@@ -15,6 +15,7 @@ import {
 } from '@/lib/applicationStatus';
 import CvPreviewModal from '@/components/CvPreviewModal';
 import BulkApplicantActions from '@/components/job-portal/BulkApplicantActions';
+import PedomanRekrutmenNote from '@/components/job-portal/PedomanRekrutmenNote';
 import { findDuplicateApplications } from '@/lib/candidateDuplicates';
 import { MAX_TAG_LENGTH, normalizeTags } from '@/lib/talentPoolTags';
 import { friendlyError, friendlyCaught } from '@/lib/errorMessage';
@@ -1706,6 +1707,7 @@ export default function JobPortalCandidatesPage() {
               )}
             </div>
 
+            <PedomanRekrutmenNote konteks="catatan" className="mb-3" />
             {noteError && <p className="text-xs text-red-600 mb-2">{noteError}</p>}
             <textarea
               value={noteDraft}

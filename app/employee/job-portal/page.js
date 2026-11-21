@@ -11,6 +11,7 @@ import { useModuleAccess } from '@/lib/useModuleAccess';
 import { callJsonApi } from '@/lib/apiClient';
 import { JOB_PORTAL_KEYS, isJobPortalScoped } from '@/lib/jobPortalAccess';
 import JobReviewersPanel from '@/components/job-portal/JobReviewersPanel';
+import PedomanRekrutmenNote from '@/components/job-portal/PedomanRekrutmenNote';
 import { friendlyError } from '@/lib/errorMessage';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import Toast from '@/components/employee-list/Toast';
@@ -616,6 +617,8 @@ export default function JobPortalLowonganPage() {
               + Tambah Pertanyaan
             </button>
           </div>
+
+          <PedomanRekrutmenNote konteks="pertanyaan" className="mb-3" />
 
           {formData.questions.length === 0 ? (
             <p className="text-xs text-[#AAA]">Belum ada pertanyaan tambahan.</p>
