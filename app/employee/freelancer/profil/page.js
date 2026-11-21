@@ -12,6 +12,7 @@ import ErrorState from '@/components/ErrorState';
 import Toast from '@/components/employee-list/Toast';
 import PaymentForm from '@/components/freelancer/PaymentForm';
 import AgreementCard from '@/components/freelancer/AgreementCard';
+import CaraKerjaPanel from '@/components/freelancer/CaraKerjaPanel';
 import { freelancerStatusLabel } from '@/lib/freelancerModules';
 import { AGREEMENT_STATUS, AGREEMENT_STATUS_LABEL } from '@/lib/freelancerAgreementConfig';
 import { PROFILE_PAYMENT_LABEL } from '@/lib/freelancerProfile';
@@ -204,6 +205,8 @@ export default function FreelancerProfilPage() {
         ) : (
           <>
             {profile && agreement && <BannerSyaratAkses profile={profile} agreement={agreement} />}
+
+            <CaraKerjaPanel className="mt-6" />
 
             {profile ? (
               <>
