@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { AlertTriangle } from 'lucide-react';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -10,8 +11,10 @@ import { todayWib } from '@/lib/wibTime';
 import {
   HALAMAN_BUAT_BPA1_ADA,
   HALAMAN_DETAIL_BPA1_ADA,
+  daftarTahunPilihan,
   hrefBuatBpa1,
   hrefDetailBpa1,
+  tahunDariQuery,
 } from '@/lib/bpa1Rute';
 
 // Daftar BPA1 (BPA-05): satu baris per klien untuk tahun pajak yang dipilih,
@@ -29,32 +32,23 @@ const STATUS_STYLE = {
   Final: 'bg-[#DCFCE7] text-[#166534]',
 };
 
-// Rentang pilihan tahun: 5 tahun ke belakang sampai 1 tahun ke depan dari
-// tahun berjalan (WIB). Batas API 2000–2100 tetap dijaga server.
-const TAHUN_KE_BELAKANG = 5;
-const TAHUN_KE_DEPAN = 1;
-
 const PESAN_GAGAL_MUAT = 'Gagal memuat daftar BPA1.';
 
 function LabelRedup({ children }) {
   return <span className="text-[11px] text-[#B0B0B0]">{children}</span>;
 }
 
-export default function Bpa1DaftarPage() {
+function Bpa1DaftarContent() {
+  const searchParams = useSearchParams();
   const [tahunIni] = useState(() => Number(todayWib().slice(0, 4)));
-  // Usulan: tahun pajak awal = tahun berjalan (WIB); pengguna dapat memilih
-  // tahun lain, mis. tahun lalu saat BPA1 dibuat di awal tahun.
-  const [tahun, setTahun] = useState(tahunIni);
+  const opsiTahun = useMemo(() => daftarTahunPilihan(tahunIni), [tahunIni]);
+  // Tahun awal: ?tahun= bila valid (mis. kembali dari form Buat), selain itu
+  // tahun berjalan WIB (usulan). Pengguna dapat memilih tahun lain.
+  const [tahun, setTahun] = useState(() => tahunDariQuery(searchParams.get('tahun'), opsiTahun, tahunIni));
   const [data, setData] = useState(null); // { tahun, klien: [...] }
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
-
-  const opsiTahun = useMemo(() => {
-    const awal = tahunIni - TAHUN_KE_BELAKANG;
-    const akhir = tahunIni + TAHUN_KE_DEPAN;
-    return Array.from({ length: akhir - awal + 1 }, (_, i) => akhir - i);
-  }, [tahunIni]);
 
   useEffect(() => {
     // AbortController: bila tahun diganti saat permintaan sebelumnya masih
@@ -139,6 +133,14 @@ export default function Bpa1DaftarPage() {
           <p className="text-xs text-[#9A9A9A] pb-2.5">
             {klien.length} klien · {jumlahDibuat} sudah dibuat · {klien.length - jumlahDibuat} belum dibuat
           </p>
+        )}
+        {HALAMAN_BUAT_BPA1_ADA && (
+          <Link
+            href={hrefBuatBpa1(null, tahun)}
+            className="ml-auto bg-madael-red text-white px-4 py-2 text-sm font-medium tracking-[0.02em] hover:bg-madael-dark transition-colors"
+          >
+            Buat BPA1
+          </Link>
         )}
       </div>
 
@@ -237,5 +239,14 @@ export default function Bpa1DaftarPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function Bpa1DaftarPage() {
+  // useSearchParams perlu batas Suspense (panduan Next.js: prerendering).
+  return (
+    <Suspense fallback={<LoadingState label="Memuat..." />}>
+      <Bpa1DaftarContent />
+    </Suspense>
   );
 }
