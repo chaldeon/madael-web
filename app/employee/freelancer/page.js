@@ -7,6 +7,9 @@ import { createClient } from '@/lib/supabase-browser';
 import EmployeeHeader from '@/components/EmployeeHeader';
 import LoadingState from '@/components/LoadingState';
 import { friendlyError } from '@/lib/errorMessage';
+import { callJsonApi } from '@/lib/apiClient';
+import GateTertutupNotice from '@/components/freelancer/GateTertutupNotice';
+import { PESAN_GATE_GAGAL } from '@/lib/freelancerGate';
 import {
   FREELANCER_MODULE_REGISTRY,
   isFreelancerModuleGranted,
@@ -25,6 +28,9 @@ export default function FreelancerDashboardPage() {
 
   const [freelancer, setFreelancer] = useState(null);
   const [moduleKeys, setModuleKeys] = useState([]);
+  // Syarat akses (FRE-TOOL-07) dari /api/freelancer/me/gate. Null = belum/tidak dimuat:
+  // diperlakukan TERTUTUP. Hanya tampilan; server menegakkan gate di tiap route.
+  const [gate, setGate] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -67,6 +73,13 @@ export default function FreelancerDashboardPage() {
         return;
       }
       setModuleKeys((mods || []).map((m) => m.module_name));
+
+      const gateRes = await callJsonApi('/api/freelancer/me/gate', 'GET');
+      if (gateRes.status === 401) {
+        router.push('/employee/login');
+        return;
+      }
+      setGate(gateRes.ok ? gateRes.data.gate : { terpenuhi: false, pesan: gateRes.error || PESAN_GATE_GAGAL });
     }
 
     setLoading(false);
@@ -159,15 +172,18 @@ export default function FreelancerDashboardPage() {
             {visibleModules.map((mod) => {
               const Icon = mod.icon;
               const isLive = mod.status === 'live';
-              const CardTag = isLive ? Link : 'div';
-              const cardProps = isLive ? { href: mod.href } : {};
+              // Modul gated yang sudah live tapi syarat belum terpenuhi: kartu tertutup.
+              const terkunci = isLive && mod.gated && !gate?.terpenuhi;
+              const bisaDibuka = isLive && !terkunci;
+              const CardTag = bisaDibuka ? Link : 'div';
+              const cardProps = bisaDibuka ? { href: mod.href } : {};
 
               return (
                 <CardTag
                   key={mod.key}
                   {...cardProps}
                   className={`block border p-5 transition-colors ${
-                    isLive
+                    bisaDibuka
                       ? 'bg-white border-[#E0E0E0] hover:border-madael-red cursor-pointer'
                       : 'bg-[#FAFAFA] border-[#E0E0E0] cursor-not-allowed'
                   }`}
@@ -175,7 +191,7 @@ export default function FreelancerDashboardPage() {
                   <div className="flex items-start justify-between mb-4">
                     <div
                       className={`w-10 h-10 flex items-center justify-center ${
-                        isLive ? 'bg-madael-red text-white' : 'bg-[#E0E0E0] text-[#9A9A9A]'
+                        bisaDibuka ? 'bg-madael-red text-white' : 'bg-[#E0E0E0] text-[#9A9A9A]'
                       }`}
                     >
                       <Icon size={18} />
@@ -184,12 +200,17 @@ export default function FreelancerDashboardPage() {
                       <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-[#E0E0E0] text-[#6B6B6B]">
                         COMING SOON
                       </span>
+                    ) : terkunci ? (
+                      <span className="text-[10px] font-medium tracking-[0.04em] px-2 py-1 bg-[#E0E0E0] text-[#6B6B6B]">
+                        TERTUTUP
+                      </span>
                     ) : null}
                   </div>
-                  <p className={`text-sm font-medium mb-1 ${isLive ? 'text-black' : 'text-[#9A9A9A]'}`}>
+                  <p className={`text-sm font-medium mb-1 ${bisaDibuka ? 'text-black' : 'text-[#9A9A9A]'}`}>
                     {mod.name}
                   </p>
                   <p className="text-xs text-[#6B6B6B]">{mod.desc}</p>
+                  {terkunci ? <GateTertutupNotice pesan={gate?.pesan || PESAN_GATE_GAGAL} className="mt-3" /> : null}
                 </CardTag>
               );
             })}
