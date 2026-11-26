@@ -14,8 +14,9 @@ import PaymentForm from '@/components/freelancer/PaymentForm';
 import AgreementCard from '@/components/freelancer/AgreementCard';
 import CaraKerjaPanel from '@/components/freelancer/CaraKerjaPanel';
 import { freelancerStatusLabel } from '@/lib/freelancerModules';
-import { AGREEMENT_STATUS, AGREEMENT_STATUS_LABEL } from '@/lib/freelancerAgreementConfig';
+import { AGREEMENT_STATUS_LABEL } from '@/lib/freelancerAgreementConfig';
 import { PROFILE_PAYMENT_LABEL } from '@/lib/freelancerProfile';
+import { evaluasiGate } from '@/lib/freelancerGate';
 
 // Nilai tetap untuk akun Freelancer (FRE-Q-25: nilai pilihan belum diputuskan;
 // ubah di sini bila diputuskan lain). Hanya tampil di halaman milik Freelancer
@@ -45,10 +46,15 @@ function Baris({ label, value }) {
 // dimuat, supaya tidak pernah menyatakan syarat belum/sudah terpenuhi dari data
 // yang tidak lengkap.
 function BannerSyaratAkses({ profile, agreement }) {
-  const profilLengkap = profile.profile_complete;
-  const agreementOk = agreement.status === AGREEMENT_STATUS.TERVERIFIKASI;
+  // Aturan syarat akses dipegang evaluasiGate (sama dengan yang ditegakkan server).
+  const gate = evaluasiGate({
+    profil_lengkap: profile.profile_complete,
+    kolom_kosong: profile.missing_fields,
+    agreement_status: agreement.status,
+  });
+  const profilLengkap = gate.profil_lengkap;
 
-  if (profilLengkap && agreementOk) {
+  if (gate.terpenuhi) {
     return (
       <div className="flex items-start gap-3 border-l-4 border-[#166534] bg-white p-4">
         <CheckCircle2 size={18} className="text-[#166534] shrink-0 mt-0.5" />
